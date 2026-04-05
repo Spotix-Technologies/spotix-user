@@ -81,20 +81,20 @@ const Footer = () => {
               </li>
               <li>
                 <a 
-                  href="https://spotix-4u.web.app/acceptable-usage.html" 
+                  href="https://spotix.com.ng/privacy-policy" 
                   className="text-slate-300 hover:text-purple-400 transition-colors duration-200 text-sm"
                 >
                   Privacy Policy
                 </a>
               </li>
-              <li>
+              {/* <li>
                 <a 
                   href="https://spotix-4u.web.app/acceptable-usage.html" 
                   className="text-slate-300 hover:text-purple-400 transition-colors duration-200 text-sm"
                 >
                   Terms of Service
                 </a>
-              </li>
+              </li> */}
               <li>
                 <a 
                   href="https://spotix.com.ng/pricing" 
