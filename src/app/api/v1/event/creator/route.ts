@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     }
 
     const eventData = eventDoc.data()
-    const organizerId = eventData?.organizerId
+    const organizerId = eventData?.organizerId || eventData?.createdBy
 
     // Validate that organizerId exists
     if (!organizerId) {

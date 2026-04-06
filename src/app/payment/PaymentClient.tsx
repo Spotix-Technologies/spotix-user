@@ -17,6 +17,7 @@ import Discount from "./helpers/discount"
 import Referral from "./helpers/referral"
 import PaymentMethods from "./helpers/payment-methods"
 import EventSurveyForm from "./helpers/event-survey-form"
+import GuestCheckoutForm from "./helpers/guest-checkout-form"
 
 interface PaymentData {
   eventId: string
@@ -87,6 +88,12 @@ export default function PaymentClient() {
   const [surveyResponses, setSurveyResponses] = useState<Record<string, any> | null>(null)
   const [isSurveyComplete, setIsSurveyComplete] = useState(false)
 
+  // Guest checkout state
+  const [guestFullName, setGuestFullName] = useState("")
+  const [guestEmail, setGuestEmail] = useState("")
+  const [guestPhone, setGuestPhone] = useState("")
+  const [showGuestForm, setShowGuestForm] = useState(false)
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
@@ -94,8 +101,9 @@ export default function PaymentClient() {
         await fetchUserData(currentUser.uid)
         await fetchWalletData(currentUser.uid)
       } else {
-        router.push("/auth/login")
-        return
+        // Allow guest checkout - don't force redirect
+        setUser(null)
+        setDataLoading(false)
       }
     })
 
@@ -146,10 +154,9 @@ export default function PaymentClient() {
       setDataLoading(false)
     }
 
-    if (user) {
-      loadPaymentData()
-    }
-  }, [user])
+    // Load payment data for both logged-in users and guests
+    loadPaymentData()
+  }, [])
 
   const fetchUserData = async (userId: string) => {
     try {
@@ -546,6 +553,22 @@ export default function PaymentClient() {
     setPaystackReference(null)
   }
 
+  const handleGuestSubmit = (fullName: string, email: string, phone: string) => {
+    // Set guest user data
+    setUserData({
+      fullName,
+      username: fullName.split(" ")[0],
+      email,
+    })
+    setShowGuestForm(false)
+  }
+
+  const handleShowSignIn = () => {
+    // Redirect to sign in page with return_to parameter
+    const returnTo = `/payment?from_guest_checkout=true`
+    router.push(`/auth/login?return_to=${encodeURIComponent(returnTo)}`)
+  }
+
   if (dataLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-purple-50 flex items-center justify-center p-4">
@@ -579,6 +602,17 @@ export default function PaymentClient() {
           </button>
         </div>
       </div>
+    )
+  }
+
+  // Show guest form if user is not authenticated and we have payment data
+  if (!user && paymentData && !userData) {
+    return (
+      <GuestCheckoutForm
+        onSubmitGuest={handleGuestSubmit}
+        onShowSignIn={handleShowSignIn}
+        isLoading={dataLoading}
+      />
     )
   }
 

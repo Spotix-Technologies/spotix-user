@@ -4,26 +4,23 @@ import { adminDb } from "@/app/lib/firebase-admin"
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
-    const creatorId = searchParams.get("creatorId")
     const eventId = searchParams.get("eventId")
 
     // Validate required parameters
-    if (!creatorId || !eventId) {
+    if (!eventId) {
       return NextResponse.json(
         {
           success: false,
-          error: "Missing required parameters: creatorId and eventId are required",
+          error: "Missing required parameter: eventId is required",
         },
         { status: 400 }
       )
     }
 
     // Fetch event data from Firebase
-    // Path: events/{creatorId}/userEvents/{eventId}
+    // Path: events/{eventId} (flat structure)
     const eventDocRef = adminDb
       .collection("events")
-      .doc(creatorId)
-      .collection("userEvents")
       .doc(eventId)
 
     const eventDoc = await eventDocRef.get()
@@ -42,6 +39,12 @@ export async function GET(request: NextRequest) {
     // Get event data
     const eventData = eventDoc.data()
 
+    // Transform the ticketPrices array to include ticketSale field
+    const transformedTicketPrices = (eventData?.ticketPrices || []).map((ticket: any) => ({
+      ...ticket,
+      ticketSale: ticket.ticketSale || 0, // Number of this ticket type sold
+    }))
+
     // Transform the data to match the expected EventType interface
     const transformedData = {
       id: eventDoc.id,
@@ -54,7 +57,7 @@ export async function GET(request: NextRequest) {
       eventEnd: eventData?.eventEnd || "",
       eventType: eventData?.eventType || "",
       isFree: eventData?.isFree || false,
-      ticketPrices: eventData?.ticketPrices || [],
+      ticketPrices: transformedTicketPrices,
       bookerName: eventData?.bookerName || "",
       bookerEmail: eventData?.bookerEmail,
       bookerPhone: eventData?.bookerPhone,
@@ -68,7 +71,8 @@ export async function GET(request: NextRequest) {
       enableStopDate: eventData?.enableStopDate || false,
       stopDate: eventData?.stopDate,
       ticketsSold: eventData?.ticketsSold || 0,
-      createdBy: eventData?.createdBy || creatorId,
+      createdBy: eventData?.createdBy || eventData?.organizerId || "",
+      organizerId: eventData?.organizerId || eventData?.createdBy || "",
       likes: eventData?.likes || 0,
       likedBy: eventData?.likedBy || [],
       allowAgents: eventData?.allowAgents || false,

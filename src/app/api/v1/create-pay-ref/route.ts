@@ -4,23 +4,6 @@ import { auth } from "firebase-admin"
 
 export async function POST(request: NextRequest) {
   try {
-    // Verify authentication
-    const authHeader = request.headers.get("Authorization")
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const idToken = authHeader.split("Bearer ")[1]
-    let decodedToken
-    
-    try {
-      decodedToken = await auth().verifyIdToken(idToken)
-    } catch (error) {
-      return NextResponse.json({ error: "Invalid token" }, { status: 401 })
-    }
-
-    const userId = decodedToken.uid
-
     // Parse request body
     const body = await request.json()
     const {
@@ -39,7 +22,34 @@ export async function POST(request: NextRequest) {
       eventEndDate,
       eventStart,
       eventEnd,
+      guestEmail,
+      guestFullName,
+      guestPhone,
     } = body
+
+    // Verify authentication - but make it optional for guests
+    const authHeader = request.headers.get("Authorization")
+    let userId: string | null = null
+    let userEmail: string | null = null
+
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const idToken = authHeader.split("Bearer ")[1]
+      try {
+        const decodedToken = await auth().verifyIdToken(idToken)
+        userId = decodedToken.uid
+        userEmail = decodedToken.email || null
+      } catch (error) {
+        console.log("[v0] Token verification failed, allowing guest checkout")
+      }
+    }
+
+    // If not authenticated, require guest email
+    if (!userId && !guestEmail) {
+      return NextResponse.json(
+        { error: "Either authentication or guest email is required" },
+        { status: 400 }
+      )
+    }
 
     // Validate required fields
     if (!eventId || !eventCreatorId || ticketPrice === undefined || !ticketType || totalAmount === undefined) {
@@ -56,7 +66,8 @@ export async function POST(request: NextRequest) {
     // Prepare metadata for Firestore
     const paymentReference = {
       reference,
-      userId,
+      userId: userId || null,
+      userEmail: userEmail || guestEmail || null,
       eventId,
       eventCreatorId,
       eventName: eventName || "",
@@ -72,6 +83,13 @@ export async function POST(request: NextRequest) {
       status: "pending",
       paymentCreationDate: new Date().toISOString(),
       paymentCreationTimestamp: timestamp,
+      
+      // Guest information (if not authenticated)
+      ...(guestEmail && {
+        guestEmail,
+        guestFullName: guestFullName || null,
+        guestPhone: guestPhone || null,
+      }),
       
       // Optional fields
       discountCode: discountCode || null,

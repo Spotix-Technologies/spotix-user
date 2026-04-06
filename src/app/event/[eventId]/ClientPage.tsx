@@ -301,15 +301,18 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
       try {
         const response = await fetch(`/api/v1/event/creator?eventId=${eventId}`)
         if (!response.ok) return
+        
         const result = await response.json()
-        if (result.success) setBookerDetails(result.data)
+        if (result.success) {
+          setBookerDetails(result.data)
+        }
       } catch (error) {
         console.error("Error fetching booker details:", error)
       }
     }
 
     fetchBookerDetails()
-  }, [eventData?.createdBy])
+  }, [eventData?.createdBy, eventId])
 
   // ── Body scroll lock when buy dialog is open ──────────────────────────────
 
@@ -409,7 +412,7 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
 
   // ── Buy ticket ────────────────────────────────────────────────────────────
 
-  const handleBuyTicket = (ticketType: string, ticketPrice: number | string) => {
+  const handleBuyTicket = (cart: any[]) => {
     if (!eventData) return
     if (isEventPassed) { setShowPassedDialog(true); return }
     if (isSoldOut) { alert("Sorry, this event is sold out!"); return }
@@ -422,18 +425,16 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
       return
     }
 
-    const parsedPrice = typeof ticketPrice === "string" ? parseFloat(ticketPrice) : ticketPrice
+    // Cart is already saved to localStorage by buy-ticket-dialog
+    // Store additional event data needed for payment
     if (typeof window !== "undefined") {
-      sessionStorage.setItem(
-        "spotix_payment_data",
-        JSON.stringify({
-          eventId,
-          eventName: eventData.eventName,
-          ticketType,
-          ticketPrice: parsedPrice,
-          eventCreatorId: creatorId,
-        })
-      )
+      const paymentData = {
+        eventId,
+        eventName: eventData.eventName,
+        cart: cart,
+        eventCreatorId: creatorId,
+      }
+      sessionStorage.setItem("spotix_payment_data", JSON.stringify(paymentData))
     }
     setShowBuyTicketDialog(false)
     router.push("/payment")

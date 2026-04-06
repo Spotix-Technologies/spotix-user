@@ -22,7 +22,7 @@ const LoginClient: React.FC<LoginProps> = () => {
 
   const router = useRouter()
   const searchParams = useSearchParams()
-  const redirect = searchParams.get("redirect")
+  const redirect = searchParams.get("redirect") || searchParams.get("return_to")
 
   const words = ["Event", "Party", "Meeting", "Conference", "Gathering", "Workshop"]
 
