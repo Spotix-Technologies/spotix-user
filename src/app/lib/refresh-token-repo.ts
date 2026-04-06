@@ -1,5 +1,5 @@
 /**
- * refresh-token-repo.ts
+ * lib/refresh-token-repo.ts
  * All Firestore operations for the `refreshTokens/{tokenId}` collection.
  *
  * Schema:
@@ -14,7 +14,7 @@
  *     lastUsedAt  : Timestamp
  */
 
-import { adminDb } from "@/lib/firebase-admin";
+import { adminDb } from "@/app/lib/firebase-admin";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { randomUUID } from "crypto";
 import {

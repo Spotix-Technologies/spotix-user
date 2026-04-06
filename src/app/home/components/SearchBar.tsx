@@ -5,7 +5,6 @@ import { Search, X } from "lucide-react"
 
 interface SearchSuggestion {
   eventName: string
-  creatorID: string
   eventId: string
 }
 
@@ -41,7 +40,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
       <div className="max-w-4xl mx-auto">
         <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-4 sm:p-6">
           <div className="flex flex-col gap-3">
-            {/* Search Bar */}
+            {/* Search Input */}
             <div className="flex-1 relative">
               <div className="relative">
                 <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
@@ -113,7 +112,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
               </select>
             </div>
 
-            {/* Active Filters Display */}
+            {/* Active Filters */}
             {hasActiveFilters && (
               <div className="flex items-center gap-2 flex-wrap pt-2">
                 <span className="text-sm font-medium text-gray-700">Active filters:</span>
@@ -150,17 +149,17 @@ const SearchBar: React.FC<SearchBarProps> = ({
   )
 }
 
-// Skeleton component
+// Skeleton
 export const SearchBarSkeleton: React.FC = () => {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
       <div className="max-w-4xl mx-auto">
         <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-4 sm:p-6 animate-pulse">
           <div className="space-y-3">
-            <div className="h-12 bg-gray-200 rounded-xl"></div>
+            <div className="h-12 bg-gray-200 rounded-xl" />
             <div className="flex flex-col sm:flex-row gap-3">
-              <div className="flex-1 h-12 bg-gray-200 rounded-xl"></div>
-              <div className="flex-1 h-12 bg-gray-200 rounded-xl"></div>
+              <div className="flex-1 h-12 bg-gray-200 rounded-xl" />
+              <div className="flex-1 h-12 bg-gray-200 rounded-xl" />
             </div>
           </div>
         </div>

@@ -6,7 +6,7 @@ import { useState } from "react"
 import { X, Upload, AlertCircle, CheckCircle, Loader2, FileText, Image as ImageIcon, Video, Shield } from "lucide-react"
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage"
 import { collection, addDoc, serverTimestamp } from "firebase/firestore"
-import { storage, db, auth } from "../../../lib/firebase"
+import { storage, db, auth } from "@/app/lib/firebase"
 
 interface ReportModalProps {
   isOpen: boolean

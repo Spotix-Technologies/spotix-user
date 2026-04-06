@@ -1,29 +1,93 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import FetchWallet from "@/components/fetch-wallet"
 import LoginButton from "@/components/LoginButton"
+import { getRandomGreeting } from "@/app/lib/greeting"
 
 interface HeaderProps {
   isAuthenticated: boolean
   username: string
 }
 
+const CYCLE_INTERVAL_MS = 5000
+
 const Header: React.FC<HeaderProps> = ({ isAuthenticated, username }) => {
+  const [greetingText, setGreetingText] = useState("")
+  const [visible, setVisible] = useState(true)
+  const lastIndexRef = useRef<number | undefined>(undefined)
+
+  // Initialize greeting on mount (client only, avoids SSR mismatch)
+  useEffect(() => {
+    const { greeting, index } = getRandomGreeting(lastIndexRef.current)
+    lastIndexRef.current = index
+    setGreetingText(greeting.text)
+  }, [])
+
+  // Cycle greetings every 5 seconds with a fade transition
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Fade out
+      setVisible(false)
+
+      setTimeout(() => {
+        const { greeting, index } = getRandomGreeting(lastIndexRef.current)
+        lastIndexRef.current = index
+        setGreetingText(greeting.text)
+        // Fade in
+        setVisible(true)
+      }, 400) // matches transition duration below
+    }, CYCLE_INTERVAL_MS)
+
+    return () => clearInterval(interval)
+  }, [])
+
+  const nameSuffix = isAuthenticated && username ? `, ${username}` : ""
+
   return (
-    <div className="bg-gradient-to-br from-purple-50 via-white to-purple-50 border-b border-gray-200">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+    <div className="relative overflow-hidden border-b border-gray-800">
+      {/* Background image */}
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: "url('/home.jpg')" }}
+        aria-hidden="true"
+      />
+
+      {/* Dark overlay */}
+      <div
+        className="absolute inset-0 bg-black/60"
+        aria-hidden="true"
+      />
+
+      {/* Content */}
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14">
         <div className="text-center">
-          <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-gray-900 mb-3 sm:mb-4 leading-tight">
-            Welcome{isAuthenticated && username ? `, ${username}` : ""} to{" "}
-            <span className="bg-gradient-to-r from-purple-600 to-purple-400 bg-clip-text text-transparent">
+
+          {/* Cycling greeting with username */}
+          <p
+            className="text-sm sm:text-base font-medium text-purple-300 mb-1 tracking-wide uppercase"
+            style={{
+              opacity: visible ? 1 : 0,
+              transform: visible ? "translateY(0)" : "translateY(-6px)",
+              transition: "opacity 0.4s ease, transform 0.4s ease",
+            }}
+          >
+            {greetingText}{nameSuffix}
+          </p>
+
+          {/* Main heading */}
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-3 leading-tight">
+            Welcome to{" "}
+            <span className="bg-gradient-to-r from-purple-400 to-purple-200 bg-clip-text text-transparent">
               Spotix
             </span>
-            !
           </h1>
-          <p className="text-base sm:text-lg text-gray-600 mb-4 sm:mb-6 max-w-2xl mx-auto px-4">
+
+          <p className="text-sm sm:text-base text-gray-300 mb-5 max-w-xl mx-auto px-4">
             Discover and book amazing events happening around you
           </p>
+
+          {/* CTA buttons */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             {isAuthenticated ? <FetchWallet /> : <LoginButton />}
             <a
@@ -53,15 +117,16 @@ const Header: React.FC<HeaderProps> = ({ isAuthenticated, username }) => {
   )
 }
 
-// Skeleton component
+// Skeleton
 export const HeaderSkeleton: React.FC = () => {
   return (
-    <div className="bg-gradient-to-br from-purple-50 via-white to-purple-50 border-b border-gray-200">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+    <div className="relative overflow-hidden border-b border-gray-800 bg-gray-900">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14">
         <div className="text-center animate-pulse">
-          <div className="h-10 sm:h-12 bg-gray-200 rounded-lg max-w-md mx-auto mb-3 sm:mb-4"></div>
-          <div className="h-6 bg-gray-200 rounded-lg max-w-lg mx-auto mb-4 sm:mb-6"></div>
-          <div className="h-10 w-32 bg-gray-200 rounded-lg mx-auto"></div>
+          <div className="h-4 bg-gray-700 rounded max-w-xs mx-auto mb-2" />
+          <div className="h-9 sm:h-10 bg-gray-700 rounded-lg max-w-sm mx-auto mb-3" />
+          <div className="h-5 bg-gray-700 rounded-lg max-w-md mx-auto mb-5" />
+          <div className="h-10 w-32 bg-gray-700 rounded-lg mx-auto" />
         </div>
       </div>
     </div>
