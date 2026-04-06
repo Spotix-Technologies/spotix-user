@@ -590,7 +590,7 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
 
             {/* Right column */}
             <div className="space-y-6 lg:relative lg:z-0">
-              <div className="bg-white rounded-2xl shadow-lg p-6 lg:p-8 border-2 border-purple-100 lg:sticky lg:top-6 lg:z-10">
+              <div className="bg-white rounded-2xl shadow-lg p-6 lg:p-8 border-2 border-purple-100">
                 <div className="mb-6">
                   {eventData.isFree ? (
                     <div className="text-center">
