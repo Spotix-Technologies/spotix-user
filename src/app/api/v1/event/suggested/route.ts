@@ -4,16 +4,16 @@ import { adminDb } from "@/app/lib/firebase-admin"
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
-    const creatorId = searchParams.get("creatorId")
+    const organizerId = searchParams.get("organizerId")
     const currentEventId = searchParams.get("currentEventId")
     const limitParam = searchParams.get("limit")
 
     // Validate required parameters
-    if (!creatorId) {
+    if (!organizerId) {
       return NextResponse.json(
         {
           success: false,
-          error: "Missing required parameter: creatorId is required",
+          error: "Missing required parameter: organizerId is required",
         },
         { status: 400 }
       )
@@ -21,12 +21,11 @@ export async function GET(request: NextRequest) {
 
     const limit = limitParam ? parseInt(limitParam, 10) : 10
 
-    // Fetch suggested events from Firebase
-    // Path: events/{creatorId}/userEvents
+    // Fetch suggested events from Firebase by querying events with matching organizerId
+    // Path: events where organizerId = organizerId
     const eventsCollectionRef = adminDb
       .collection("events")
-      .doc(creatorId)
-      .collection("userEvents")
+      .where("organizerId", "==", organizerId)
       .orderBy("createdAt", "desc")
       .limit(limit)
 
@@ -42,6 +41,18 @@ export async function GET(request: NextRequest) {
         { status: 200 }
       )
     }
+
+    // Fetch organizer info from users collection
+    const organizerDocRef = adminDb.collection("users").doc(organizerId)
+    const organizerDoc = await organizerDocRef.get()
+
+    const organizerInfo = organizerDoc.exists
+      ? {
+          username: organizerDoc.data()?.username || organizerDoc.data()?.displayName || "Unknown User",
+          avatar: organizerDoc.data()?.avatar || "",
+          isVerified: organizerDoc.data()?.isVerified || false,
+        }
+      : null
 
     // Transform the events data
     const eventsData = []
@@ -59,6 +70,7 @@ export async function GET(request: NextRequest) {
         eventImage: data?.eventImage || "",
         eventDate: data?.eventDate || "",
         eventVenue: data?.eventVenue || "",
+        organizer: organizerInfo,
       })
     }
 

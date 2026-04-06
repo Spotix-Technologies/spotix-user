@@ -4,22 +4,52 @@ import { adminDb } from "@/app/lib/firebase-admin"
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
-    const creatorId = searchParams.get("creatorId")
+    const eventId = searchParams.get("eventId")
 
     // Validate required parameter
-    if (!creatorId) {
+    if (!eventId) {
       return NextResponse.json(
         {
           success: false,
-          error: "Missing required parameter: creatorId is required",
+          error: "Missing required parameter: eventId is required",
         },
         { status: 400 }
       )
     }
 
-    // Fetch creator/booker details from Firebase
-    // Path: users/{creatorId}
-    const userDocRef = adminDb.collection("users").doc(creatorId)
+    // Fetch event details to get the organizer ID
+    // Path: events/{eventId}
+    const eventDocRef = adminDb.collection("events").doc(eventId)
+    const eventDoc = await eventDocRef.get()
+
+    // Check if event exists
+    if (!eventDoc.exists) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Event not found",
+        },
+        { status: 404 }
+      )
+    }
+
+    const eventData = eventDoc.data()
+    const organizerId = eventData?.organizerId
+
+    // Validate that organizerId exists
+    if (!organizerId) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Event organizer information missing",
+        },
+        { status: 400 }
+      )
+    }
+
+    // Fetch organizer/creator details from Firebase
+    // Path: users/{organizerId}
+    const userDocRef = adminDb.collection("users").doc(organizerId)
     const userDoc = await userDocRef.get()
 
     // Check if user exists

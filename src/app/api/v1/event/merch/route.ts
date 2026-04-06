@@ -4,25 +4,22 @@ import { adminDb } from "@/app/lib/firebase-admin"
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
-    const creatorId = searchParams.get("creatorId")
     const eventId = searchParams.get("eventId")
 
-    // Validate required parameters
-    if (!creatorId || !eventId) {
+    // Validate required parameter
+    if (!eventId) {
       return NextResponse.json(
         {
           success: false,
-          error: "Missing required parameters: creatorId and eventId are required",
+          error: "Missing required parameter: eventId is required",
         },
         { status: 400 }
       )
     }
 
-    // Step 1: Fetch listings references from events/{creatorId}/userEvents/{eventId}/listings
+    // Step 1: Fetch listings references from events/{eventId}/listings
     const listingsCollectionRef = adminDb
       .collection("events")
-      .doc(creatorId)
-      .collection("userEvents")
       .doc(eventId)
       .collection("listings")
 
