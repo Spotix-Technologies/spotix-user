@@ -24,7 +24,7 @@ export default function MerchSection({ eventId, creatorId }: MerchSectionProps) 
   useEffect(() => {
     const fetchEventMerch = async () => {
       try {
-        const response = await fetch(`/api/v1/event/merch?creatorId=${creatorId}&eventId=${eventId}`)
+        const response = await fetch(`/api/v1/event/merch?eventId=${eventId}`)
         
         if (!response.ok) {
           throw new Error("Failed to fetch merchandise")

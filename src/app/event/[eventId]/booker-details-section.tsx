@@ -55,7 +55,7 @@ const BookerDetailsSection: React.FC<BookerDetailsSectionProps> = ({ bookerDetai
       try {
         // Fetch from API
         const response = await fetch(
-          `/api/v1/event/suggested?creatorId=${creatorId}&currentEventId=${currentEventId}&limit=10`
+          `/api/v1/event/suggested?organizerId=${creatorId}&currentEventId=${currentEventId}&limit=10`
         )
         
         if (!response.ok) {

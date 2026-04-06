@@ -299,7 +299,7 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
 
     const fetchBookerDetails = async () => {
       try {
-        const response = await fetch(`/api/v1/event/creator?creatorId=${eventData.createdBy}`)
+        const response = await fetch(`/api/v1/event/creator?eventId=${eventId}`)
         if (!response.ok) return
         const result = await response.json()
         if (result.success) setBookerDetails(result.data)
