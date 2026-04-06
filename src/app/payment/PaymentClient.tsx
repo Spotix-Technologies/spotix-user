@@ -94,6 +94,8 @@ export default function PaymentClient() {
   const [guestPhone, setGuestPhone] = useState("")
   const [showGuestForm, setShowGuestForm] = useState(false)
 
+  const cart = JSON.parse(localStorage.getItem("spotix_cart") || "[]")
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
@@ -117,11 +119,11 @@ export default function PaymentClient() {
       if (storedPaymentData) {
         try {
           const parsedData = JSON.parse(storedPaymentData)
-          
-          const needsEventDetails = !parsedData.eventVenue || 
-                                     !parsedData.eventType || 
-                                     !parsedData.eventDate || 
-                                     !parsedData.bookerName
+
+          const needsEventDetails = !parsedData.eventVenue ||
+            !parsedData.eventType ||
+            !parsedData.eventDate ||
+            !parsedData.bookerName
 
           if (needsEventDetails && parsedData.eventCreatorId && parsedData.eventId) {
             const completeData = await fetchEventDetails(parsedData.eventCreatorId, parsedData.eventId, parsedData)
@@ -177,8 +179,8 @@ export default function PaymentClient() {
   }
 
   const fetchEventDetails = async (
-    creatorId: string, 
-    eventId: string, 
+    creatorId: string,
+    eventId: string,
     existingData: PaymentData
   ): Promise<PaymentData> => {
     try {
@@ -666,12 +668,10 @@ export default function PaymentClient() {
             <div className="space-y-4 sm:space-y-6 w-full">
               <OrderSummary
                 eventName={paymentData.eventName}
-                ticketType={paymentData.ticketType}
-                ticketPrice={paymentData.ticketPrice}
-                vatFee={vatFee}
-                discountAmount={discountAmount}
+                cart={cart}
+                discountAmount={discountAmount ?? 0}
                 discountData={discountData}
-                totalAmount={totalAmount}
+                // totalAmount={totalAmount ?? 0}
                 isFreeEvent={isFreeEvent}
               />
 

@@ -14,10 +14,10 @@ interface Merch {
 
 interface MerchSectionProps {
   eventId: string
-  creatorId: string
+  createdBy: string
 }
 
-export default function MerchSection({ eventId, creatorId }: MerchSectionProps) {
+export default function MerchSection({ eventId, createdBy }: MerchSectionProps) {
   const [merch, setMerch] = useState<Merch[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -25,13 +25,13 @@ export default function MerchSection({ eventId, creatorId }: MerchSectionProps) 
     const fetchEventMerch = async () => {
       try {
         const response = await fetch(`/api/v1/event/merch?eventId=${eventId}`)
-        
+
         if (!response.ok) {
           throw new Error("Failed to fetch merchandise")
         }
 
         const result = await response.json()
-        
+
         if (result.success) {
           setMerch(result.data)
         }
@@ -43,7 +43,7 @@ export default function MerchSection({ eventId, creatorId }: MerchSectionProps) 
     }
 
     fetchEventMerch()
-  }, [eventId, creatorId])
+  }, [eventId, createdBy])
 
   const formatPrice = (price: number): string => {
     return new Intl.NumberFormat("en-NG", {

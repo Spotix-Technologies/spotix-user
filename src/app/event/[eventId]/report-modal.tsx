@@ -12,7 +12,7 @@ interface ReportModalProps {
   isOpen: boolean
   onClose: () => void
   eventId: string
-  creatorId: string
+  createdBy: string
   eventName: string
 }
 
@@ -49,7 +49,7 @@ const ALLOWED_FILE_TYPES = {
   document: ["application/pdf", "text/plain"],
 }
 
-export function ReportModal({ isOpen, onClose, eventId, creatorId, eventName }: ReportModalProps) {
+export function ReportModal({ isOpen, onClose, eventId, createdBy, eventName }: ReportModalProps) {
   const [topic, setTopic] = useState<ReportTopic>("Event doesn't exist")
   const [heading, setHeading] = useState("")
   const [files, setFiles] = useState<File[]>([])
@@ -190,7 +190,7 @@ export function ReportModal({ isOpen, onClose, eventId, creatorId, eventName }: 
       }
 
       // Add report to Firestore
-      const reportsRef = collection(db, "reports", creatorId, "events", eventId, "reports")
+      const reportsRef = collection(db, "reports", createdBy, "events", eventId, "reports")
 
       await addDoc(reportsRef, {
         reporterUid: user.uid,
@@ -331,11 +331,10 @@ export function ReportModal({ isOpen, onClose, eventId, creatorId, eventName }: 
                   Detailed Description <span className="text-red-500">*</span>
                 </label>
                 <span
-                  className={`text-xs font-bold px-3 py-1 rounded-full ${
-                    heading.trim().split(/\s+/).filter((w) => w).length >= 10
+                  className={`text-xs font-bold px-3 py-1 rounded-full ${heading.trim().split(/\s+/).filter((w) => w).length >= 10
                       ? "bg-emerald-100 text-emerald-700"
                       : "bg-slate-100 text-slate-600"
-                  }`}
+                    }`}
                 >
                   {
                     heading
@@ -382,11 +381,10 @@ export function ReportModal({ isOpen, onClose, eventId, creatorId, eventName }: 
                 onDragLeave={handleDrag}
                 onDragOver={handleDrag}
                 onDrop={handleDrop}
-                className={`border-2 border-dashed rounded-xl p-8 md:p-10 text-center transition-all cursor-pointer ${
-                  dragActive
+                className={`border-2 border-dashed rounded-xl p-8 md:p-10 text-center transition-all cursor-pointer ${dragActive
                     ? "border-[#6b2fa5] bg-purple-50 scale-[1.02]"
                     : "border-slate-300 bg-slate-50 hover:border-[#6b2fa5] hover:bg-purple-50/50"
-                } ${loading || success ? "opacity-50 pointer-events-none" : ""}`}
+                  } ${loading || success ? "opacity-50 pointer-events-none" : ""}`}
               >
                 <div className="inline-flex items-center justify-center w-16 h-16 bg-white rounded-2xl shadow-md mb-4">
                   <Upload size={32} className="text-[#6b2fa5]" />

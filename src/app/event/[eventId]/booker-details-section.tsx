@@ -13,7 +13,7 @@ interface BookerDetailsSectionProps {
     isVerified: boolean
   } | null
   bookerName: string
-  creatorId: string
+  createdBy: string
 }
 
 interface SuggestedEvent {
@@ -27,7 +27,7 @@ interface SuggestedEvent {
 // Utility function to transform Cloudinary URLs
 const getOptimizedImageUrl = (url: string, width = 400, height = 300): string => {
   if (!url) return "/placeholder.svg"
-  
+
   if (url.includes('cloudinary.com')) {
     const uploadIndex = url.indexOf('/upload/')
     if (uploadIndex !== -1) {
@@ -37,11 +37,11 @@ const getOptimizedImageUrl = (url: string, width = 400, height = 300): string =>
       return `${beforeUpload}${transformations}/${afterUpload}`
     }
   }
-  
+
   return url
 }
 
-const BookerDetailsSection: React.FC<BookerDetailsSectionProps> = ({ bookerDetails, bookerName, creatorId }) => {
+const BookerDetailsSection: React.FC<BookerDetailsSectionProps> = ({ bookerDetails, bookerName, createdBy }) => {
   const [suggestedEvents, setSuggestedEvents] = useState<SuggestedEvent[]>([])
   const [loadingSuggestions, setLoadingSuggestions] = useState(false)
   const params = useParams()
@@ -49,22 +49,22 @@ const BookerDetailsSection: React.FC<BookerDetailsSectionProps> = ({ bookerDetai
 
   useEffect(() => {
     const fetchSuggestedEvents = async () => {
-      if (!creatorId) return
+      if (!createdBy) return
 
       setLoadingSuggestions(true)
       try {
         // Fetch from API
         const response = await fetch(
-          `/api/v1/event/suggested?organizerId=${creatorId}&currentEventId=${currentEventId}&limit=10`
+          `/api/v1/event/suggested?organizerId=${createdBy}&currentEventId=${currentEventId}&limit=10`
         )
-        
+
         if (!response.ok) {
           console.error("Failed to fetch suggested events")
           return
         }
 
         const result = await response.json()
-        
+
         if (result.success) {
           // Shuffle and take 3 events
           const shuffled = result.data.sort(() => 0.5 - Math.random())
@@ -78,10 +78,10 @@ const BookerDetailsSection: React.FC<BookerDetailsSectionProps> = ({ bookerDetai
     }
 
     fetchSuggestedEvents()
-  }, [creatorId, currentEventId])
+  }, [createdBy, currentEventId])
 
   const handleEventClick = (eventId: string) => {
-    window.open(`/event/${creatorId}/${eventId}`, "_blank")
+    window.open(`/event/${createdBy}/${eventId}`, "_blank")
   }
 
   return (
@@ -165,11 +165,10 @@ const BookerDetailsSection: React.FC<BookerDetailsSectionProps> = ({ bookerDetai
                       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Status</p>
                       <div className="flex items-center gap-2">
                         <span
-                          className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold shadow-sm ${
-                            bookerDetails.isVerified
+                          className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold shadow-sm ${bookerDetails.isVerified
                               ? "bg-gradient-to-r from-green-500 to-green-600 text-white"
                               : "bg-gray-200 text-gray-700"
-                          }`}
+                            }`}
                         >
                           {bookerDetails.isVerified ? (
                             <>
@@ -250,19 +249,19 @@ const BookerDetailsSection: React.FC<BookerDetailsSectionProps> = ({ bookerDetai
                             className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                          
+
                           {/* External Link Icon */}
                           <div className="absolute top-3 right-3 w-8 h-8 bg-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 shadow-lg">
                             <ExternalLink size={14} className="text-[#6b2fa5]" />
                           </div>
                         </div>
-                        
+
                         {/* Content */}
                         <div className="p-4 flex-1 min-w-0">
                           <h4 className="font-bold text-gray-900 mb-3 line-clamp-2 text-base group-hover:text-[#6b2fa5] transition-colors">
                             {event.eventName}
                           </h4>
-                          
+
                           <div className="space-y-2">
                             <div className="flex items-center gap-2 text-sm text-gray-600">
                               <div className="w-6 h-6 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
@@ -276,7 +275,7 @@ const BookerDetailsSection: React.FC<BookerDetailsSectionProps> = ({ bookerDetai
                                 })}
                               </span>
                             </div>
-                            
+
                             <div className="flex items-center gap-2 text-sm text-gray-600">
                               <div className="w-6 h-6 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
                                 <MapPin size={14} className="text-[#6b2fa5]" />

@@ -29,7 +29,7 @@ import type { EventType } from "./page"
 
 interface ClientPageProps {
   params: {
-    creatorId: string
+    createdBy: string
     eventId: string
   }
   initialEventData?: EventType | null
@@ -62,9 +62,8 @@ const LazyImage: React.FC<{
           alt={alt}
           onLoad={() => setIsLoaded(true)}
           onError={() => { setHasError(true); setIsLoaded(true) }}
-          className={`w-full h-full object-cover rounded-lg transition-opacity duration-300 ${
-            isLoaded ? "opacity-100" : "opacity-0"
-          }`}
+          className={`w-full h-full object-cover rounded-lg transition-opacity duration-300 ${isLoaded ? "opacity-100" : "opacity-0"
+            }`}
         />
         {showFullscreenIcon && isLoaded && !hasError && (
           <button
@@ -140,7 +139,7 @@ const Preloader = () => (
 // ── ClientPage ────────────────────────────────────────────────────────────────
 
 export default function ClientPage({ params, initialEventData }: ClientPageProps) {
-  const { creatorId, eventId } = params
+  const { createdBy, eventId } = params
   const router = useRouter()
 
   // Event data
@@ -187,7 +186,7 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
   const bookerDetailsRef = useRef<HTMLDivElement>(null)
 
   // Stable cache key — outside render so useEffect deps don't fluctuate
-  const cacheKey = `event_${eventId}_${creatorId}`
+  const cacheKey = `event_${eventId}_${createdBy}`
   const CACHE_TTL = 5 * 60 * 1000
 
   // ── Auth check (single source of truth: Spotix JWT via /api/v1/auth) ────────
@@ -301,7 +300,7 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
       try {
         const response = await fetch(`/api/v1/event/creator?eventId=${eventId}`)
         if (!response.ok) return
-        
+
         const result = await response.json()
         if (result.success) {
           setBookerDetails(result.data)
@@ -337,8 +336,8 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
 
     setIsEventToday(
       now.getDate() === eventDate.getDate() &&
-        now.getMonth() === eventDate.getMonth() &&
-        now.getFullYear() === eventDate.getFullYear()
+      now.getMonth() === eventDate.getMonth() &&
+      now.getFullYear() === eventDate.getFullYear()
     )
     setIsEventPassed(now > eventEndDate)
 
@@ -432,7 +431,7 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
         eventId,
         eventName: eventData.eventName,
         cart: cart,
-        eventCreatorId: creatorId,
+        eventcreatedBy: createdBy,
       }
       sessionStorage.setItem("spotix_payment_data", JSON.stringify(paymentData))
     }
@@ -470,30 +469,28 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
   const ctaLabel = isEventPassed
     ? "Event Has Passed"
     : isSoldOut
-    ? "Sold Out"
-    : isSaleEnded
-    ? "Sales Ended"
-    : eventData.isFree
-    ? "Register Now"
-    : "Buy Tickets"
+      ? "Sold Out"
+      : isSaleEnded
+        ? "Sales Ended"
+        : eventData.isFree
+          ? "Register Now"
+          : "Buy Tickets"
 
   const CtaButton = ({ mobile = false }: { mobile?: boolean }) =>
     ctaDisabled ? (
       <button
         disabled
         onClick={isEventPassed ? () => setShowPassedDialog(true) : undefined}
-        className={`w-full bg-gray-400 text-white rounded-lg font-semibold text-lg cursor-not-allowed shadow-md ${
-          mobile ? "py-3" : "py-3.5 px-6"
-        }`}
+        className={`w-full bg-gray-400 text-white rounded-lg font-semibold text-lg cursor-not-allowed shadow-md ${mobile ? "py-3" : "py-3.5 px-6"
+          }`}
       >
         {ctaLabel}
       </button>
     ) : (
       <button
         onClick={() => setShowBuyTicketDialog(true)}
-        className={`w-full bg-gradient-to-r from-[#6b2fa5] to-purple-700 text-white rounded-lg font-semibold text-lg hover:from-purple-700 hover:to-purple-800 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 ${
-          mobile ? "py-3" : "py-3.5 px-6"
-        }`}
+        className={`w-full bg-gradient-to-r from-[#6b2fa5] to-purple-700 text-white rounded-lg font-semibold text-lg hover:from-purple-700 hover:to-purple-800 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 ${mobile ? "py-3" : "py-3.5 px-6"
+          }`}
       >
         <div className="flex items-center justify-center gap-2">
           <Ticket size={mobile ? 20 : 22} />
@@ -578,7 +575,7 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
               />
 
               <LocationSection eventVenue={eventData.eventVenue} eventName={""} />
-              <MerchSection eventId={eventId} creatorId={creatorId} />
+              <MerchSection eventId={eventId} createdBy={createdBy} />
               <ReviewsSection
                 eventId={eventId}
                 eventName={eventData.eventName}
@@ -658,7 +655,7 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
                 <BookerDetailsSection
                   bookerDetails={bookerDetails}
                   bookerName={eventData.bookerName}
-                  creatorId={eventData.createdBy}
+                  createdBy={eventData.createdBy}
                 />
               </div>
             </div>
@@ -725,7 +722,7 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
           isOpen={showReportModal}
           onClose={() => setShowReportModal(false)}
           eventId={eventId || ""}
-          creatorId={creatorId || ""}
+          createdBy={createdBy || ""}
           eventName={eventData.eventName}
         />
       </div>

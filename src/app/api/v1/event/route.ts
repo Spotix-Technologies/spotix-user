@@ -78,6 +78,7 @@ export async function GET(request: NextRequest) {
       allowAgents: eventData?.allowAgents || false,
     }
 
+
     // Return success response
     return NextResponse.json(
       {
@@ -93,7 +94,7 @@ export async function GET(request: NextRequest) {
     )
   } catch (error) {
     console.error("Error fetching event data:", error)
-    
+
     return NextResponse.json(
       {
         success: false,
