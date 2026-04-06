@@ -47,39 +47,38 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
   onClose,
   onShowPassedDialog,
 }) => {
-  // State for ticket quantities
   const [quantities, setQuantities] = useState<Record<string, number>>({})
 
-  // Check if a specific ticket type is sold out
   const isTicketTypeSoldOut = (ticket: TicketType) => {
     if (!ticket.availableTickets) return false
     const soldCount = ticket.ticketSale || 0
     return soldCount >= ticket.availableTickets
   }
 
-  // Get remaining tickets for a ticket type
   const getRemainingTickets = (ticket: TicketType) => {
-    if (!ticket.availableTickets) return null
+    if (!ticket.availableTickets) return null // null = unlimited
     const soldCount = ticket.ticketSale || 0
     return Math.max(0, ticket.availableTickets - soldCount)
   }
 
-  // Calculate percentage sold
   const getPercentageSold = (ticket: TicketType) => {
     if (!ticket.availableTickets) return 0
     const soldCount = ticket.ticketSale || 0
     return Math.round((soldCount / ticket.availableTickets) * 100)
   }
 
-  // Update quantity for a ticket type
+  // Fixed: only enforce cap when availableTickets exists
   const updateQuantity = (ticketPolicy: string, newQuantity: number) => {
-    const remaining = eventData.ticketPrices?.find(t => t.policy === ticketPolicy)?.availableTickets || 0
-    const sold = eventData.ticketPrices?.find(t => t.policy === ticketPolicy)?.ticketSale || 0
-    const availableCount = Math.max(0, remaining - sold)
+    const ticketData = eventData.ticketPrices?.find(t => t.policy === ticketPolicy)
+    const hasLimit = !!ticketData?.availableTickets
 
-    // Don't allow more than available
-    if (newQuantity > availableCount) return
-    
+    if (hasLimit) {
+      const remaining = ticketData?.availableTickets || 0
+      const sold = ticketData?.ticketSale || 0
+      const availableCount = Math.max(0, remaining - sold)
+      if (newQuantity > availableCount) return
+    }
+
     if (newQuantity <= 0) {
       setQuantities(prev => {
         const updated = { ...prev }
@@ -91,7 +90,6 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
     }
   }
 
-  // Calculate total and handle checkout
   const handleContinueToPayment = () => {
     const cart: CartItem[] = Object.entries(quantities)
       .filter(([_, qty]) => qty > 0)
@@ -104,14 +102,10 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
 
     if (cart.length === 0) return
 
-    // Save cart to localStorage
     localStorage.setItem("spotix_cart", JSON.stringify(cart))
-    
-    // Call callback with cart
     onBuyTicket(cart)
   }
 
-  // Calculate running totals
   const cartTotal = Object.entries(quantities)
     .filter(([_, qty]) => qty > 0)
     .reduce((total, [ticketType, quantity]) => {
@@ -121,9 +115,7 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
       return total + (finalPrice * quantity)
     }, 0)
 
-  const formatNumber = (num: number) => {
-    return num.toLocaleString()
-  }
+  const formatNumber = (num: number) => num.toLocaleString()
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 overflow-y-auto">
@@ -223,13 +215,14 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
                 <div className="flex-1">
                   <h3 className="font-bold text-blue-900 text-lg mb-1">Limited Time</h3>
                   <p className="text-sm text-blue-700 leading-relaxed">
-                    <strong>Ticket sales end:</strong> {new Date(eventData.stopDate).toLocaleString("en-US", {
+                    <strong>Ticket sales end:</strong>{" "}
+                    {new Date(eventData.stopDate).toLocaleString("en-US", {
                       weekday: "long",
                       month: "long",
                       day: "numeric",
                       year: "numeric",
                       hour: "numeric",
-                      minute: "2-digit"
+                      minute: "2-digit",
                     })}
                   </p>
                 </div>
@@ -276,7 +269,6 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
                   </button>
                 )}
 
-                {/* Security Badge */}
                 <div className="mt-6 flex items-center justify-center gap-2 text-sm text-emerald-700">
                   <Shield size={16} />
                   <span>Free registration • No payment required</span>
@@ -299,12 +291,9 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
                 <div className="space-y-4">
                   {eventData.ticketPrices.map((ticket, index) => {
                     const isThisTicketSoldOut = isTicketTypeSoldOut(ticket)
-                    const remainingTickets = getRemainingTickets(ticket)
+                    const remainingTickets = getRemainingTickets(ticket) // null = unlimited
                     const isLowStock = remainingTickets !== null && remainingTickets <= 10 && remainingTickets > 0
                     const percentageSold = getPercentageSold(ticket)
-                    
-                    // Calculate VAT fee and final price
-                    // Convert ticket.price to number explicitly to ensure mathematical addition (not string concatenation)
                     const ticketPrice = Number(ticket.price)
                     const vatFee = ticketPrice > 0 ? calculateVATFee(ticketPrice) : 0
                     const finalPrice = ticketPrice > 0 ? calculateFinalPrice(ticketPrice) : 0
@@ -312,11 +301,10 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
                     return (
                       <div
                         key={index}
-                        className={`group rounded-2xl p-6 transition-all shadow-md hover:shadow-xl ${
-                          isThisTicketSoldOut
+                        className={`group rounded-2xl p-6 transition-all shadow-md hover:shadow-xl ${isThisTicketSoldOut
                             ? "border-2 border-gray-300 bg-gray-50 opacity-70"
                             : "border-2 border-purple-200 bg-gradient-to-br from-purple-50 to-white hover:border-purple-400 hover:scale-[1.02]"
-                        }`}
+                          }`}
                       >
                         {/* Ticket Header */}
                         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4 mb-4">
@@ -371,21 +359,19 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
                           </div>
                         )}
 
-                        {/* Availability Info with Progress Bar */}
+                        {/* Availability Info — only shown when there's a limit */}
                         {remainingTickets !== null && (
                           <div className="space-y-3 mb-4">
                             <div className="flex items-center justify-between text-sm">
                               <div className="flex items-center gap-2">
-                                <div className={`w-5 h-5 rounded-full flex items-center justify-center ${
-                                  isThisTicketSoldOut ? "bg-red-100" : isLowStock ? "bg-yellow-100" : "bg-green-100"
-                                }`}>
+                                <div className={`w-5 h-5 rounded-full flex items-center justify-center ${isThisTicketSoldOut ? "bg-red-100" : isLowStock ? "bg-yellow-100" : "bg-green-100"
+                                  }`}>
                                   <Ticket size={12} className={
                                     isThisTicketSoldOut ? "text-red-600" : isLowStock ? "text-yellow-600" : "text-green-600"
                                   } />
                                 </div>
-                                <span className={`font-semibold ${
-                                  isThisTicketSoldOut ? "text-red-600" : isLowStock ? "text-yellow-700" : "text-gray-700"
-                                }`}>
+                                <span className={`font-semibold ${isThisTicketSoldOut ? "text-red-600" : isLowStock ? "text-yellow-700" : "text-gray-700"
+                                  }`}>
                                   {isThisTicketSoldOut ? (
                                     "Sold Out"
                                   ) : (
@@ -401,13 +387,12 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
                             {/* Progress Bar */}
                             <div className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
                               <div
-                                className={`h-full rounded-full transition-all duration-500 ${
-                                  isThisTicketSoldOut
+                                className={`h-full rounded-full transition-all duration-500 ${isThisTicketSoldOut
                                     ? "bg-red-500"
                                     : isLowStock
-                                    ? "bg-gradient-to-r from-yellow-400 to-orange-500"
-                                    : "bg-gradient-to-r from-purple-500 to-purple-600"
-                                }`}
+                                      ? "bg-gradient-to-r from-yellow-400 to-orange-500"
+                                      : "bg-gradient-to-r from-purple-500 to-purple-600"
+                                  }`}
                                 style={{ width: `${percentageSold}%` }}
                               />
                             </div>
@@ -422,7 +407,7 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
                                 <AlertTriangle size={14} className="text-white" />
                               </div>
                               <span className="text-yellow-900 text-sm font-bold">
-                                Only {remainingTickets} ticket{remainingTickets !== 1 ? 's' : ''} left! Act fast!
+                                Only {remainingTickets} ticket{remainingTickets !== 1 ? "s" : ""} left! Act fast!
                               </span>
                             </div>
                           </div>
@@ -445,7 +430,8 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
                               </span>
                               <button
                                 onClick={() => updateQuantity(ticket.policy, (quantities[ticket.policy] || 0) + 1)}
-                                disabled={(quantities[ticket.policy] || 0) >= (remainingTickets || 0)}
+                                // Fixed: only cap when remainingTickets is not null (i.e. has a limit)
+                                disabled={remainingTickets !== null && (quantities[ticket.policy] || 0) >= remainingTickets}
                                 className="p-2 rounded-lg bg-white border-2 border-purple-200 hover:border-purple-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                               >
                                 <Plus size={16} className="text-purple-600" />
@@ -470,7 +456,7 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
           )}
         </div>
 
-        {/* Footer with Continue Button and Total */}
+        {/* Footer */}
         {!eventData.isFree && Array.isArray(eventData.ticketPrices) && eventData.ticketPrices.length > 0 && (
           <div className="border-t-2 border-gray-200 bg-gray-50 px-6 md:px-8 py-5 flex items-center justify-between rounded-b-2xl flex-shrink-0">
             <div className="flex-1">
@@ -486,11 +472,10 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
             <button
               onClick={handleContinueToPayment}
               disabled={Object.values(quantities).every(q => q === 0) || isEventPassed || isSoldOut || isSaleEnded}
-              className={`flex items-center gap-2 px-8 py-3 rounded-xl font-bold transition-all shadow-lg ${
-                Object.values(quantities).every(q => q === 0) || isEventPassed || isSoldOut || isSaleEnded
+              className={`flex items-center gap-2 px-8 py-3 rounded-xl font-bold transition-all shadow-lg ${Object.values(quantities).every(q => q === 0) || isEventPassed || isSoldOut || isSaleEnded
                   ? "bg-gray-400 text-white cursor-not-allowed"
                   : "bg-gradient-to-r from-[#6b2fa5] to-purple-600 text-white hover:from-purple-700 hover:to-purple-700 hover:shadow-xl hover:scale-105 transform"
-              }`}
+                }`}
             >
               <ShoppingCart size={18} />
               Continue to Payment
