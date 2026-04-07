@@ -24,6 +24,7 @@ interface HomeEvent {
   eventType: string
   eventStartDate: string
   freeOrPaid: boolean
+  eventImage: string
 }
 
 interface EventCollection {
