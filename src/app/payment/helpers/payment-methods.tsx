@@ -8,8 +8,11 @@ interface PaymentMethodsProps {
   isFreeEvent: boolean
   creatingReference: boolean
   isSurveyComplete: boolean
+  isSurveyRequired: boolean
+  isGuest: boolean
   onSelectMethod: (method: string) => void
   onProceed: () => void
+  onSignIn?: () => void
 }
 
 const formatNumber = (num: number): string => {
@@ -22,8 +25,11 @@ export default function PaymentMethods({
   isFreeEvent,
   creatingReference,
   isSurveyComplete,
+  isSurveyRequired,
+  isGuest,
   onSelectMethod,
   onProceed,
+  onSignIn,
 }: PaymentMethodsProps) {
   return (
     <div className="bg-white rounded-2xl border-2 border-gray-200 shadow-lg p-4 sm:p-6 w-full">
@@ -35,12 +41,16 @@ export default function PaymentMethods({
         <div className="space-y-3 sm:space-y-4">
           {/* Wallet */}
           <div
-            className={`p-3 sm:p-4 rounded-xl border-2 cursor-pointer transition-all duration-200 ${
-              selectedMethod === "wallet"
-                ? "border-purple-500 bg-purple-50 shadow-md"
-                : "border-gray-200 hover:border-purple-300 hover:shadow-sm"
+            className={`p-3 sm:p-4 rounded-xl border-2 ${
+              isGuest
+                ? "border-gray-200 bg-gray-50 cursor-not-allowed"
+                : `cursor-pointer transition-all duration-200 ${
+                    selectedMethod === "wallet"
+                      ? "border-purple-500 bg-purple-50 shadow-md"
+                      : "border-gray-200 hover:border-purple-300 hover:shadow-sm"
+                  }`
             }`}
-            onClick={() => onSelectMethod("wallet")}
+            onClick={() => !isGuest && onSelectMethod("wallet")}
           >
             <div className="flex items-center gap-3 sm:gap-4">
               <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center bg-green-100 flex-shrink-0">
@@ -48,9 +58,20 @@ export default function PaymentMethods({
               </div>
               <div className="flex-1 min-w-0">
                 <h4 className="font-bold text-sm sm:text-base text-gray-900">My Wallet</h4>
-                <p className="text-xs sm:text-sm text-gray-600 break-words">Balance: ₦{formatNumber(walletBalance)}</p>
+                {isGuest ? (
+                  <p className="text-xs sm:text-sm text-gray-600 break-words">
+                    <button
+                      onClick={onSignIn}
+                      className="text-purple-600 hover:text-purple-700 font-semibold underline"
+                    >
+                      Login to view wallet
+                    </button>
+                  </p>
+                ) : (
+                  <p className="text-xs sm:text-sm text-gray-600 break-words">Balance: ₦{formatNumber(walletBalance)}</p>
+                )}
               </div>
-              {selectedMethod === "wallet" && (
+              {selectedMethod === "wallet" && !isGuest && (
                 <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0" style={{ color: "#6b2fa5" }} />
               )}
             </div>
@@ -133,7 +154,7 @@ export default function PaymentMethods({
       )}
 
       {/* Survey Warning */}
-      {!isSurveyComplete && (
+      {isSurveyRequired && !isSurveyComplete && (
         <div className="mt-4 p-3 sm:p-4 bg-amber-50 border-2 border-amber-200 rounded-xl">
           <div className="flex items-start gap-3">
             <svg
@@ -162,7 +183,7 @@ export default function PaymentMethods({
       {/* Proceed Button */}
       <button
         onClick={onProceed}
-        disabled={(!selectedMethod && !isFreeEvent) || creatingReference || !isSurveyComplete}
+        disabled={(!selectedMethod && !isFreeEvent) || creatingReference || (isSurveyRequired && !isSurveyComplete)}
         className="w-full mt-4 sm:mt-6 py-3 sm:py-4 text-sm sm:text-base text-white font-bold rounded-xl transition-all duration-200 transform hover:scale-105 shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
         style={{ background: "#6b2fa5" }}
       >

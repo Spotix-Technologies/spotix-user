@@ -1,36 +1,42 @@
 "use client"
 
-import { CheckCircle } from "lucide-react"
+import { CheckCircle, Ticket } from "lucide-react"
+
+interface CartItem {
+  ticketType: string
+  quantity: number
+  price: number
+  vat: number
+}
 
 interface OrderSummaryProps {
   eventName: string
-  ticketType: string
-  ticketPrice: number
-  vatFee: number
+  cart: CartItem[]
   discountAmount: number
   discountData: {
     code: string
     discountType: "percentage" | "fixed"
     discountValue: number
   } | null
-  totalAmount: number
   isFreeEvent: boolean
 }
 
 const formatNumber = (num: number): string => {
+  if (num === undefined || num === null || isNaN(num)) return "0"
   return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")
 }
 
 export default function OrderSummary({
   eventName,
-  ticketType,
-  ticketPrice,
-  vatFee,
+  cart,
   discountAmount,
   discountData,
-  totalAmount,
   isFreeEvent,
 }: OrderSummaryProps) {
+  const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0)
+  const totalVat = cart.reduce((sum, item) => sum + (item.vat * item.quantity), 0)
+  const computedTotal = Math.max(0, subtotal + totalVat - (discountAmount ?? 0))
+
   return (
     <div className="bg-white rounded-2xl border-2 border-gray-200 shadow-lg p-4 sm:p-6 w-full">
       <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
@@ -44,23 +50,60 @@ export default function OrderSummary({
       </h3>
 
       <div className="space-y-3">
+        {/* Event Name */}
         <div className="p-3 sm:p-4 bg-purple-50 rounded-xl border border-purple-100">
-          <p className="text-xs sm:text-sm text-gray-600 mb-1">Event Name</p>
+          <p className="text-xs sm:text-sm text-gray-600 mb-1">Event</p>
           <p className="font-bold text-sm sm:text-base text-gray-900 break-words">{eventName}</p>
         </div>
 
-        <div className="p-3 sm:p-4 bg-purple-50 rounded-xl border border-purple-100">
-          <p className="text-xs sm:text-sm text-gray-600 mb-1">Ticket Type</p>
-          <p className="font-bold text-sm sm:text-base text-gray-900 break-words">{ticketType}</p>
+        {/* Ticket Line Items */}
+        <div className="p-3 sm:p-4 bg-purple-50 rounded-xl border border-purple-100 space-y-2">
+          <p className="text-xs sm:text-sm text-gray-600 mb-2">
+            {isFreeEvent ? "Ticket" : `Tickets (${cart.reduce((sum, i) => sum + i.quantity, 0)} total)`}
+          </p>
+          {isFreeEvent ? (
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Ticket size={14} className="text-purple-500 flex-shrink-0" />
+                <span className="text-sm font-semibold text-gray-800">Free Admission</span>
+              </div>
+              <span className="text-sm font-bold text-emerald-600">Free</span>
+            </div>
+          ) : (
+            cart.map((item, index) => (
+              <div key={index} className="flex items-start justify-between gap-2">
+                <div className="flex items-start gap-2 flex-1 min-w-0">
+                  <Ticket size={14} className="text-purple-500 flex-shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-800 break-words">{item.ticketType}</p>
+                    <p className="text-xs text-gray-500">
+                      ₦{formatNumber(item.price)} × {item.quantity}
+                    </p>
+                  </div>
+                </div>
+                <span className="text-sm font-bold text-gray-900 whitespace-nowrap">
+                  ₦{formatNumber(item.price * item.quantity)}
+                </span>
+              </div>
+            ))
+          )}
         </div>
 
+        {/* Price Breakdown */}
         <div className="pt-4 border-t border-gray-200 space-y-2">
-          <div className="flex justify-between text-sm sm:text-base text-gray-700">
-            <span>Ticket Price</span>
-            <span className="font-semibold whitespace-nowrap">
-              {isFreeEvent ? "Free" : `₦${formatNumber(ticketPrice)}`}
-            </span>
-          </div>
+          {!isFreeEvent && (
+            <>
+              <div className="flex justify-between text-sm sm:text-base text-gray-700">
+                <span>Subtotal</span>
+                <span className="font-semibold whitespace-nowrap">₦{formatNumber(subtotal)}</span>
+              </div>
+
+              <div className="flex justify-between text-sm sm:text-base text-gray-700">
+                <span>VAT</span>
+                <span className="font-semibold whitespace-nowrap">₦{formatNumber(totalVat)}</span>
+              </div>
+            </>
+          )}
 
           {discountData && !isFreeEvent && (
             <div className="flex justify-between text-sm sm:text-base text-green-600 font-medium">
@@ -71,20 +114,13 @@ export default function OrderSummary({
             </div>
           )}
 
-          {!isFreeEvent && (
-            <div className="flex justify-between text-sm sm:text-base text-gray-700">
-              <span>VAT</span>
-              <span className="font-semibold whitespace-nowrap">₦{formatNumber(vatFee)}</span>
-            </div>
-          )}
-
           <div
             className="flex justify-between pt-3 border-t border-gray-300 text-base sm:text-lg font-bold"
             style={{ color: "#6b2fa5" }}
           >
             <span>Total Amount</span>
             <span className="whitespace-nowrap">
-              {isFreeEvent ? "Free" : `₦${formatNumber(totalAmount)}`}
+              {isFreeEvent ? "Free" : `₦${formatNumber(computedTotal)}`}
             </span>
           </div>
         </div>

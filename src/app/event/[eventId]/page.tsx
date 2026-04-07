@@ -67,7 +67,7 @@ async function fetchEventData(eventId: string): Promise<EventType | null> {
       stopDate: d?.stopDate,
       ticketsSold: d?.ticketsSold || 0,
       likeCount: d?.likeCount || 0,
-      createdBy: d?.createdBy || "",
+      createdBy: d?.organizerId || "",
       allowAgents: d?.allowAgents || false,
     }
   } catch (error) {
@@ -76,10 +76,11 @@ async function fetchEventData(eventId: string): Promise<EventType | null> {
   }
 }
 
+
 export async function generateMetadata({
   params,
 }: {
-  params: Promise<{ creatorId: string; eventId: string }>
+  params: Promise<{ createdBy: string; eventId: string }>
 }): Promise<Metadata> {
   try {
     const { eventId } = await params
@@ -152,12 +153,14 @@ export async function generateMetadata({
 export default async function EventPage({
   params,
 }: {
-  params: Promise<{ creatorId: string; eventId: string }>
+  params: Promise<{ createdBy: string; eventId: string }>
 }) {
-  const { creatorId, eventId } = await params
+  const { createdBy, eventId } = await params
 
-  // SSR fetch — no creatorId needed anymore (flat path)
+  // SSR fetch — no createdBy needed anymore (flat path)
   const eventData = await fetchEventData(eventId)
 
-  return <ClientPage params={{ creatorId, eventId }} initialEventData={eventData} />
+  // console.log("Fetched event data for SSR:", eventData)
+
+  return <ClientPage params={{ createdBy, eventId }} initialEventData={eventData} />
 }

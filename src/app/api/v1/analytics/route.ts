@@ -25,7 +25,11 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { ticketPrice, ticketId, eventId, timestamp } = body;
+
+    // ticketId is used as idempotency key (first ticketId of the batch, passed from ticket.js)
+    // ticketCount is the total number of tickets in this order (defaults to 1 for backwards compat)
+    // ticketPrice is the total order value (totalAmount from the reference)
+    const { ticketPrice, ticketId, ticketCount, eventId, timestamp } = body;
 
     // ── Validation ────────────────────────────────────────────────
     if (!ticketPrice || !ticketId) {
@@ -39,8 +43,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const price = Number(ticketPrice);
-    if (isNaN(price) || price < 0) {
+    const totalRevenue = Number(ticketPrice);
+    if (isNaN(totalRevenue) || totalRevenue < 0) {
       return NextResponse.json(
         {
           error: "Bad Request",
@@ -51,6 +55,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // How many seats were sold in this order — default to 1 for backwards compatibility
+    const qty = Math.max(1, Number(ticketCount) || 1);
+
     // ── Nigerian time (WAT = UTC+1) ───────────────────────────────
     const now = timestamp ? new Date(timestamp) : new Date();
     const nigerianTime = new Date(now.getTime() + 60 * 60 * 1000);
@@ -60,6 +67,7 @@ export async function POST(request: NextRequest) {
     const day   = `${year}-${String(nigerianTime.getUTCMonth() + 1).padStart(2, "0")}-${String(nigerianTime.getUTCDate()).padStart(2, "0")}`;
 
     // ── Idempotency check ─────────────────────────────────────────
+    // ticketId here is the first ticket of the batch — unique per order call from ticket.js
     const processedRef = adminDb
       .collection("admin")
       .doc("analytics")
@@ -84,10 +92,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ── Prepare analytics update ──────────────────────────────────
+    // ── Analytics update — increment by real order quantities ─────
     const updateData = {
-      ticketsSold: FieldValue.increment(1),
-      totalRevenue: FieldValue.increment(price),
+      ticketsSold: FieldValue.increment(qty),
+      totalRevenue: FieldValue.increment(totalRevenue),
       lastUpdated: FieldValue.serverTimestamp(),
     };
 
@@ -101,22 +109,22 @@ export async function POST(request: NextRequest) {
     batch.set(monthlyRef, updateData, { merge: true });
     batch.set(yearlyRef,  updateData, { merge: true });
 
-    // ── Commit + mark as processed (atomic relative to each other) ──
     await batch.commit();
 
-    // Mark after successful commit → at-least-once + deduplication
+    // Mark as processed after successful commit (at-least-once + deduplication)
     await processedRef.set({
       processedAt: FieldValue.serverTimestamp(),
-      ticketPrice: price,
+      ticketPrice: totalRevenue,
+      ticketCount: qty,
       eventId: eventId || null,
       day,
       month,
       year,
-      createdAt: now.toISOString(),        // original receive time
+      createdAt: now.toISOString(),
       nigerianTime: nigerianTime.toISOString(),
     });
 
-    console.log(`[Analytics] Updated successfully for ticketId: ${ticketId}`);
+    console.log(`[Analytics] Updated — ticketId: ${ticketId}, qty: ${qty}, revenue: ${totalRevenue}`);
 
     return NextResponse.json(
       {
@@ -124,7 +132,8 @@ export async function POST(request: NextRequest) {
         message: "Analytics updated successfully",
         data: {
           ticketId,
-          ticketPrice: price,
+          ticketCount: qty,
+          ticketPrice: totalRevenue,
           day,
           month,
           year,

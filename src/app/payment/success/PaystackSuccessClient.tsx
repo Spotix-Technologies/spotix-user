@@ -10,17 +10,17 @@ import Footer from "@/components/footer"
 interface TicketData {
   success: boolean
   message: string
-  ticketId: string
+  // Multi-ticket fields (new shape)
+  ticketIds: string[]
+  totalTickets: number
   ticketReference: string
-  docId: string
   eventId: string
   eventName: string
-  ticketType: string
-  ticketPrice: number
   totalAmount: number
-  userData: {
+  buyerInfo: {
     fullName: string
     email: string
+    isGuest: boolean
   }
   eventDetails: {
     eventVenue: string
@@ -59,15 +59,15 @@ function PaymentSuccessContent() {
         console.log("Generating ticket for reference:", reference)
 
         // Get stored payment data to determine if ticket is free
-        const storedPaymentData = sessionStorage.getItem("spotix_payment_data") || 
-                                   sessionStorage.getItem("paystack_payment_data")
-        
+        const storedPaymentData =
+          sessionStorage.getItem("spotix_payment_data") ||
+          sessionStorage.getItem("paystack_payment_data")
+
         let isFreeTicket = false
-        
+
         if (storedPaymentData) {
           try {
             const paymentData = JSON.parse(storedPaymentData)
-            // Check if ticket price is 0 (free ticket)
             isFreeTicket = paymentData.ticketPrice === 0
             console.log("Ticket price:", paymentData.ticketPrice, "Is free:", isFreeTicket)
           } catch (parseError) {
@@ -75,7 +75,6 @@ function PaymentSuccessContent() {
           }
         }
 
-        // Call ticket generation API
         const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL
 
         if (!BACKEND_URL) {
@@ -84,16 +83,15 @@ function PaymentSuccessContent() {
           return
         }
 
-        // Use different endpoint based on ticket price
-        // Free tickets use /v1/ticket2, paid tickets use /v1/ticket
-        const ticketEndpoint = isFreeTicket ? `${BACKEND_URL}/v1/ticket/free` : `${BACKEND_URL}/v1/ticket`
+        const ticketEndpoint = isFreeTicket
+          ? `${BACKEND_URL}/v1/ticket/free`
+          : `${BACKEND_URL}/v1/ticket`
+
         console.log("Calling ticket endpoint:", ticketEndpoint)
 
         const response = await fetch(ticketEndpoint, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ reference }),
         })
 
@@ -108,11 +106,8 @@ function PaymentSuccessContent() {
         if (data.success) {
           setTicketData(data)
           setShowConfetti(true)
-          
-          // Stop confetti after 5 seconds
           setTimeout(() => setShowConfetti(false), 5000)
 
-          // Clear any stored payment data
           sessionStorage.removeItem("paystack_payment_data")
           sessionStorage.removeItem("spotix_payment_data")
           sessionStorage.removeItem("selected_referral_code")
@@ -131,19 +126,15 @@ function PaymentSuccessContent() {
     generateTicket()
   }, [searchParams])
 
+  // For multi-ticket purchases, "View Ticket" links to the first ticket
   const handleViewTicket = () => {
-    if (ticketData) {
-      router.push(`/ticket?id=${ticketData.ticketId}`)
+    if (ticketData?.ticketIds?.length) {
+      router.push(`/ticket?id=${ticketData.ticketIds[0]}`)
     }
   }
 
-  const handleGoHome = () => {
-    router.push("/home")
-  }
-
-  const handleViewTickets = () => {
-    router.push("/ticket-history")
-  }
+  const handleGoHome = () => router.push("/home")
+  const handleViewTickets = () => router.push("/ticket-history")
 
   if (loading) {
     return (
@@ -197,18 +188,18 @@ function PaymentSuccessContent() {
             </button>
           </div>
           <p className="text-center text-sm text-gray-500 mt-6">
-            If you need assistance, please contact support with reference: {searchParams.get("reference")}
+            If you need assistance, please contact support with reference:{" "}
+            {searchParams.get("reference")}
           </p>
         </div>
       </div>
     )
   }
 
-  if (!ticketData) {
-    return null
-  }
+  if (!ticketData) return null
 
-  const isFreeTicket = ticketData.ticketPrice === 0
+  const isFreeTicket = ticketData.totalAmount === 0
+  const isMultiTicket = ticketData.totalTickets > 1
 
   return (
     <>
@@ -223,14 +214,9 @@ function PaymentSuccessContent() {
                 style={{
                   left: `${Math.random() * 100}%`,
                   animationDelay: `${Math.random() * 3}s`,
-                  backgroundColor: [
-                    "#6b2fa5",
-                    "#8b5cf6",
-                    "#a78bfa",
-                    "#c4b5fd",
-                    "#fbbf24",
-                    "#34d399",
-                  ][Math.floor(Math.random() * 6)],
+                  backgroundColor: ["#6b2fa5", "#8b5cf6", "#a78bfa", "#c4b5fd", "#fbbf24", "#34d399"][
+                    Math.floor(Math.random() * 6)
+                  ],
                 }}
               />
             ))}
@@ -240,6 +226,7 @@ function PaymentSuccessContent() {
 
       <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-purple-50 py-12 px-4">
         <div className="max-w-3xl mx-auto">
+
           {/* Success Header */}
           <div className="bg-white rounded-2xl shadow-2xl p-8 mb-6 text-center">
             <div className="flex justify-center mb-4">
@@ -250,7 +237,11 @@ function PaymentSuccessContent() {
             <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">
               {isFreeTicket ? "Registration Successful!" : "Payment Successful!"}
             </h1>
-            <p className="text-lg text-gray-600">Your ticket has been generated</p>
+            <p className="text-lg text-gray-600">
+              {isMultiTicket
+                ? `${ticketData.totalTickets} tickets have been generated`
+                : "Your ticket has been generated"}
+            </p>
           </div>
 
           {/* Ticket Details Card */}
@@ -268,17 +259,32 @@ function PaymentSuccessContent() {
 
             {/* Ticket Body */}
             <div className="p-6 space-y-6">
-              {/* Ticket ID */}
+
+              {/* Ticket ID(s) */}
               <div className="bg-gradient-to-r from-purple-50 to-purple-100 rounded-xl p-4 border-2 border-purple-200">
-                <p className="text-sm text-purple-700 font-medium mb-1">Ticket ID</p>
-                <p className="text-2xl font-bold text-purple-900 font-mono">{ticketData.ticketId}</p>
+                <p className="text-sm text-purple-700 font-medium mb-2">
+                  {isMultiTicket ? `Ticket IDs (${ticketData.totalTickets})` : "Ticket ID"}
+                </p>
+                {isMultiTicket ? (
+                  <div className="space-y-1">
+                    {ticketData.ticketIds.map((id, idx) => (
+                      <p key={id} className="text-sm font-bold text-purple-900 font-mono">
+                        {idx + 1}. {id}
+                      </p>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-2xl font-bold text-purple-900 font-mono">
+                    {ticketData.ticketIds[0]}
+                  </p>
+                )}
               </div>
 
               {/* Event Details */}
               <div className="grid md:grid-cols-2 gap-4">
                 <div>
-                  <p className="text-sm text-gray-600 mb-1">Ticket Type</p>
-                  <p className="text-lg font-bold text-gray-900">{ticketData.ticketType}</p>
+                  <p className="text-sm text-gray-600 mb-1">Tickets Purchased</p>
+                  <p className="text-lg font-bold text-gray-900">{ticketData.totalTickets}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-600 mb-1">Amount Paid</p>
@@ -289,7 +295,9 @@ function PaymentSuccessContent() {
                 <div>
                   <p className="text-sm text-gray-600 mb-1">Date</p>
                   <p className="text-lg font-semibold text-gray-900">
-                    {new Date(ticketData.eventDetails.eventDate).toLocaleDateString()}
+                    {ticketData.eventDetails.eventDate
+                      ? new Date(ticketData.eventDetails.eventDate).toLocaleDateString()
+                      : "TBA"}
                   </p>
                 </div>
                 <div>
@@ -300,22 +308,35 @@ function PaymentSuccessContent() {
                 </div>
                 <div className="md:col-span-2">
                   <p className="text-sm text-gray-600 mb-1">Venue</p>
-                  <p className="text-lg font-semibold text-gray-900">{ticketData.eventDetails.eventVenue}</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {ticketData.eventDetails.eventVenue}
+                  </p>
                 </div>
               </div>
 
-              {/* Attendee Info */}
+              {/* Attendee Info — uses buyerInfo from new response shape */}
               <div className="border-t border-gray-200 pt-6">
                 <h3 className="text-lg font-bold text-gray-900 mb-4">Attendee Information</h3>
                 <div className="grid md:grid-cols-2 gap-4">
                   <div>
                     <p className="text-sm text-gray-600 mb-1">Name</p>
-                    <p className="text-lg font-semibold text-gray-900">{ticketData.userData.fullName}</p>
+                    <p className="text-lg font-semibold text-gray-900">
+                      {ticketData.buyerInfo.fullName || "—"}
+                    </p>
                   </div>
                   <div>
                     <p className="text-sm text-gray-600 mb-1">Email</p>
-                    <p className="text-lg font-semibold text-gray-900">{ticketData.userData.email}</p>
+                    <p className="text-lg font-semibold text-gray-900">
+                      {ticketData.buyerInfo.email}
+                    </p>
                   </div>
+                  {ticketData.buyerInfo.isGuest && (
+                    <div className="md:col-span-2">
+                      <span className="px-3 py-1 bg-gray-100 text-gray-700 text-sm font-semibold rounded-full">
+                        👤 Guest Purchase
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -345,7 +366,9 @@ function PaymentSuccessContent() {
                 <p className="text-sm text-gray-600 mb-1">
                   {isFreeTicket ? "Registration Reference" : "Payment Reference"}
                 </p>
-                <p className="text-sm font-mono text-gray-900 break-all">{ticketData.ticketReference}</p>
+                <p className="text-sm font-mono text-gray-900 break-all">
+                  {ticketData.ticketReference}
+                </p>
               </div>
             </div>
           </div>
@@ -357,7 +380,7 @@ function PaymentSuccessContent() {
               className="w-full py-4 px-6 bg-gradient-to-r from-purple-600 to-purple-800 text-white font-bold rounded-xl hover:from-purple-700 hover:to-purple-900 transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
             >
               <Ticket size={20} />
-              View Ticket Details
+              {isMultiTicket ? "View First Ticket" : "View Ticket Details"}
               <ArrowRight size={20} />
             </button>
             <button
@@ -380,11 +403,13 @@ function PaymentSuccessContent() {
                 <ul className="space-y-2 text-blue-800">
                   <li className="flex items-start gap-2">
                     <span className="text-blue-600 mt-1">✓</span>
-                    <span>A confirmation email has been sent to {ticketData.userData.email}</span>
+                    <span>
+                      A confirmation email has been sent to {ticketData.buyerInfo.email}
+                    </span>
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-blue-600 mt-1">✓</span>
-                    <span>Your ticket is now available in your ticket history</span>
+                    <span>Your ticket{isMultiTicket ? "s are" : " is"} now available in your ticket history</span>
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-blue-600 mt-1">✓</span>
@@ -392,7 +417,9 @@ function PaymentSuccessContent() {
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-blue-600 mt-1">✓</span>
-                    <span>For questions, contact: {ticketData.eventDetails.bookerEmail}</span>
+                    <span>
+                      For questions, contact: {ticketData.eventDetails.bookerEmail}
+                    </span>
                   </li>
                 </ul>
               </div>
@@ -427,12 +454,8 @@ function PaymentSuccessContent() {
         }
 
         @keyframes bounce {
-          0%, 100% {
-            transform: translateY(0);
-          }
-          50% {
-            transform: translateY(-10px);
-          }
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-10px); }
         }
 
         .animate-bounce {
@@ -443,7 +466,6 @@ function PaymentSuccessContent() {
   )
 }
 
-// Loading fallback component
 function LoadingFallback() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-purple-50 flex items-center justify-center p-4">
@@ -456,7 +478,6 @@ function LoadingFallback() {
   )
 }
 
-// Main page component with Suspense wrapper
 export default function PaymentSuccessPage() {
   return (
     <>

@@ -4,30 +4,13 @@ import { auth } from "firebase-admin"
 
 export async function POST(request: NextRequest) {
   try {
-    // Verify authentication
-    const authHeader = request.headers.get("Authorization")
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const idToken = authHeader.split("Bearer ")[1]
-    let decodedToken
-    
-    try {
-      decodedToken = await auth().verifyIdToken(idToken)
-    } catch (error) {
-      return NextResponse.json({ error: "Invalid token" }, { status: 401 })
-    }
-
-    const userId = decodedToken.uid
-
-    // Parse request body
     const body = await request.json()
     const {
       eventId,
       eventCreatorId,
       ticketPrice,
-      ticketType,
+      ticketType,       // legacy single-type field (kept for backwards compat)
+      ticketTypes,      // primary: [{ type, quantity, price }]
       totalAmount,
       discountCode,
       discountData,
@@ -39,56 +22,163 @@ export async function POST(request: NextRequest) {
       eventEndDate,
       eventStart,
       eventEnd,
+      guestEmail,
+      guestFullName,
+      guestPhone,
+      // Extra fields passed from PaymentClient (stored on ref for ticket.js to use)
+      bookerName,
+      bookerEmail,
+      stopDate,
+      eventType,
+      userFullName,
+      userEmail: bodyUserEmail,
     } = body
 
-    // Validate required fields
-    if (!eventId || !eventCreatorId || ticketPrice === undefined || !ticketType || totalAmount === undefined) {
+    console.log("[create-pay-ref] Incoming body:", JSON.stringify({
+      eventId,
+      eventCreatorId,
+      ticketPrice,
+      ticketType,
+      ticketTypes,
+      totalAmount,
+      discountCode,
+      referralCode,
+      guestEmail: guestEmail || null,
+    }, null, 2))
+
+    // ── Auth — optional for guests ─────────────────────────────────────────────
+    const authHeader = request.headers.get("Authorization")
+    let userId: string | null = null
+    let userEmail: string | null = null
+
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const idToken = authHeader.split("Bearer ")[1]
+      try {
+        const decodedToken = await auth().verifyIdToken(idToken)
+        userId = decodedToken.uid
+        userEmail = decodedToken.email || null
+        console.log(`[create-pay-ref] Authenticated user: ${userId}`)
+      } catch (error) {
+        console.log("[create-pay-ref] Token verification failed — allowing guest checkout")
+      }
+    }
+
+    if (!userId && !guestEmail) {
       return NextResponse.json(
-        { error: "Missing required fields" },
+        { error: "Either authentication or guest email is required" },
         { status: 400 }
       )
     }
 
-    // Generate unique reference
+    // ── Normalise ticketTypes ──────────────────────────────────────────────────
+    // ticketTypes is the canonical field: [{ type, quantity, price }]
+    // If only the legacy ticketType string was sent, promote it to the array shape.
+    let normalisedTicketTypes: { type: string; quantity: number; price: number }[] = []
+
+    if (ticketTypes && Array.isArray(ticketTypes) && ticketTypes.length > 0) {
+      normalisedTicketTypes = ticketTypes.map((item: any) => ({
+        type: item.type || item.ticketType || "",
+        quantity: Number(item.quantity) || 1,
+        price: Number(item.price) || 0,
+      }))
+    } else if (ticketType) {
+      // Legacy fallback
+      normalisedTicketTypes = [{ type: ticketType, quantity: 1, price: Number(ticketPrice) || 0 }]
+    }
+
+    if (normalisedTicketTypes.length === 0) {
+      console.error("[create-pay-ref] No valid ticket type info found in request")
+      return NextResponse.json(
+        { error: "Missing required fields: ticketTypes array (or ticketType) is required" },
+        { status: 400 }
+      )
+    }
+
+    // Derive the primary ticketType string from the first item in the array
+    // (used for backwards-compat fields on the reference doc)
+    const primaryTicketType = normalisedTicketTypes[0].type
+
+    // Total ticket count across all types
+    const totalTicketCount = normalisedTicketTypes.reduce((sum, item) => sum + item.quantity, 0)
+
+    console.log("[create-pay-ref] Normalised ticketTypes:", JSON.stringify(normalisedTicketTypes))
+    console.log(`[create-pay-ref] primaryTicketType: ${primaryTicketType}, totalTicketCount: ${totalTicketCount}`)
+
+    // ── Validate remaining required fields ────────────────────────────────────
+    if (!eventId || !eventCreatorId || ticketPrice === undefined || totalAmount === undefined) {
+      console.error("[create-pay-ref] Missing required fields", { eventId, eventCreatorId, ticketPrice, totalAmount })
+      return NextResponse.json(
+        { error: "Missing required fields: eventId, eventCreatorId, ticketPrice, totalAmount" },
+        { status: 400 }
+      )
+    }
+
+    // ── Generate reference ────────────────────────────────────────────────────
     const timestamp = Date.now()
     const reference = `SPTX-REF-${timestamp}`
+    console.log(`[create-pay-ref] Generated reference: ${reference}`)
 
-    // Prepare metadata for Firestore
+    // ── Build Firestore document ───────────────────────────────────────────────
     const paymentReference = {
       reference,
-      userId,
+      userId: userId || null,
+      userEmail: userEmail || bodyUserEmail || guestEmail || null,
+      userFullName: userFullName || null,
       eventId,
       eventCreatorId,
       eventName: eventName || "",
       eventVenue: eventVenue || "",
+      eventType: eventType || "",
       eventDate: eventDate || "",
       eventEndDate: eventEndDate || "",
       eventStart: eventStart || "",
       eventEnd: eventEnd || "",
-      ticketPrice: Number(ticketPrice),
-      ticketType,
-      totalAmount: Number(totalAmount),
+      stopDate: stopDate || "",
+      bookerName: bookerName || "",
+      bookerEmail: bookerEmail || "",
+
+      // Canonical ticket info — ticket.js reads ticketTypes to expand into seats
+      ticketTypes: normalisedTicketTypes,
+      ticketType: primaryTicketType,          // convenience / backwards compat
+      ticketPrice: Number(ticketPrice),       // subtotal before VAT (used for display)
+      totalAmount: Number(totalAmount),       // grand total inc. VAT after discount
+      totalTicketCount,
+
       vendor: "paystack",
       status: "pending",
       paymentCreationDate: new Date().toISOString(),
       paymentCreationTimestamp: timestamp,
-      
-      // Optional fields
+
+      // Guest fields
+      ...(guestEmail && {
+        guestEmail,
+        guestFullName: guestFullName || null,
+        guestPhone: guestPhone || null,
+      }),
+
+      // Discount / referral
       discountCode: discountCode || null,
       discountData: discountData || null,
       referralCode: referralCode || null,
       referralName: referralData?.code || referralCode || null,
-      
-      // Metadata
+
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
 
-    // Store in Firestore Reference collection
+    console.log("[create-pay-ref] Writing reference doc:", JSON.stringify({
+      reference,
+      ticketTypes: normalisedTicketTypes,
+      totalAmount: paymentReference.totalAmount,
+      totalTicketCount,
+      userId: paymentReference.userId,
+      guestEmail: paymentReference.guestEmail || null,
+    }, null, 2))
+
     const referenceDocRef = adminDb.collection("Reference").doc(reference)
     await referenceDocRef.set(paymentReference)
 
-    console.log(`Payment reference created: ${reference}`)
+    console.log(`[create-pay-ref] Reference stored successfully: ${reference}`)
 
     return NextResponse.json(
       {
@@ -99,7 +189,7 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     )
   } catch (error) {
-    console.error("Error creating payment reference:", error)
+    console.error("[create-pay-ref] Unhandled error:", error)
     return NextResponse.json(
       {
         error: "Internal server error",

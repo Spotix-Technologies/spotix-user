@@ -13,12 +13,13 @@ interface PayWithPaystackProps {
   metadata: {
     eventId: string
     eventName: string
-    ticketType: string
+    ticketType?: string
     ticketPrice: number
     eventCreatorId: string
     userId: string
     discountCode?: string | null
     referralCode?: string | null
+    [key: string]: any
   }
   onSuccess: (reference: string) => void
   onClose: () => void
@@ -174,11 +175,15 @@ export default function PayWithPaystack({
               variable_name: "event_name",
               value: metadata.eventName,
             },
-            {
-              display_name: "Ticket Type",
-              variable_name: "ticket_type",
-              value: metadata.ticketType,
-            },
+            ...(metadata.ticketType
+              ? [
+                  {
+                    display_name: "Ticket Type",
+                    variable_name: "ticket_type",
+                    value: metadata.ticketType,
+                  },
+                ]
+              : []),
             {
               display_name: "Event ID",
               variable_name: "event_id",
@@ -229,8 +234,25 @@ export default function PayWithPaystack({
         },
       })
 
-      console.log("Opening Paystack iframe...")
-      handler.openIframe()
+      console.log("Handler object:", handler)
+      if (!handler) {
+        console.error("Handler is invalid")
+        setError("Failed to initialize Paystack. Please refresh and try again.")
+        return
+      }
+
+      console.log("Opening Paystack modal...")
+      // Paystack handler uses openIframe() to show the payment modal
+      if (typeof handler.openIframe === "function") {
+        handler.openIframe()
+      } else if (typeof handler.pay === "function") {
+        handler.pay()
+      } else {
+        console.error("Neither openIframe nor pay method found on handler")
+        setError("Failed to open payment modal. Please try again.")
+        return
+      }
+      console.log("Modal opened successfully")
       setPaymentInitialized(true)
     } catch (error) {
       console.error("Error initializing payment:", error)
@@ -240,27 +262,21 @@ export default function PayWithPaystack({
 
   // Auto-initialize payment when ready
   useEffect(() => {
-    console.log("Payment initialization check:", {
+    console.log("[v0] Payment initialization check:", {
       scriptLoaded,
       checkingPhone,
       phoneNumber: !!phoneNumber,
       error: !!error,
       paymentInitialized,
+      reference,
     })
 
     if (scriptLoaded && !checkingPhone && phoneNumber && !error && !paymentInitialized) {
-      console.log("All conditions met, initializing payment in 500ms...")
-      // Small delay to ensure everything is ready
-      const timer = setTimeout(() => {
-        initializePayment()
-      }, 500)
-
-      return () => {
-        console.log("Cleaning up initialization timer")
-        clearTimeout(timer)
-      }
+      console.log("[v0] All conditions met, initializing payment immediately...")
+      // Initialize immediately instead of with delay
+      initializePayment()
     }
-  }, [scriptLoaded, checkingPhone, phoneNumber, error, paymentInitialized, initializePayment])
+  }, [scriptLoaded, checkingPhone, phoneNumber, error, paymentInitialized, initializePayment, reference])
 
   if (showPhoneNumberModal) {
     return (

@@ -17,6 +17,7 @@ import Discount from "./helpers/discount"
 import Referral from "./helpers/referral"
 import PaymentMethods from "./helpers/payment-methods"
 import EventSurveyForm from "./helpers/event-survey-form"
+import GuestCheckoutForm from "./helpers/guest-checkout-form"
 
 interface PaymentData {
   eventId: string
@@ -87,15 +88,103 @@ export default function PaymentClient() {
   const [surveyResponses, setSurveyResponses] = useState<Record<string, any> | null>(null)
   const [isSurveyComplete, setIsSurveyComplete] = useState(false)
 
+  // Guest checkout state
+  const [guestFullName, setGuestFullName] = useState("")
+  const [guestEmail, setGuestEmail] = useState("")
+  const [guestPhone, setGuestPhone] = useState("")
+  const [showGuestForm, setShowGuestForm] = useState(false)
+  const [cart, setCart] = useState<any[]>([])
+
+  // Organizer state
+  const [organizerName, setOrganizerName] = useState("")
+  const [organizerEmail, setOrganizerEmail] = useState("")
+  const [organizerId, setOrganizerId] = useState("")
+
+  // Survey state for multiple tickets
+  const [surveyRequiredTickets, setSurveyRequiredTickets] = useState<Set<string>>(new Set())
+  const [checkingSurveyRequirements, setCheckingSurveyRequirements] = useState(false)
+
+  // Load cart, organizer, and guest data from localStorage (client-side only)
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedCart = JSON.parse(localStorage.getItem("spotix_cart") || "[]")
+      setCart(savedCart)
+
+      const organizer = localStorage.getItem("spotix_organizer")
+      if (organizer) {
+        try {
+          const organizerData = JSON.parse(organizer)
+          setOrganizerName(organizerData.bookername || "")
+          setOrganizerEmail(organizerData.bookeremail || "")
+          setOrganizerId(organizerData.organizerId || "")
+        } catch (error) {
+          console.error("Error parsing organizer data:", error)
+        }
+      }
+
+      // Load guest data from localStorage if it exists
+      const guestData = localStorage.getItem("spotix_guest_checkout")
+      if (guestData) {
+        try {
+          const parsed = JSON.parse(guestData)
+          setGuestFullName(parsed.guestFullName || "")
+          setGuestEmail(parsed.guestEmail || "")
+          setGuestPhone(parsed.guestPhone || "")
+        } catch (error) {
+          console.error("Error parsing guest data:", error)
+        }
+      }
+    }
+  }, [])
+
+  // Check survey requirements for all ticket types in cart
+  useEffect(() => {
+    if (!paymentData || cart.length === 0 || !userData) return
+
+    const checkAllTicketsSurveyRequirements = async () => {
+      setCheckingSurveyRequirements(true)
+      const requiredTickets = new Set<string>()
+
+      try {
+        // Check each unique ticket type in cart
+        const uniqueTicketTypes = Array.from(new Set(cart.map(item => item.ticketType)))
+
+        for (const ticketType of uniqueTicketTypes) {
+          const response = await fetch(
+            `/api/v1/survey?eventId=${paymentData.eventId}&ticketType=${encodeURIComponent(ticketType)}`
+          )
+
+          if (response.ok) {
+            const result = await response.json()
+            if (result.requiresForm) {
+              requiredTickets.add(ticketType)
+            }
+          }
+        }
+
+        setSurveyRequiredTickets(requiredTickets)
+      } catch (error) {
+        console.error("Error checking survey requirements:", error)
+      } finally {
+        setCheckingSurveyRequirements(false)
+      }
+    }
+
+    checkAllTicketsSurveyRequirements()
+  }, [paymentData, cart, userData])
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
         setUser(currentUser)
         await fetchUserData(currentUser.uid)
         await fetchWalletData(currentUser.uid)
+        // Only set loading to false after user data is fetched
+        setDataLoading(false)
       } else {
-        router.push("/auth/login")
-        return
+        // Allow guest checkout - don't force redirect
+        setUser(null)
+        // Don't set dataLoading to false here - let payment data loading handle it
       }
     })
 
@@ -109,11 +198,11 @@ export default function PaymentClient() {
       if (storedPaymentData) {
         try {
           const parsedData = JSON.parse(storedPaymentData)
-          
-          const needsEventDetails = !parsedData.eventVenue || 
-                                     !parsedData.eventType || 
-                                     !parsedData.eventDate || 
-                                     !parsedData.bookerName
+
+          const needsEventDetails = !parsedData.eventVenue ||
+            !parsedData.eventType ||
+            !parsedData.eventDate ||
+            !parsedData.bookerName
 
           if (needsEventDetails && parsedData.eventCreatorId && parsedData.eventId) {
             const completeData = await fetchEventDetails(parsedData.eventCreatorId, parsedData.eventId, parsedData)
@@ -146,10 +235,9 @@ export default function PaymentClient() {
       setDataLoading(false)
     }
 
-    if (user) {
-      loadPaymentData()
-    }
-  }, [user])
+    // Load payment data for both logged-in users and guests
+    loadPaymentData()
+  }, [])
 
   const fetchUserData = async (userId: string) => {
     try {
@@ -170,27 +258,23 @@ export default function PaymentClient() {
   }
 
   const fetchEventDetails = async (
-    creatorId: string, 
-    eventId: string, 
+    creatorId: string,
+    eventId: string,
     existingData: PaymentData
   ): Promise<PaymentData> => {
     try {
-      const eventDocRef = doc(db, "events", creatorId, "userEvents", eventId)
-      const eventDoc = await getDoc(eventDocRef)
+      // Use the new flat structure API
+      const response = await fetch(`/api/v1/event?eventId=${eventId}`)
 
-      if (eventDoc.exists()) {
-        const data = eventDoc.data()
+      if (!response.ok) {
+        console.error("Failed to fetch event details")
+        return existingData
+      }
 
-        const bookerDocRef = doc(db, "users", creatorId)
-        const bookerDoc = await getDoc(bookerDocRef)
-        let bookerName = "Event Host"
-        let bookerEmail = "support@spotix.com.ng"
+      const result = await response.json()
 
-        if (bookerDoc.exists()) {
-          const bookerData = bookerDoc.data()
-          bookerName = bookerData.bookerName || bookerData.fullName || "Event Host"
-          bookerEmail = bookerData.email || "support@spotix.com.ng"
-        }
+      if (result.success && result.data) {
+        const data = result.data
 
         return {
           ...existingData,
@@ -200,9 +284,9 @@ export default function PaymentClient() {
           eventEndDate: data.eventEndDate || existingData.eventEndDate || "",
           eventStart: data.eventStart || existingData.eventStart || "",
           eventEnd: data.eventEnd || existingData.eventEnd || "",
-          stopDate: data.enableStopDate ? data.stopDate : existingData.stopDate,
-          bookerName: bookerName,
-          bookerEmail: bookerEmail,
+          stopDate: data.stopDate || existingData.stopDate || "",
+          bookerName: data.bookerName || "Event Host",
+          bookerEmail: data.bookerEmail || "support@spotix.com.ng",
         }
       }
 
@@ -320,38 +404,47 @@ export default function PaymentClient() {
   }
 
   const createPaymentReference = async () => {
-    if (!paymentData || !user || !userData) return null
+    if (!paymentData || cart.length === 0) return null
+
+    // For guests, userData won't be set from Firestore, but we need guestEmail/guestFullName
+    // For authenticated users, userData must be set
+    if (user && !userData) return null
 
     setCreatingReference(true)
 
     try {
-      const idToken = await auth.currentUser?.getIdToken()
-      if (!idToken) {
-        throw new Error("Authentication required")
-      }
-
       const isFreeEvent = paymentData.ticketPrice === 0
+
+      // Calculate totals from cart items
+      const subtotalBeforeDiscount = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0)
+      const totalVat = cart.reduce((sum, item) => sum + ((item.vat || 0) * item.quantity), 0)
 
       let discountAmount = 0
       if (discountData && !isFreeEvent) {
         if (discountData.discountType === "percentage") {
-          discountAmount = (paymentData.ticketPrice * discountData.discountValue) / 100
+          discountAmount = (subtotalBeforeDiscount * discountData.discountValue) / 100
         } else {
           discountAmount = discountData.discountValue
         }
       }
 
-      const subtotal = paymentData.ticketPrice - discountAmount
-      const vatFee = isFreeEvent ? 0 : calculateVATFee(Number(paymentData.ticketPrice))
-      const totalAmount = subtotal + vatFee
+      const subtotal = subtotalBeforeDiscount - discountAmount
+      const totalAmount = subtotal + totalVat
 
       // Use different endpoint for free events
       const endpoint = isFreeEvent ? "/api/v1/ref/free" : "/api/v1/create-pay-ref"
 
+      // Create array of ticket types with quantities
+      const ticketTypes = cart.map(item => ({
+        type: item.ticketType,
+        quantity: item.quantity,
+        price: item.price,
+      }))
+
       const requestBody: any = {
         eventId: paymentData.eventId,
-        eventCreatorId: paymentData.eventCreatorId,
-        ticketType: paymentData.ticketType,
+        eventCreatorId: organizerId || paymentData.eventCreatorId,
+        ticketTypes: ticketTypes,
         referralCode: referralData?.code || null,
         referralData: referralData || null,
         eventName: paymentData.eventName,
@@ -362,27 +455,66 @@ export default function PaymentClient() {
         eventStart: paymentData.eventStart || null,
         eventEnd: paymentData.eventEnd || null,
         stopDate: paymentData.stopDate || null,
-        bookerName: paymentData.bookerName || null,
-        bookerEmail: paymentData.bookerEmail || null,
-        userFullName: userData.fullName || "Valued Customer",
-        userEmail: userData.email,
+        bookerName: organizerName || paymentData.bookerName || null,
+        bookerEmail: organizerEmail || paymentData.bookerEmail || null,
+      }
+
+      // For authenticated users, include user data
+      if (user && userData) {
+        requestBody.userFullName = userData.fullName || "Valued Customer"
+        requestBody.userEmail = userData.email
+      }
+
+      // For guests, include guest data
+      if (!user) {
+        // Use state variables first, but fall back to localStorage if empty
+        let finalGuestEmail = guestEmail
+        let finalGuestFullName = guestFullName
+        let finalGuestPhone = guestPhone
+
+        // If state variables are empty, try to load from localStorage
+        if (!finalGuestEmail || !finalGuestFullName) {
+          const savedGuestData = localStorage.getItem("spotix_guest_checkout")
+          if (savedGuestData) {
+            try {
+              const parsed = JSON.parse(savedGuestData)
+              finalGuestEmail = finalGuestEmail || parsed.guestEmail
+              finalGuestFullName = finalGuestFullName || parsed.guestFullName
+              finalGuestPhone = finalGuestPhone || parsed.guestPhone
+            } catch (error) {
+              console.error("Error parsing guest data from localStorage:", error)
+            }
+          }
+        }
+
+        requestBody.guestEmail = finalGuestEmail
+        requestBody.guestFullName = finalGuestFullName
+        requestBody.guestPhone = finalGuestPhone
       }
 
       // Add payment-specific fields only for paid events
       if (!isFreeEvent) {
-        requestBody.ticketPrice = paymentData.ticketPrice
+        requestBody.ticketPrice = subtotalBeforeDiscount
         requestBody.totalAmount = totalAmount
-        requestBody.transactionFee = vatFee
+        requestBody.transactionFee = totalVat
+        requestBody.discountAmount = discountAmount
         requestBody.discountCode = discountData?.code || null
         requestBody.discountData = discountData || null
       }
 
+      const headers: any = {
+        "Content-Type": "application/json",
+      }
+
+      // Only add auth header if user is authenticated
+      if (user && auth.currentUser) {
+        const idToken = await auth.currentUser.getIdToken()
+        headers.Authorization = `Bearer ${idToken}`
+      }
+
       const response = await fetch(endpoint, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${idToken}`,
-        },
+        headers,
         body: JSON.stringify(requestBody),
       })
 
@@ -408,8 +540,9 @@ export default function PaymentClient() {
 
     const isFreeEvent = paymentData.ticketPrice === 0
 
-    // Check if survey is complete (if required)
-    if (!isSurveyComplete && surveyResponses === null) {
+    // Check if survey is complete (only if a survey is actually required for the tickets)
+    const hasSurveyRequired = surveyRequiredTickets.size > 0
+    if (hasSurveyRequired && !isSurveyComplete && surveyResponses === null) {
       alert("Please complete the event registration form before proceeding.")
       return
     }
@@ -422,6 +555,8 @@ export default function PaymentClient() {
       // Submit survey responses if they exist
       if (surveyResponses && Object.keys(surveyResponses).length > 0) {
         try {
+          // Use first ticket type from cart if available
+          const primaryTicketType = cart.length > 0 ? cart[0].ticketType : paymentData.ticketType
           await fetch("/api/v1/survey/response", {
             method: "POST",
             headers: {
@@ -434,7 +569,7 @@ export default function PaymentClient() {
               attendeeInfo: {
                 fullName: userData.fullName,
                 email: userData.email,
-                ticketType: paymentData.ticketType,
+                ticketType: primaryTicketType,
               },
             }),
           })
@@ -494,7 +629,7 @@ export default function PaymentClient() {
             attendeeInfo: {
               fullName: userData.fullName,
               email: userData.email,
-              ticketType: paymentData.ticketType,
+              ticketType: cart.length > 0 ? cart[0].ticketType : paymentData.ticketType,
             },
           }),
         })
@@ -514,12 +649,14 @@ export default function PaymentClient() {
     } else {
       sessionStorage.setItem("spotix_payment_data", JSON.stringify(paymentDataWithExtras))
 
+      // Calculate total from cart
+      const totalFromCart = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0)
       const params = new URLSearchParams({
         eventId: paymentData.eventId,
         eventName: paymentData.eventName,
-        ticketType: paymentData.ticketType,
-        ticketPrice: paymentData.ticketPrice.toString(),
-        eventCreatorId: paymentData.eventCreatorId,
+        ticketPrice: totalFromCart.toString(),
+        eventCreatorId: organizerId || paymentData.eventCreatorId,
+        cart: JSON.stringify(cart),
       })
 
       switch (selectedMethod) {
@@ -544,6 +681,36 @@ export default function PaymentClient() {
   const handlePaystackClose = () => {
     setShowPaystackModal(false)
     setPaystackReference(null)
+  }
+
+  const handleGuestSubmit = (fullName: string, email: string, phone: string) => {
+    // Set guest user data
+    setUserData({
+      fullName,
+      username: fullName.split(" ")[0],
+      email,
+    })
+    // Also set guest state variables for API call
+    setGuestFullName(fullName)
+    setGuestEmail(email)
+    setGuestPhone(phone)
+
+    // Persist guest data to localStorage
+    if (typeof window !== "undefined") {
+      localStorage.setItem("spotix_guest_checkout", JSON.stringify({
+        guestFullName: fullName,
+        guestEmail: email,
+        guestPhone: phone,
+      }))
+    }
+
+    setShowGuestForm(false)
+  }
+
+  const handleShowSignIn = () => {
+    // Redirect to sign in page with return_to parameter
+    const returnTo = `/payment?from_guest_checkout=true`
+    router.push(`/auth/login?return_to=${encodeURIComponent(returnTo)}`)
   }
 
   if (dataLoading) {
@@ -582,20 +749,34 @@ export default function PaymentClient() {
     )
   }
 
-  const isFreeEvent = paymentData.ticketPrice === 0
-  const vatFee = isFreeEvent ? 0 : calculateVATFee(Number(paymentData.ticketPrice))
-
-  let discountAmount = 0
-  if (discountData && !isFreeEvent) {
-    if (discountData.discountType === "percentage") {
-      discountAmount = (paymentData.ticketPrice * discountData.discountValue) / 100
-    } else {
-      discountAmount = discountData.discountValue
-    }
+  // Show guest form if user is not authenticated and we have payment data
+  if (!user && paymentData && !userData) {
+    return (
+      <GuestCheckoutForm
+        onSubmitGuest={handleGuestSubmit}
+        onShowSignIn={handleShowSignIn}
+        isLoading={dataLoading}
+      />
+    )
   }
 
-  const subtotal = paymentData.ticketPrice - discountAmount
-  const totalAmount = subtotal + vatFee
+// AFTER
+const isFreeEvent = paymentData.ticketPrice === 0
+
+const cartSubtotalBeforeDiscount = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0)
+const cartTotalVat = cart.reduce((sum, item) => sum + ((item.vat || 0) * item.quantity), 0)
+
+let discountAmount = 0
+if (discountData && !isFreeEvent) {
+  if (discountData.discountType === "percentage") {
+    discountAmount = (cartSubtotalBeforeDiscount * discountData.discountValue) / 100
+  } else {
+    discountAmount = discountData.discountValue
+  }
+}
+
+const cartSubtotal = cartSubtotalBeforeDiscount - discountAmount
+const totalAmount = cartSubtotal + cartTotalVat
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-purple-50 flex flex-col">
@@ -632,12 +813,10 @@ export default function PaymentClient() {
             <div className="space-y-4 sm:space-y-6 w-full">
               <OrderSummary
                 eventName={paymentData.eventName}
-                ticketType={paymentData.ticketType}
-                ticketPrice={paymentData.ticketPrice}
-                vatFee={vatFee}
-                discountAmount={discountAmount}
+                cart={cart}
+                discountAmount={discountAmount ?? 0}
                 discountData={discountData}
-                totalAmount={totalAmount}
+                // totalAmount={totalAmount ?? 0}
                 isFreeEvent={isFreeEvent}
               />
 
@@ -667,20 +846,26 @@ export default function PaymentClient() {
               />
 
               {/* Event Survey Form */}
-              {paymentData && userData && (
-                <EventSurveyForm
-                  userId={paymentData.eventCreatorId}
-                  eventId={paymentData.eventId}
-                  ticketType={paymentData.ticketType}
-                  userEmail={userData.email}
-                  onFormComplete={(responses) => {
-                    setSurveyResponses(responses)
-                    setIsSurveyComplete(true)
-                  }}
-                  onFormIncomplete={() => {
-                    setIsSurveyComplete(false)
-                  }}
-                />
+              {paymentData && userData && cart.length > 0 && surveyRequiredTickets.size > 0 && (
+                <div className="space-y-4">
+                  <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
+                    <p className="text-sm font-semibold text-blue-900">
+                      One or more of the tickets you selected requires you to fill a form
+                    </p>
+                  </div>
+                  <EventSurveyForm
+                    eventId={paymentData.eventId}
+                    ticketType={cart[0].ticketType}
+                    userEmail={userData.email}
+                    onFormComplete={(responses) => {
+                      setSurveyResponses(responses)
+                      setIsSurveyComplete(true)
+                    }}
+                    onFormIncomplete={() => {
+                      setIsSurveyComplete(false)
+                    }}
+                  />
+                </div>
               )}
             </div>
 
@@ -692,8 +877,11 @@ export default function PaymentClient() {
                 isFreeEvent={isFreeEvent}
                 creatingReference={creatingReference}
                 isSurveyComplete={isSurveyComplete}
+                isSurveyRequired={surveyRequiredTickets.size > 0}
+                isGuest={!user}
                 onSelectMethod={handlePaymentMethodSelect}
                 onProceed={handleProceedPayment}
+                onSignIn={handleShowSignIn}
               />
             </div>
           </div>
@@ -709,9 +897,9 @@ export default function PaymentClient() {
           metadata={{
             eventId: paymentData.eventId,
             eventName: paymentData.eventName,
-            ticketType: paymentData.ticketType,
             ticketPrice: paymentData.ticketPrice,
-            eventCreatorId: paymentData.eventCreatorId,
+            cart: JSON.stringify(cart),
+            eventCreatorId: organizerId || paymentData.eventCreatorId,
             userId: user.uid,
             discountCode: discountData?.code || null,
             referralCode: referralData?.code || null,

@@ -4,22 +4,19 @@ import { adminDb } from "@/app/lib/firebase-admin"
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const userId = searchParams.get("userId")
     const eventId = searchParams.get("eventId")
     const ticketType = searchParams.get("ticketType")
 
-    if (!userId || !eventId || !ticketType) {
+    if (!eventId || !ticketType) {
       return NextResponse.json(
-        { error: "Missing required parameters: userId, eventId, ticketType" },
+        { error: "Missing required parameters: eventId, ticketType" },
         { status: 400 },
       )
     }
 
-    // Get questions
+    // Get questions - using flat structure with eventId only
     const questionsCollectionRef = adminDb
       .collection("events")
-      .doc(userId)
-      .collection("userEvents")
       .doc(eventId)
       .collection("questions")
 
@@ -43,8 +40,6 @@ export async function GET(request: NextRequest) {
     // Get ticket settings
     const settingsRef = adminDb
       .collection("events")
-      .doc(userId)
-      .collection("userEvents")
       .doc(eventId)
       .collection("formSettings")
       .doc("ticketSettings")
@@ -62,7 +57,7 @@ export async function GET(request: NextRequest) {
       questions: requiresForm ? questions : [],
     })
   } catch (error) {
-    console.error("Error fetching user survey:", error)
+    console.error("Error fetching survey:", error)
     return NextResponse.json({ error: "Failed to fetch survey" }, { status: 500 })
   }
 }

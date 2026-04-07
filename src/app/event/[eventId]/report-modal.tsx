@@ -12,7 +12,7 @@ interface ReportModalProps {
   isOpen: boolean
   onClose: () => void
   eventId: string
-  creatorId: string
+  createdBy: string
   eventName: string
 }
 
@@ -49,7 +49,7 @@ const ALLOWED_FILE_TYPES = {
   document: ["application/pdf", "text/plain"],
 }
 
-export function ReportModal({ isOpen, onClose, eventId, creatorId, eventName }: ReportModalProps) {
+export function ReportModal({ isOpen, onClose, eventId, createdBy, eventName }: ReportModalProps) {
   const [topic, setTopic] = useState<ReportTopic>("Event doesn't exist")
   const [heading, setHeading] = useState("")
   const [files, setFiles] = useState<File[]>([])
@@ -190,7 +190,7 @@ export function ReportModal({ isOpen, onClose, eventId, creatorId, eventName }: 
       }
 
       // Add report to Firestore
-      const reportsRef = collection(db, "reports", creatorId, "events", eventId, "reports")
+      const reportsRef = collection(db, "reports", createdBy, "events", eventId, "reports")
 
       await addDoc(reportsRef, {
         reporterUid: user.uid,

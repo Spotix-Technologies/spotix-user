@@ -13,7 +13,6 @@ interface Question {
 }
 
 interface EventSurveyFormProps {
-  userId: string
   eventId: string
   ticketType: string
   userEmail: string
@@ -22,7 +21,6 @@ interface EventSurveyFormProps {
 }
 
 export default function EventSurveyForm({
-  userId,
   eventId,
   ticketType,
   userEmail,
@@ -38,7 +36,7 @@ export default function EventSurveyForm({
 
   useEffect(() => {
     fetchSurvey()
-  }, [userId, eventId, ticketType])
+  }, [eventId, ticketType])
 
   useEffect(() => {
     // Validate form whenever responses change
@@ -58,7 +56,7 @@ export default function EventSurveyForm({
     try {
       setLoading(true)
       const response = await fetch(
-        `/api/v1/survey?userId=${userId}&eventId=${eventId}&ticketType=${encodeURIComponent(ticketType)}`,
+        `/api/v1/survey?eventId=${eventId}&ticketType=${encodeURIComponent(ticketType)}`,
       )
       const data = await response.json()
 

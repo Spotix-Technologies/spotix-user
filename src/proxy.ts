@@ -47,6 +47,7 @@ const PUBLIC_AUTH_ROUTES = new Set([
   "/auth/login",
   "/auth/signup",
   "/auth/forgot-password",
+  "/payment"
 ]);
 
 /**
@@ -54,7 +55,6 @@ const PUBLIC_AUTH_ROUTES = new Set([
  * (including sub-paths) requires authentication.
  */
 const PROTECTED_PREFIXES = [
-  "/payment",
   "/ticket-history",
   "/profile",
   "/Referrals",
@@ -91,7 +91,8 @@ export async function proxy(request: NextRequest) {
   if (isPublicAuthRoute(pathname)) {
     // Already authenticated → redirect to home, no point showing login/signup
     if (payload) {
-      return NextResponse.redirect(new URL("/home", request.url));
+      return NextResponse.redirect(new URL("/payment", request.url));
+      // return NextResponse.redirect(new URL("/home", request.url));
     }
     return NextResponse.next();
   }
@@ -108,7 +109,7 @@ export async function proxy(request: NextRequest) {
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set("x-user-id", payload.uid);
     requestHeaders.set("x-user-email", payload.email);
-    requestHeaders.set("x-user-is-booker", String(payload.isBooker));
+    // requestHeaders.set("x-user-is-booker", String(payload.isBooker));
     requestHeaders.set("x-device-id", payload.deviceId);
 
     return NextResponse.next({ request: { headers: requestHeaders } });
@@ -121,7 +122,7 @@ export async function proxy(request: NextRequest) {
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set("x-user-id", payload.uid);
     requestHeaders.set("x-user-email", payload.email);
-    requestHeaders.set("x-user-is-booker", String(payload.isBooker));
+    // requestHeaders.set("x-user-is-booker", String(payload.isBooker));
     requestHeaders.set("x-device-id", payload.deviceId);
     return NextResponse.next({ request: { headers: requestHeaders } });
   }

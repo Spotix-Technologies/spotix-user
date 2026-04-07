@@ -69,7 +69,7 @@ export async function GET() {
       .limit(15)
       .get()
 
-    console.log(`[home] Total docs scanned: ${eventsSnapshot.size}`)
+    // console.log(`[home] Total docs scanned: ${eventsSnapshot.size}`)
 
     const events: HomeEvent[] = []
 
@@ -77,22 +77,22 @@ export async function GET() {
       const data = doc.data()
 
       if (data.eventGroup === true) {
-        console.log(`[home] Doc ${doc.id} — SKIPPED (eventGroup)`)
+        // console.log(`[home] Doc ${doc.id} — SKIPPED (eventGroup)`)
         return
       }
 
       const status = data.status ?? "active"
       if (status === "inactive" || status === "cancelled") {
-        console.log(`[home] Doc ${doc.id} — SKIPPED (status: ${status})`)
+        // console.log(`[home] Doc ${doc.id} — SKIPPED (status: ${status})`)
         return
       }
 
       if (data.suspended === true) {
-        console.log(`[home] Doc ${doc.id} — SKIPPED (suspended)`)
+        // console.log(`[home] Doc ${doc.id} — SKIPPED (suspended)`)
         return
       }
 
-      console.log(`[home] Doc ${doc.id} — INCLUDED as "${data.eventName}" | date: "${data.eventDate}"`)
+      // console.log(`[home] Doc ${doc.id} — INCLUDED as "${data.eventName}" | date: "${data.eventDate}"`)
 
       events.push({
         eventId: doc.id,
@@ -105,11 +105,11 @@ export async function GET() {
       })
     })
 
-    console.log(`[home] Events after filtering: ${events.length}`)
+    // console.log(`[home] Events after filtering: ${events.length}`)
 
     const categorized = categorizeEvents(events)
 
-    console.log(`[home] today: ${categorized.today.length} | upcoming: ${categorized.upcoming.length} | past: ${categorized.past.length}`)
+    // console.log(`[home] today: ${categorized.today.length} | upcoming: ${categorized.upcoming.length} | past: ${categorized.past.length}`)
 
     // Only fetch the fields we need from collections
     const collectionsSnapshot = await adminDb
@@ -118,7 +118,7 @@ export async function GET() {
       .limit(15)
       .get()
 
-    console.log(`[home] EventCollections docs scanned: ${collectionsSnapshot.size}`)
+    // console.log(`[home] EventCollections docs scanned: ${collectionsSnapshot.size}`)
 
     const collections: EventCollection[] = []
 
@@ -136,7 +136,7 @@ export async function GET() {
       })
     })
 
-    console.log(`[home] Collections after filtering: ${collections.length}`)
+    // console.log(`[home] Collections after filtering: ${collections.length}`)
 
     return NextResponse.json(
       {
