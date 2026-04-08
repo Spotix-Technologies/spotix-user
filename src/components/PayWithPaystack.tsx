@@ -10,13 +10,15 @@ interface PayWithPaystackProps {
   email: string
   amount: number
   reference: string
+  isGuest?: boolean
+  userId?: string | null
   metadata: {
     eventId: string
     eventName: string
     ticketType?: string
     ticketPrice: number
     eventCreatorId: string
-    userId: string
+    userId?: string | null
     discountCode?: string | null
     referralCode?: string | null
     [key: string]: any
@@ -35,6 +37,8 @@ export default function PayWithPaystack({
   email,
   amount,
   reference,
+  isGuest = false,
+  userId = null,
   metadata,
   onSuccess,
   onClose,
@@ -43,7 +47,7 @@ export default function PayWithPaystack({
   const [error, setError] = useState<string | null>(null)
   const [phoneNumber, setPhoneNumber] = useState<string | null>(null)
   const [showPhoneNumberModal, setShowPhoneNumberModal] = useState(false)
-  const [checkingPhone, setCheckingPhone] = useState(true)
+  const [checkingPhone, setCheckingPhone] = useState(!isGuest) // Skip phone check for guests
   const [scriptLoaded, setScriptLoaded] = useState(false)
   const [paymentInitialized, setPaymentInitialized] = useState(false)
 
@@ -79,8 +83,15 @@ export default function PayWithPaystack({
     }
   }, [])
 
-  // Check if user has phone number
+  // Check if user has phone number (skip for guests)
   useEffect(() => {
+    if (isGuest) {
+      // For guests, we don't need a phone number - proceed directly
+      setPhoneNumber("guest")
+      setCheckingPhone(false)
+      return
+    }
+
     const checkPhoneNumber = async () => {
       try {
         const user = auth.currentUser
@@ -119,7 +130,7 @@ export default function PayWithPaystack({
     }
 
     checkPhoneNumber()
-  }, [])
+  }, [isGuest])
 
   const handlePhoneNumberAdded = (phone: string) => {
     console.log("Phone number added:", phone)
@@ -262,21 +273,11 @@ export default function PayWithPaystack({
 
   // Auto-initialize payment when ready
   useEffect(() => {
-    console.log("[v0] Payment initialization check:", {
-      scriptLoaded,
-      checkingPhone,
-      phoneNumber: !!phoneNumber,
-      error: !!error,
-      paymentInitialized,
-      reference,
-    })
-
     if (scriptLoaded && !checkingPhone && phoneNumber && !error && !paymentInitialized) {
-      console.log("[v0] All conditions met, initializing payment immediately...")
-      // Initialize immediately instead of with delay
+      // Initialize payment directly - the iframe will open in the next render
       initializePayment()
     }
-  }, [scriptLoaded, checkingPhone, phoneNumber, error, paymentInitialized, initializePayment, reference])
+  }, [scriptLoaded, checkingPhone, phoneNumber, error, paymentInitialized, initializePayment])
 
   if (showPhoneNumberModal) {
     return (

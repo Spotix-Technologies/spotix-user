@@ -1,6 +1,6 @@
 {
   "name": "spotix-user",
-  "version": "31.1.5",
+  "version": "32.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",

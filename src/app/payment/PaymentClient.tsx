@@ -465,7 +465,8 @@ export default function PaymentClient() {
         requestBody.userEmail = userData.email
       }
 
-      // For guests, include guest data
+      // For guests, map guest data to user fields (not guest fields)
+      // This way guests are treated like users in the backend
       if (!user) {
         // Use state variables first, but fall back to localStorage if empty
         let finalGuestEmail = guestEmail
@@ -487,9 +488,13 @@ export default function PaymentClient() {
           }
         }
 
-        requestBody.guestEmail = finalGuestEmail
-        requestBody.guestFullName = finalGuestFullName
-        requestBody.guestPhone = finalGuestPhone
+        // Map guest data to user fields for consistency
+        requestBody.userEmail = finalGuestEmail
+        requestBody.userFullName = finalGuestFullName
+        // Phone can be optional
+        if (finalGuestPhone) {
+          requestBody.userPhone = finalGuestPhone
+        }
       }
 
       // Add payment-specific fields only for paid events
@@ -889,18 +894,20 @@ const totalAmount = cartSubtotal + cartTotalVat
       </main>
 
       {/* Paystack Payment Modal */}
-      {showPaystackModal && paystackReference && user && !isFreeEvent && (
+      {showPaystackModal && paystackReference && userData && !isFreeEvent && (
         <PayWithPaystack
-          email={user.email || ""}
+          email={userData.email || ""}
           amount={totalAmount}
           reference={paystackReference}
+          isGuest={!user}
+          userId={user?.uid || null}
           metadata={{
             eventId: paymentData.eventId,
             eventName: paymentData.eventName,
             ticketPrice: paymentData.ticketPrice,
             cart: JSON.stringify(cart),
             eventCreatorId: organizerId || paymentData.eventCreatorId,
-            userId: user.uid,
+            userId: user?.uid || null,
             discountCode: discountData?.code || null,
             referralCode: referralData?.code || null,
           }}

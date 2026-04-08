@@ -12,6 +12,7 @@ export async function POST(request: NextRequest) {
       ticketType,       // legacy single-type field (kept for backwards compat)
       ticketTypes,      // primary: [{ type, quantity, price }]
       totalAmount,
+      transactionFee,   // VAT/transaction fee from orderSummary
       discountCode,
       discountData,
       referralCode,
@@ -32,6 +33,7 @@ export async function POST(request: NextRequest) {
       eventType,
       userFullName,
       userEmail: bodyUserEmail,
+      userPhone,
     } = body
 
     console.log("[create-pay-ref] Incoming body:", JSON.stringify({
@@ -43,7 +45,7 @@ export async function POST(request: NextRequest) {
       totalAmount,
       discountCode,
       referralCode,
-      guestEmail: guestEmail || null,
+      userEmail: bodyUserEmail || guestEmail || null,
     }, null, 2))
 
     // ── Auth — optional for guests ─────────────────────────────────────────────
@@ -63,9 +65,14 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (!userId && !guestEmail) {
+    // Use bodyUserEmail (from guest checkout form) if no authenticated userId
+    // For guests, the email serves as their identifier
+    const finalUserEmail = userEmail || bodyUserEmail || guestEmail || null
+    const finalUserId = userId || (finalUserEmail ? finalUserEmail : null) // Use email as ID for guests
+
+    if (!finalUserId && !finalUserEmail) {
       return NextResponse.json(
-        { error: "Either authentication or guest email is required" },
+        { error: "Either authentication or user email is required" },
         { status: 400 }
       )
     }
@@ -119,11 +126,16 @@ export async function POST(request: NextRequest) {
     console.log(`[create-pay-ref] Generated reference: ${reference}`)
 
     // ── Build Firestore document ───────────────────────────────────────────────
+    // Use finalUserEmail/userFullName/userPhone already defined above
+    const finalUserFullName = userFullName || guestFullName || null
+    const finalUserPhone = userPhone || guestPhone || null
+
     const paymentReference = {
       reference,
-      userId: userId || null,
-      userEmail: userEmail || bodyUserEmail || guestEmail || null,
-      userFullName: userFullName || null,
+      userId: finalUserId, // Use email as ID for guests if no userId
+      userEmail: finalUserEmail,
+      userFullName: finalUserFullName,
+      userPhone: finalUserPhone || null,
       eventId,
       eventCreatorId,
       eventName: eventName || "",
@@ -142,19 +154,13 @@ export async function POST(request: NextRequest) {
       ticketType: primaryTicketType,          // convenience / backwards compat
       ticketPrice: Number(ticketPrice),       // subtotal before VAT (used for display)
       totalAmount: Number(totalAmount),       // grand total inc. VAT after discount
+      transactionFee: Number(transactionFee) || 0, // VAT/fee sent from orderSummary
       totalTicketCount,
 
       vendor: "paystack",
       status: "pending",
       paymentCreationDate: new Date().toISOString(),
       paymentCreationTimestamp: timestamp,
-
-      // Guest fields
-      ...(guestEmail && {
-        guestEmail,
-        guestFullName: guestFullName || null,
-        guestPhone: guestPhone || null,
-      }),
 
       // Discount / referral
       discountCode: discountCode || null,
@@ -171,8 +177,9 @@ export async function POST(request: NextRequest) {
       ticketTypes: normalisedTicketTypes,
       totalAmount: paymentReference.totalAmount,
       totalTicketCount,
-      userId: paymentReference.userId,
-      guestEmail: paymentReference.guestEmail || null,
+      userId: finalUserId,
+      userEmail: finalUserEmail,
+      userFullName: finalUserFullName,
     }, null, 2))
 
     const referenceDocRef = adminDb.collection("Reference").doc(reference)

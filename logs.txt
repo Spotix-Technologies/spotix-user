@@ -1,0 +1,17 @@
+.LOG
+
+8:46 PM 4/8/2026
+[v32.0.0]
+Quite unconventional to start keeping logs from the 32nd version of the app but hey, you gotta start some day but here is a couple things I did:
+
+##Bug Fixes##
+- Payment page kept on redirecting users. It was a problem with cookies.
+- The paystack page didn't open when users were not logged in. Fixed that.
+
+
+##Chores
+- The payment ref creator wasn't passing or even accepting transactionFee. Now it does
+- The analytics route now receives transaction fees from backend api. 
+
+That's it :)
+

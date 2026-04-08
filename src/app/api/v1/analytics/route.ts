@@ -29,7 +29,8 @@ export async function POST(request: NextRequest) {
     // ticketId is used as idempotency key (first ticketId of the batch, passed from ticket.js)
     // ticketCount is the total number of tickets in this order (defaults to 1 for backwards compat)
     // ticketPrice is the total order value (totalAmount from the reference)
-    const { ticketPrice, ticketId, ticketCount, eventId, timestamp } = body;
+    // transactionFee is the VAT/transaction fee amount
+    const { ticketPrice, ticketId, ticketCount, transactionFee, eventId, timestamp } = body;
 
     // ── Validation ────────────────────────────────────────────────
     if (!ticketPrice || !ticketId) {
@@ -96,6 +97,7 @@ export async function POST(request: NextRequest) {
     const updateData = {
       ticketsSold: FieldValue.increment(qty),
       totalRevenue: FieldValue.increment(totalRevenue),
+      totalTransactionFees: FieldValue.increment(Number(transactionFee) || 0),
       lastUpdated: FieldValue.serverTimestamp(),
     };
 
@@ -116,6 +118,7 @@ export async function POST(request: NextRequest) {
       processedAt: FieldValue.serverTimestamp(),
       ticketPrice: totalRevenue,
       ticketCount: qty,
+      transactionFee: Number(transactionFee) || 0,
       eventId: eventId || null,
       day,
       month,
@@ -134,6 +137,7 @@ export async function POST(request: NextRequest) {
           ticketId,
           ticketCount: qty,
           ticketPrice: totalRevenue,
+          transactionFee: Number(transactionFee) || 0,
           day,
           month,
           year,
