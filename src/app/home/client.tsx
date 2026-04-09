@@ -72,8 +72,10 @@ const Home: React.FC = () => {
   const router = useRouter()
   const hasActiveFilters = Boolean(searchQuery || filterType || priceFilter)
 
-  // ── Auth check ──────────────────────────────────────────────────────────────
+  // ── Auth check (only once on mount) ─────────────────────────────────────────
   useEffect(() => {
+    let cancelled = false
+
     const checkAuth = async () => {
       try {
         const response = await fetch("/api/v1/auth", {
@@ -82,20 +84,28 @@ const Home: React.FC = () => {
         })
         const data = await response.json()
 
-        if (data.authenticated) {
-          setIsAuthenticated(true)
-          const storedUser = localStorage.getItem("spotix_user")
-          if (storedUser) {
-            const userData = JSON.parse(storedUser)
-            setUsername(userData.username || userData.fullName || "")
+        if (!cancelled) {
+          if (data.authenticated) {
+            setIsAuthenticated(true)
+            const storedUser = localStorage.getItem("spotix_user")
+            if (storedUser) {
+              const userData = JSON.parse(storedUser)
+              setUsername(userData.username || userData.fullName || "")
+            }
+          } else {
+            setIsAuthenticated(false)
           }
         }
       } catch (error) {
-        console.error("Error checking auth:", error)
+        console.error("  Error checking auth:", error)
+        if (!cancelled) {
+          setIsAuthenticated(false)
+        }
       }
     }
 
     checkAuth()
+    return () => { cancelled = true }
   }, [])
 
   // ── Fetch home data from API ─────────────────────────────────────────────────

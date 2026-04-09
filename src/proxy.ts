@@ -47,7 +47,6 @@ const PUBLIC_AUTH_ROUTES = new Set([
   "/auth/login",
   "/auth/signup",
   "/auth/forgot-password",
-  "/payment"
 ]);
 
 /**
@@ -88,14 +87,12 @@ export async function proxy(request: NextRequest) {
   const payload = await verifyAccessTokenEdge(token, AUDIENCE);
 
   // ── 1. Public auth routes (/auth/login, /auth/signup, etc.) ─────────────────
-  if (isPublicAuthRoute(pathname)) {
-    // Already authenticated → redirect to home, no point showing login/signup
-    if (payload) {
-      return NextResponse.redirect(new URL("/payment", request.url));
-      // return NextResponse.redirect(new URL("/home", request.url));
-    }
-    return NextResponse.next();
+if (isPublicAuthRoute(pathname)) {
+  if (payload) {
+    return NextResponse.redirect(new URL("/home", request.url));
   }
+  return NextResponse.next();
+}
 
   // ── 2. Protected routes ──────────────────────────────────────────────────────
   if (isProtectedRoute(pathname)) {

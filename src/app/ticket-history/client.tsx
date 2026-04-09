@@ -2,8 +2,6 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { auth, db } from "@/app/lib/firebase"
-import { collection, getDocs, query, orderBy } from "firebase/firestore"
 import { Ticket, Calendar, Clock, RefreshCw, AlertTriangle, SearchIcon } from "lucide-react"
 import UserHeader from "../../components/UserHeader"
 import Footer from "../../components/footer"
@@ -39,57 +37,49 @@ export default function TicketHistoryClient() {
 
   const fetchTicketHistory = async (isRefresh = false) => {
     try {
-      const user = auth.currentUser
-      if (!user) {
-        router.push("/auth/login")
-        return
-      }
-
       if (isRefresh) {
         setRefreshing(true)
       } else {
         setLoading(true)
       }
 
-      const ticketsCollectionRef = collection(db, "TicketHistory", user.uid, "tickets")
-      const ticketsQuery = query(ticketsCollectionRef, orderBy("purchaseDate", "desc"))
-      const ticketsSnapshot = await getDocs(ticketsQuery)
-
-      const ticketsList: TicketHistoryItem[] = []
-      ticketsSnapshot.forEach((doc) => {
-        const data = doc.data()
-
-        let purchaseDate = "N/A"
-        let purchaseTime = "N/A"
-
-        if (data.purchaseDate) {
-          if (typeof data.purchaseDate === "string") {
-            purchaseDate = data.purchaseDate
-            purchaseTime = data.purchaseTime || "N/A"
-          } else if (data.purchaseDate.toDate) {
-            const date = data.purchaseDate.toDate()
-            purchaseDate = date.toLocaleDateString()
-            purchaseTime = date.toLocaleTimeString()
-          }
-        }
-
-        ticketsList.push({
-          id: doc.id,
-          eventId: data.eventId || "",
-          eventName: data.eventName || "Unknown Event",
-          ticketType: data.ticketType || "Standard",
-          ticketPrice: data.ticketPrice || 0,
-          ticketId: data.ticketId || "",
-          ticketReference: data.ticketReference || "",
-          purchaseDate: purchaseDate,
-          purchaseTime: purchaseTime,
-          paymentMethod: data.paymentMethod || "Wallet",
-        })
+      const response = await fetch("/api/v1/ticket", {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
       })
 
-      setTickets(ticketsList)
-      setFilteredTickets(ticketsList)
-      localStorage.setItem(CACHE_KEY, JSON.stringify(ticketsList))
+      if (response.status === 401) {
+        router.push("/auth/login")
+        return
+      }
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch tickets: ${response.statusText}`)
+      }
+
+      const data = await response.json()
+
+      if (data.success && data.tickets) {
+        const ticketsList: TicketHistoryItem[] = data.tickets.map((ticket: any) => ({
+          id: ticket.id,
+          eventId: ticket.eventId,
+          eventName: ticket.eventName,
+          ticketType: ticket.ticketType,
+          ticketPrice: ticket.ticketPrice,
+          ticketId: ticket.ticketId,
+          ticketReference: ticket.ticketReference,
+          purchaseDate: ticket.purchaseDate,
+          purchaseTime: ticket.purchaseTime,
+          paymentMethod: ticket.paymentMethod,
+        }))
+
+        setTickets(ticketsList)
+        setFilteredTickets(ticketsList)
+        localStorage.setItem(CACHE_KEY, JSON.stringify(ticketsList))
+      }
+
       setLoading(false)
     } catch (error) {
       console.error("  Error fetching ticket history:", error)

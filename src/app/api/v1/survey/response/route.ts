@@ -1,3 +1,5 @@
+// api/v1/survey/response/route.ts
+
 import { NextRequest, NextResponse } from "next/server"
 import { adminDb } from "@/app/lib/firebase-admin"
 
@@ -6,30 +8,32 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { userId, eventId, responses, attendeeInfo } = body
 
-    if (!userId || !eventId) {
-      return NextResponse.json({ error: "Missing required fields: userId, eventId" }, { status: 400 })
+    // eventId is required; userId is optional for guests
+    if (!eventId) {
+      return NextResponse.json({ error: "Missing required field: eventId" }, { status: 400 })
     }
 
     if (!responses || typeof responses !== "object") {
       return NextResponse.json({ error: "Responses must be an object" }, { status: 400 })
     }
 
-    // Store response
-    const responsesCollectionRef = adminDb
+    // Flat structure: events/{eventId}/responses
+    const responsesRef = adminDb
       .collection("events")
-      .doc(userId)
-      .collection("userEvents")
       .doc(eventId)
       .collection("responses")
 
     const responseData = {
       responses,
       attendeeInfo: attendeeInfo || {},
+      // Store userId when available; null for guests
+      userId: userId || null,
+      isGuest: attendeeInfo?.isGuest ?? !userId,
       submittedAt: new Date().toISOString(),
       timestamp: new Date(),
     }
 
-    const docRef = await responsesCollectionRef.add(responseData)
+    const docRef = await responsesRef.add(responseData)
 
     return NextResponse.json({
       success: true,
@@ -45,40 +49,29 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const userId = searchParams.get("userId")
     const eventId = searchParams.get("eventId")
 
-    if (!userId || !eventId) {
-      return NextResponse.json({ error: "Missing required parameters: userId, eventId" }, { status: 400 })
+    if (!eventId) {
+      return NextResponse.json({ error: "Missing required parameter: eventId" }, { status: 400 })
     }
 
-    // Get all responses
-    const responsesCollectionRef = adminDb
+    // Flat structure: events/{eventId}/responses
+    const responsesRef = adminDb
       .collection("events")
-      .doc(userId)
-      .collection("userEvents")
       .doc(eventId)
       .collection("responses")
 
-    const responsesSnapshot = await responsesCollectionRef.orderBy("timestamp", "desc").get()
-    const responses = responsesSnapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }))
+    const snapshot = await responsesRef.orderBy("timestamp", "desc").get()
+    const responses = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
 
-    // Get questions for reference
-    const questionsCollectionRef = adminDb
+    // Get questions for reference — also flat: events/{eventId}/questions
+    const questionsRef = adminDb
       .collection("events")
-      .doc(userId)
-      .collection("userEvents")
       .doc(eventId)
       .collection("questions")
 
-    const questionsSnapshot = await questionsCollectionRef.orderBy("order").get()
-    const questions = questionsSnapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }))
+    const questionsSnapshot = await questionsRef.orderBy("order").get()
+    const questions = questionsSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
 
     return NextResponse.json({
       success: true,
