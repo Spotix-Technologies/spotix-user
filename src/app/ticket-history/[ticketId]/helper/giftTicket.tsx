@@ -195,7 +195,7 @@ export default function GiftTicket({ isOpen, ticketId, onClose, onSuccess }: Gif
                   Does the recipient have a Spotix account?
                 </p>
                 <p className="text-xs text-gray-500 leading-relaxed">
-                  If they do, we'll auto-fill their name and phone number from their profile.
+                  If they do, they'll see it in their ticket history, if they don't we will email them.
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-3">

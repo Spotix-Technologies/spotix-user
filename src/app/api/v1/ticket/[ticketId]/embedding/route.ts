@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { db } from "@/app/lib/firebase"
-import { doc, setDoc, getDoc, deleteField, updateDoc, serverTimestamp } from "firebase/firestore"
+import { adminDb } from "@/app/lib/firebase-admin"
+import { FieldValue } from "firebase-admin/firestore"
 import { verifyAccessToken, type TokenAudience } from "@/app/lib/auth-tokens"
 
 const AUDIENCE: TokenAudience = "spotix-user"
@@ -35,20 +35,20 @@ export async function GET(
       return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 })
     }
 
-    const ticketRef = doc(db, "tickets", ticketId)
-    const ticketDoc = await getDoc(ticketRef)
+    const ticketRef = adminDb.collection("tickets").doc(ticketId)
+    const ticketDoc = await ticketRef.get()
 
-    if (!ticketDoc.exists()) {
+    if (!ticketDoc.exists) {
       return NextResponse.json({ success: false, message: "Ticket not found" }, { status: 404 })
     }
 
-    const ticketData = ticketDoc.data()
+    const ticketData = ticketDoc.data()!
 
     if (ticketData.email !== tokenData.email) {
       return NextResponse.json({ success: false, message: "Forbidden" }, { status: 403 })
     }
 
-    const hasEmbedding = Array.isArray(ticketData.faceEmbedding) && ticketData.faceEmbedding.length === 128
+    const hasEmbedding = ticketData.hasEmbedding === true
 
     return NextResponse.json({
       success: true,
@@ -89,36 +89,55 @@ export async function POST(
       return NextResponse.json({ success: false, message: "Event ID is required" }, { status: 400 })
     }
 
-    const ticketRef = doc(db, "tickets", ticketId)
-    const ticketDoc = await getDoc(ticketRef)
+    const ticketRef = adminDb.collection("tickets").doc(ticketId)
+    const eventRef = adminDb.collection("events").doc(eventId)
 
-    if (!ticketDoc.exists()) {
+    // Pre-flight reads (outside the batch — batches are write-only)
+    const [ticketDoc, eventDoc] = await Promise.all([ticketRef.get(), eventRef.get()])
+
+    if (!ticketDoc.exists) {
       return NextResponse.json({ success: false, message: "Ticket not found" }, { status: 404 })
     }
-
-    if (ticketDoc.data().email !== userEmail) {
+    if (ticketDoc.data()!.email !== userEmail) {
       return NextResponse.json({ success: false, message: "Forbidden" }, { status: 403 })
     }
-
-    const eventRef = doc(db, "events", eventId)
-    const eventDoc = await getDoc(eventRef)
-    if (!eventDoc.exists()) {
+    if (!eventDoc.exists) {
       return NextResponse.json({ success: false, message: "Event not found" }, { status: 404 })
     }
 
-    // Save to events/{eventId}/attendees/{ticketId}
-    const attendeeRef = doc(db, "events", eventId, "attendees", ticketId)
-    await setDoc(attendeeRef, {
-      faceEmbedding: embedding,
-      email: userEmail,
-      updatedAt: serverTimestamp(),
-    }, { merge: true })
+    const attendeeRef = adminDb
+      .collection("events")
+      .doc(eventId)
+      .collection("attendees")
+      .doc(ticketId)
 
-    // Save to tickets/{ticketId}
-    await setDoc(ticketRef, {
-      faceEmbedding: embedding,
-      faceEmbeddingUpdatedAt: serverTimestamp(),
-    }, { merge: true })
+    const now = FieldValue.serverTimestamp()
+
+    // Atomic batch: both writes succeed or both fail
+    const batch = adminDb.batch()
+
+    batch.set(
+      ticketRef,
+      {
+        faceEmbedding: embedding,
+        faceEmbeddingUpdatedAt: now,
+        hasEmbedding: true,
+      },
+      { merge: true }
+    )
+
+    batch.set(
+      attendeeRef,
+      {
+        faceEmbedding: embedding,
+        email: userEmail,
+        hasEmbedding: true,
+        updatedAt: now,
+      },
+      { merge: true }
+    )
+
+    await batch.commit()
 
     return NextResponse.json({
       success: true,
@@ -152,32 +171,44 @@ export async function DELETE(
       return NextResponse.json({ success: false, message: "Event ID is required" }, { status: 400 })
     }
 
-    const ticketRef = doc(db, "tickets", ticketId)
-    const ticketDoc = await getDoc(ticketRef)
+    const ticketRef = adminDb.collection("tickets").doc(ticketId)
+    const attendeeRef = adminDb
+      .collection("events")
+      .doc(eventId)
+      .collection("attendees")
+      .doc(ticketId)
 
-    if (!ticketDoc.exists()) {
+    // Pre-flight reads
+    const [ticketDoc, attendeeDoc] = await Promise.all([ticketRef.get(), attendeeRef.get()])
+
+    if (!ticketDoc.exists) {
       return NextResponse.json({ success: false, message: "Ticket not found" }, { status: 404 })
     }
-
-    if (ticketDoc.data().email !== userEmail) {
+    if (ticketDoc.data()!.email !== userEmail) {
       return NextResponse.json({ success: false, message: "Forbidden" }, { status: 403 })
     }
 
-    // Delete from tickets/{ticketId}
-    await updateDoc(ticketRef, {
-      faceEmbedding: deleteField(),
-      faceEmbeddingUpdatedAt: deleteField(),
+    const now = FieldValue.serverTimestamp()
+
+    // Atomic batch: both deletes succeed or both fail
+    const batch = adminDb.batch()
+
+    batch.update(ticketRef, {
+      faceEmbedding: FieldValue.delete(),
+      faceEmbeddingUpdatedAt: FieldValue.delete(),
+      hasEmbedding: false,
     })
 
-    // Delete from events/{eventId}/attendees/{ticketId}
-    const attendeeRef = doc(db, "events", eventId, "attendees", ticketId)
-    const attendeeDoc = await getDoc(attendeeRef)
-    if (attendeeDoc.exists()) {
-      await updateDoc(attendeeRef, {
-        faceEmbedding: deleteField(),
-        updatedAt: serverTimestamp(),
+    // Only include attendee in the batch if the doc actually exists
+    if (attendeeDoc.exists) {
+      batch.update(attendeeRef, {
+        faceEmbedding: FieldValue.delete(),
+        hasEmbedding: false,
+        updatedAt: now,
       })
     }
+
+    await batch.commit()
 
     return NextResponse.json({
       success: true,

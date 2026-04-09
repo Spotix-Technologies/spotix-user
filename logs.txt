@@ -4,14 +4,41 @@
 [v32.0.0]
 Quite unconventional to start keeping logs from the 32nd version of the app but hey, you gotta start some day but here is a couple things I did:
 
-##Bug Fixes##
+## Bug Fixes ##
 - Payment page kept on redirecting users. It was a problem with cookies.
 - The paystack page didn't open when users were not logged in. Fixed that.
 
 
-##Chores
+## Chores ##
 - The payment ref creator wasn't passing or even accepting transactionFee. Now it does
 - The analytics route now receives transaction fees from backend api. 
 
 That's it :)
 
+
+1:41 PM 4/9/2026
+[v32.1.1]
+The issue I believed was fixed, wasn't actually fixed so I dug through and yeah, I fixed it
+
+## Bug Fixes ##
+- Payment page was declared an open route in the middleware so when visited, it checked for cookies, saw them and redircted itself back to itself. So that caused the redirect error
+
+## Chores ##
+- Since the structure switch I hadn't fixed the ticket history. I did that now and added the necessary APIs
+
+## Features ##
+- The facial verification model was not computing landmarks properly. Rebuilt it again
+- What's Spotix without love? I added sharing ticket feature and fixed bugs that didn't accept props from the face embedding modal
+
+4:39 PM 4/9/2026
+[v32.2.1]
+Man, I need to start actually writing unit tests again. So I discovered yet another issue with the face recognition
+
+## Bug Fixes ##
+- Camera unmount bug. The cleanup stopCamera() runs in the useEffect return, but startCamera is called async so the stream might outlive unmount. Need to store the stream in a ref and stop it reliably and to avoid people think we are spying on them.
+
+- Gradual confidence build-up and green lock. we need to accumulate scores over N frames, show a filling ring/progress, switch to green when locked. You see yeah, the model is trained on human faces so the confidence score checks if its a human face and if it can read it
+
+
+## Chore ## 
+The view === "enroll" renders <FaceMarker> immediately. Gate it so <FaceMarker> only mounts after user clicks "Re-enroll" (when hasExistingEmbedding) — but on first enroll, show instructions + "Start" button first. Fingers crossed this won't break prod.
