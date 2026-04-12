@@ -15,13 +15,6 @@ import UserHeader from "@/components/UserHeader"
 import Footer from "@/components/footer"
 import { ArrowLeft, X, Wallet, AlertCircle, Flag, Ticket } from "lucide-react"
 import LoginButton from "@/components/LoginButton"
-import EventDetailsSection from "./event-details-section"
-import LocationSection from "./location-section"
-import ReviewsSection from "./reviews-section"
-import BookerDetailsSection from "./booker-details-section"
-import BuyTicketDialog from "./buy-ticket-dialog"
-import MerchSection from "./merch-section"
-import { ReportModal } from "./report-modal"
 import { formatNumber } from "@/utils/formatter"
 import { EventImageSection } from "./components/event-image-section"
 import { TicketSummaryCard } from "./components/ticket-summary-card"
@@ -109,7 +102,7 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
   // UI
   const [eventUrl, setEventUrl] = useState("")
   const [showPassedDialog, setShowPassedDialog] = useState(false)
-  const [showBuyTicketDialog, setShowBuyTicketDialog] = useState(false)
+  // const [showBuyTicketDialog, setShowBuyTicketDialog] = useState(false)
   const [isPageLoaded, setIsPageLoaded] = useState(false)
   const [showReportModal, setShowReportModal] = useState(false)
 
@@ -375,7 +368,7 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
       sessionStorage.setItem("spotix_payment_data", JSON.stringify(paymentData))
     }
     setShowBuyTicketDialog(false)
-    
+
     // If not authenticated, show guest form first
     if (!isAuthenticated) {
       router.push("/payment?mode=guest")
