@@ -18,6 +18,13 @@ import LoginButton from "@/components/LoginButton"
 import { formatNumber } from "@/utils/formatter"
 import { EventImageSection } from "./components/event-image-section"
 import { TicketSummaryCard } from "./components/ticket-summary-card"
+import EventDetailsSection from "./event-details-section"
+import LocationSection from "./location-section"
+import ReviewsSection from "./reviews-section"
+import BookerDetailsSection from "./booker-details-section"
+import BuyTicketDialog from "./buy-ticket-dialog"
+import MerchSection from "./merch-section"
+import { ReportModal } from "./report-modal"
 
 import type { EventType } from "./page"
 
@@ -102,7 +109,7 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
   // UI
   const [eventUrl, setEventUrl] = useState("")
   const [showPassedDialog, setShowPassedDialog] = useState(false)
-  // const [showBuyTicketDialog, setShowBuyTicketDialog] = useState(false)
+  const [showBuyTicketDialog, setShowBuyTicketDialog] = useState(false)
   const [isPageLoaded, setIsPageLoaded] = useState(false)
   const [showReportModal, setShowReportModal] = useState(false)
 
