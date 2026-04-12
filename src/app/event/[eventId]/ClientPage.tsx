@@ -13,7 +13,7 @@ import {
 } from "@/app/lib/auth-client"
 import UserHeader from "@/components/UserHeader"
 import Footer from "@/components/footer"
-import { ArrowLeft, Ticket, X, Wallet, Maximize2, AlertCircle, Flag } from "lucide-react"
+import { ArrowLeft, X, Wallet, AlertCircle, Flag } from "lucide-react"
 import LoginButton from "@/components/LoginButton"
 import EventDetailsSection from "./event-details-section"
 import LocationSection from "./location-section"
@@ -21,9 +21,9 @@ import ReviewsSection from "./reviews-section"
 import BookerDetailsSection from "./booker-details-section"
 import BuyTicketDialog from "./buy-ticket-dialog"
 import MerchSection from "./merch-section"
-import { formatNumber } from "@/utils/formatter"
 import { ReportModal } from "./report-modal"
-import { ImageCarousel } from "./image-carousel"
+import { EventImageSection } from "./components/event-image-section"
+import { TicketSummaryCard } from "./components/ticket-summary-card"
 
 import type { EventType } from "./page"
 
@@ -33,75 +33,6 @@ interface ClientPageProps {
     eventId: string
   }
   initialEventData?: EventType | null
-}
-
-// ── LazyImage ─────────────────────────────────────────────────────────────────
-
-const LazyImage: React.FC<{
-  src: string
-  alt: string
-  className?: string
-  eventName?: string
-  showFullscreenIcon?: boolean
-}> = ({ src, alt, className, showFullscreenIcon = false }) => {
-  const [isLoaded, setIsLoaded] = useState(false)
-  const [hasError, setHasError] = useState(false)
-  const [showFullscreen, setShowFullscreen] = useState(false)
-  const imgSrc = src || "/placeholder.svg"
-
-  return (
-    <>
-      <div className={`relative group ${className || ""}`}>
-        {!isLoaded && !hasError && (
-          <div className="absolute inset-0 bg-gray-200 animate-pulse rounded-lg flex items-center justify-center">
-            <div className="w-16 h-16 bg-gray-300 rounded-full animate-pulse" />
-          </div>
-        )}
-        <img
-          src={imgSrc}
-          alt={alt}
-          onLoad={() => setIsLoaded(true)}
-          onError={() => { setHasError(true); setIsLoaded(true) }}
-          className={`w-full h-full object-cover rounded-lg transition-opacity duration-300 ${isLoaded ? "opacity-100" : "opacity-0"
-            }`}
-        />
-        {showFullscreenIcon && isLoaded && !hasError && (
-          <button
-            onClick={() => setShowFullscreen(true)}
-            className="absolute top-4 right-4 bg-black bg-opacity-50 text-white p-2 rounded-full transition-all duration-200 hover:bg-opacity-70 hover:scale-110"
-            aria-label="View fullscreen"
-          >
-            <Maximize2 size={20} />
-          </button>
-        )}
-        {hasError && (
-          <div className="absolute inset-0 bg-gray-100 rounded-lg flex items-center justify-center">
-            <span className="text-gray-500">Failed to load image</span>
-          </div>
-        )}
-      </div>
-
-      {showFullscreen && (
-        <div className="fixed inset-0 bg-black bg-opacity-95 z-50">
-          <button
-            onClick={() => setShowFullscreen(false)}
-            className="absolute top-1/2 -translate-y-1/2 right-4 bg-white hover:bg-gray-100 text-gray-900 p-4 rounded-full transition-all duration-200 shadow-2xl border-2 border-gray-200"
-            style={{ zIndex: 9999 }}
-            aria-label="Close fullscreen"
-          >
-            <X size={28} />
-          </button>
-          <div className="w-full h-full flex items-center justify-center p-4 sm:p-8">
-            <img
-              src={imgSrc}
-              alt={alt}
-              className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg"
-            />
-          </div>
-        </div>
-      )}
-    </>
-  )
 }
 
 // ── Skeleton / Preloader ──────────────────────────────────────────────────────
@@ -564,18 +495,12 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
             {/* Left column */}
             <div className="lg:col-span-2 space-y-6">
-              <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
-                {eventData.eventImages && eventData.eventImages.length > 1 ? (
-                  <ImageCarousel images={eventData.eventImages} eventName={eventData.eventName} />
-                ) : (
-                  <LazyImage
-                    src={eventData.eventImage || "/placeholder.svg"}
-                    alt={eventData.eventName}
-                    className="w-full h-[300px] sm:h-[400px] lg:h-[500px]"
-                    showFullscreenIcon
-                  />
-                )}
-              </div>
+              <EventImageSection
+                images={eventData.eventImages}
+                eventName={eventData.eventName}
+                eventImage={eventData.eventImage}
+                showFullscreenIcon
+              />
 
               <EventDetailsSection
                 eventData={eventData}
@@ -601,67 +526,11 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
 
             {/* Right column */}
             <div className="space-y-6 lg:relative lg:z-0">
-              <div className="bg-white rounded-2xl shadow-lg p-6 lg:p-8 border-2 border-purple-100">
-                <div className="mb-6">
-                  {eventData.isFree ? (
-                    <div className="text-center">
-                      <div className="inline-flex items-center gap-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white px-6 py-3 rounded-full shadow-lg mb-4">
-                        <Ticket size={24} />
-                        <span className="text-2xl font-bold">FREE EVENT</span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-center mb-4">
-                      <p className="text-gray-600 mb-2">Starting from</p>
-                      <p className="text-4xl font-bold text-[#6b2fa5]">
-                        ₦
-                        {formatNumber(
-                          eventData.ticketPrices?.length
-                            ? Math.min(...eventData.ticketPrices.map((t) => t.price))
-                            : 0
-                        )}
-                      </p>
-                    </div>
-                  )}
+              <div>
+                <TicketSummaryCard eventData={eventData} />
+                <div className="mt-6">
+                  <CtaButton />
                 </div>
-
-                <h3 className="text-xl font-bold text-gray-900 mb-4">Get Your Tickets</h3>
-
-                {!eventData.isFree && eventData.ticketPrices?.length > 0 && (
-                  <div className="mb-6 space-y-3">
-                    <p className="text-sm font-medium text-gray-600 mb-2">Ticket Options:</p>
-                    {eventData.ticketPrices.map((ticket, index) => (
-                      <div
-                        key={index}
-                        className="flex justify-between items-center p-3 bg-purple-50 rounded-lg"
-                      >
-                        <span className="font-medium text-gray-800">{ticket.policy}</span>
-                        <span className="font-bold text-[#6b2fa5]">₦{formatNumber(ticket.price)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="space-y-3 mb-6 p-4 bg-gray-50 rounded-lg">
-                  {eventData.enableMaxSize && eventData.maxSize && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Tickets Sold:</span>
-                      <span className="font-semibold text-gray-900">
-                        {eventData.ticketsSold || 0} / {eventData.maxSize}
-                      </span>
-                    </div>
-                  )}
-                  {eventData.enableStopDate && eventData.stopDate && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Sales End:</span>
-                      <span className="font-semibold text-gray-900">
-                        {new Date(eventData.stopDate).toLocaleDateString()}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <CtaButton />
               </div>
 
               <div ref={bookerDetailsRef}>
