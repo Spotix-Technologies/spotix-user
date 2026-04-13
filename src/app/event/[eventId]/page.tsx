@@ -30,6 +30,7 @@ export interface EventType {
   ticketsSold?: number
   likeCount: number
   createdBy: string
+  organizerId?: string
   allowAgents?: boolean
   suspended?: boolean
 }
@@ -39,6 +40,7 @@ async function fetchEventData(eventId: string): Promise<EventType | null> {
     const eventDoc = await adminDb.collection("events").doc(eventId).get()
     if (!eventDoc.exists) return null
     const d = eventDoc.data()
+    const organizerId = d?.organizerId || d?.createdBy || ""
     return {
       id: eventDoc.id,
       eventName: d?.eventName || "",
@@ -65,7 +67,8 @@ async function fetchEventData(eventId: string): Promise<EventType | null> {
       stopDate: d?.stopDate,
       ticketsSold: d?.ticketsSold || 0,
       likeCount: d?.likeCount || 0,
-      createdBy: d?.organizerId || "",
+      createdBy: organizerId,
+      organizerId: organizerId,
       allowAgents: d?.allowAgents || false,
       suspended: d?.suspended || false,
     }
