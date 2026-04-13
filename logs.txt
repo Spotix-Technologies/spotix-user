@@ -42,3 +42,14 @@ Man, I need to start actually writing unit tests again. So I discovered yet anot
 
 ## Chore ## 
 The view === "enroll" renders <FaceMarker> immediately. Gate it so <FaceMarker> only mounts after user clicks "Re-enroll" (when hasExistingEmbedding) — but on first enroll, show instructions + "Start" button first. Fingers crossed this won't break prod.
+
+
+9:21 AM 4/13/2026
+[v32.2.2]
+So I touched up the events page UI and sitemap
+
+## Chore
+- Adjusted sitemap
+- Fixed event UI
+
+

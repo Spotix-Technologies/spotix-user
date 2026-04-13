@@ -1,3 +1,5 @@
+// app/payment/helpers/order-summary.tsx
+
 "use client"
 
 import { CheckCircle, Ticket } from "lucide-react"
