@@ -25,6 +25,7 @@ interface PaymentData {
   ticketType: string
   ticketPrice: number
   eventCreatorId: string
+  organizerId?: string
   eventVenue?: string
   eventType?: string
   eventDate?: string
@@ -287,6 +288,7 @@ export default function PaymentClient() {
           stopDate: data.stopDate || existingData.stopDate || "",
           bookerName: data.bookerName || "Event Host",
           bookerEmail: data.bookerEmail || "support@spotix.com.ng",
+          organizerId: data.organizerId || existingData.organizerId || "",
         }
       }
 
@@ -441,9 +443,12 @@ export default function PaymentClient() {
         price: item.price,
       }))
 
+      // Use organizerId from localStorage, then from paymentData, then from eventCreatorId
+      const finalEventCreatorId = organizerId || paymentData.organizerId || paymentData.eventCreatorId
+
       const requestBody: any = {
         eventId: paymentData.eventId,
-        eventCreatorId: organizerId || paymentData.eventCreatorId,
+        eventCreatorId: finalEventCreatorId,
         ticketTypes: ticketTypes,
         referralCode: referralData?.code || null,
         referralData: referralData || null,

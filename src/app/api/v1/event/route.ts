@@ -45,6 +45,9 @@ export async function GET(request: NextRequest) {
       ticketSale: ticket.ticketSale || 0, // Number of this ticket type sold
     }))
 
+    // Extract organizerId from Firestore (the actual event creator)
+    const organizerId = eventData?.organizerId || eventData?.createdBy || ""
+
     // Transform the data to match the expected EventType interface
     const transformedData = {
       id: eventDoc.id,
@@ -71,8 +74,8 @@ export async function GET(request: NextRequest) {
       enableStopDate: eventData?.enableStopDate || false,
       stopDate: eventData?.stopDate,
       ticketsSold: eventData?.ticketsSold || 0,
-      createdBy: eventData?.createdBy || eventData?.organizerId || "",
-      organizerId: eventData?.organizerId || eventData?.createdBy || "",
+      createdBy: eventData?.createdBy || organizerId || "",
+      organizerId: organizerId,
       likes: eventData?.likes || 0,
       likedBy: eventData?.likedBy || [],
       allowAgents: eventData?.allowAgents || false,

@@ -385,6 +385,7 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
         ticketType: firstItem.ticketType,
         ticketPrice: firstItem.price,
         eventCreatorId: createdBy,
+        organizerId: eventData.organizerId || createdBy,
         eventVenue: eventData.eventVenue || "",
         eventType: eventData.eventType || "",
         eventDate: eventData.eventDate || "",
@@ -407,7 +408,7 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
     }
   }
 
-  // ── Render guards ─────────────────────────────────────────────────────────
+  // ── Render guards ───────────────────────────────────────���─────────────────
 
   if (!isPageLoaded) return <Preloader />
   if (loading) return <EventSkeleton />
