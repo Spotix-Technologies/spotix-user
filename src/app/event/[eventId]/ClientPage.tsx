@@ -267,7 +267,20 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
         const response = await fetch(`/api/v1/event/creator?eventId=${eventId}`)
         if (!response.ok) return
         const result = await response.json()
-        if (result.success) setBookerDetails(result.data)
+        if (result.success) {
+          setBookerDetails(result.data)
+          // Store booker details to localStorage for payment flow
+          if (typeof window !== "undefined") {
+            localStorage.setItem(
+              "spotix_organizer",
+              JSON.stringify({
+                bookername: result.data.username,
+                bookeremail: result.data.email,
+                organizerId: eventData?.createdBy,
+              })
+            )
+          }
+        }
       } catch (error) {
         console.error("Error fetching booker details:", error)
       }
