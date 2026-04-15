@@ -9,10 +9,10 @@ export async function POST(request: NextRequest) {
       eventId,
       eventCreatorId,
       ticketPrice,
-      ticketType,       // legacy single-type field (kept for backwards compat)
-      ticketTypes,      // primary: [{ type, quantity, price }]
+      ticketType,       
+      ticketTypes,      
       totalAmount,
-      transactionFee,   // VAT/transaction fee from orderSummary
+      transactionFee,   
       discountCode,
       discountData,
       referralCode,
@@ -36,17 +36,17 @@ export async function POST(request: NextRequest) {
       userPhone,
     } = body
 
-    console.log("[create-pay-ref] Incoming body:", JSON.stringify({
-      eventId,
-      eventCreatorId,
-      ticketPrice,
-      ticketType,
-      ticketTypes,
-      totalAmount,
-      discountCode,
-      referralCode,
-      userEmail: bodyUserEmail || guestEmail || null,
-    }, null, 2))
+    // console.log("[create-pay-ref] Incoming body:", JSON.stringify({
+    //   eventId,
+    //   eventCreatorId,
+    //   ticketPrice,
+    //   ticketType,
+    //   ticketTypes,
+    //   totalAmount,
+    //   discountCode,
+    //   referralCode,
+    //   userEmail: bodyUserEmail || guestEmail || null,
+    // }, null, 2))
 
     // ── Auth — optional for guests ─────────────────────────────────────────────
     const authHeader = request.headers.get("Authorization")
@@ -59,9 +59,9 @@ export async function POST(request: NextRequest) {
         const decodedToken = await auth().verifyIdToken(idToken)
         userId = decodedToken.uid
         userEmail = decodedToken.email || null
-        console.log(`[create-pay-ref] Authenticated user: ${userId}`)
+        // console.log(`[create-pay-ref] Authenticated user: ${userId}`)
       } catch (error) {
-        console.log("[create-pay-ref] Token verification failed — allowing guest checkout")
+        // console.log("[create-pay-ref] Token verification failed — allowing guest checkout")
       }
     }
 
@@ -172,15 +172,15 @@ export async function POST(request: NextRequest) {
       updatedAt: new Date().toISOString(),
     }
 
-    console.log("[create-pay-ref] Writing reference doc:", JSON.stringify({
-      reference,
-      ticketTypes: normalisedTicketTypes,
-      totalAmount: paymentReference.totalAmount,
-      totalTicketCount,
-      userId: finalUserId,
-      userEmail: finalUserEmail,
-      userFullName: finalUserFullName,
-    }, null, 2))
+    // console.log("[create-pay-ref] Writing reference doc:", JSON.stringify({
+    //   reference,
+    //   ticketTypes: normalisedTicketTypes,
+    //   totalAmount: paymentReference.totalAmount,
+    //   totalTicketCount,
+    //   userId: finalUserId,
+    //   userEmail: finalUserEmail,
+    //   userFullName: finalUserFullName,
+    // }, null, 2))
 
     const referenceDocRef = adminDb.collection("Reference").doc(reference)
     await referenceDocRef.set(paymentReference)
