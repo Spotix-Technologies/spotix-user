@@ -1,0 +1,6 @@
+Error: Only plain objects, and a few built-ins, can be passed to Client Components from Server Components. Classes or null prototypes are not supported.
+  {id: ..., eventName: ..., eventImage: ..., eventImages: ..., eventDate: ..., eventEndDate: ..., eventStart: ..., eventEnd: ..., eventType: ..., isFree: ..., ticketPrices: ..., bookerName: ..., bookerEmail: ..., bookerPhone: ..., isVerified: ..., eventDescription: ..., eventVenue: ..., colorCode: ..., enableColorCode: ..., enableMaxSize: ..., maxSize: ..., enableStopDate: ..., stopDate: {_seconds: ..., _nanoseconds: 0}, ticketsSold: ..., likeCount: ..., createdBy: ..., organizerId: ..., allowAgents: ..., suspended: ...}
+                                                                                                                                                                                                                                                                                                                                                                                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    at stringify (<anonymous>) {
+  digest: '3801373880'
+}
