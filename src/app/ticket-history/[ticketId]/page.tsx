@@ -171,64 +171,112 @@ export default function TicketHistoryInfo() {
   const handleDownloadTicket = async () => {
     if (!ticketRef.current || !ticketDetails || !qrCodeGenerated) return
     setIsDownloading(true)
+
     try {
-      // Build a safe style overrides map so html2canvas only sees rgb()
-      const allElements = [
-        ticketRef.current,
-        ...Array.from(ticketRef.current.querySelectorAll("*")),
-      ] as HTMLElement[]
-
-      const styleOverrides = new Map<HTMLElement, { property: string; value: string }[]>()
-
-      const colorProps = [
-        "color", "background-color", "border-color",
-        "border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
-        "outline-color", "text-decoration-color", "fill", "stroke",
-      ]
-
-      allElements.forEach((el) => {
-        const computed = window.getComputedStyle(el)
-        const overrides: { property: string; value: string }[] = []
-
-        colorProps.forEach((prop) => {
-          const value = computed.getPropertyValue(prop)
-          // Replace oklch/lab/lch/oklab with a dummy safe fallback only if needed
-          // The browser already resolves these to rgb() in getComputedStyle on
-          // Chromium — but if it doesn't (Safari/Firefox), we skip gracefully.
-          if (value && (value.includes("oklch") || value.includes("lab(") || value.includes("lch(") || value.includes("oklab("))) {
-            // Force the element to use the resolved rgb via a temporary inline style reset
-            overrides.push({ property: prop, value: "transparent" })
-          }
-        })
-
-        if (overrides.length) styleOverrides.set(el, overrides)
-      })
-
-      // Temporarily patch problematic elements
-      styleOverrides.forEach((overrides, el) => {
-        overrides.forEach(({ property, value }) => {
-          el.style.setProperty(property, value)
-        })
-      })
-
       const canvas = await html2canvas(ticketRef.current, {
         useCORS: true,
         allowTaint: false,
         backgroundColor: "#ffffff",
-        scale: 2, // retina quality
+        scale: 2,
         logging: false,
-        // Ignore elements that can't be rendered (like SVG QR codes need special handling)
-        ignoreElements: (element) => {
-          // html2canvas handles inline SVG fine; skip nothing by default
-          return false
-        },
-      })
+        onclone: (_clonedDoc, clonedElement) => {
+          // Collect every stylesheet in the cloned document and replace
+          // any unsupported color functions with safe rgb() equivalents.
+          // html2canvas parses raw CSS text, so we must fix the source
+          // rules — not the computed styles.
+          const sheets = Array.from(_clonedDoc.styleSheets) as CSSStyleSheet[]
 
-      // Restore patched styles
-      styleOverrides.forEach((overrides, el) => {
-        overrides.forEach(({ property }) => {
-          el.style.removeProperty(property)
-        })
+          for (const sheet of sheets) {
+            let rules: CSSRuleList
+            try {
+              rules = sheet.cssRules
+            } catch {
+              // Cross-origin sheet — can't access rules, skip
+              continue
+            }
+
+            for (const rule of Array.from(rules)) {
+              if (!(rule instanceof CSSStyleRule)) continue
+              const style = rule.style
+              for (let i = 0; i < style.length; i++) {
+                const prop = style[i]
+                const value = style.getPropertyValue(prop)
+                if (
+                  value.includes("oklch(") ||
+                  value.includes("oklab(") ||
+                  value.includes("lab(") ||
+                  value.includes("lch(") ||
+                  value.includes("color(")
+                ) {
+                  try {
+                    // Resolve the color via a temporary element in the
+                    // cloned document — the browser converts it to rgb()
+                    const probe = _clonedDoc.createElement("div")
+                    probe.style.setProperty(prop, value)
+                    _clonedDoc.body.appendChild(probe)
+                    const resolved = _clonedDoc.defaultView!
+                      .getComputedStyle(probe)
+                      .getPropertyValue(prop)
+                    _clonedDoc.body.removeChild(probe)
+
+                    if (resolved && resolved !== value) {
+                      style.setProperty(
+                        prop,
+                        resolved,
+                        style.getPropertyPriority(prop)
+                      )
+                    }
+                  } catch (e) {
+                    // If resolution fails, set a safe fallback
+                    style.setProperty(
+                      prop,
+                      "rgb(100, 100, 100)",
+                      style.getPropertyPriority(prop)
+                    )
+                  }
+                }
+              }
+            }
+          }
+
+          // Also patch inline styles on every element in the cloned subtree
+          const allEls = clonedElement.querySelectorAll<HTMLElement>("*")
+          const colorProps = [
+            "color", "background-color", "border-color",
+            "border-top-color", "border-right-color",
+            "border-bottom-color", "border-left-color",
+            "fill", "stroke",
+          ]
+          allEls.forEach((el) => {
+            colorProps.forEach((prop) => {
+              const val = el.style.getPropertyValue(prop)
+              if (!val) return
+              if (
+                val.includes("oklch(") ||
+                val.includes("oklab(") ||
+                val.includes("lab(") ||
+                val.includes("lch(") ||
+                val.includes("color(")
+              ) {
+                try {
+                  const probe = _clonedDoc.createElement("div")
+                  probe.style.setProperty(prop, val)
+                  _clonedDoc.body.appendChild(probe)
+                  const resolved = _clonedDoc.defaultView!
+                    .getComputedStyle(probe)
+                    .getPropertyValue(prop)
+                  _clonedDoc.body.removeChild(probe)
+                  if (resolved && resolved !== val) {
+                    el.style.setProperty(prop, resolved)
+                  }
+                } catch (e) {
+                  // If resolution fails, fallback to a safe color
+                  el.style.setProperty(prop, "rgb(100, 100, 100)")
+                }
+              }
+            })
+          })
+        },
       })
 
       const link = document.createElement("a")
@@ -569,7 +617,6 @@ export default function TicketHistoryInfo() {
           router.push("/tickets")
         }}
       />
-
       <Footer />
     </div>
   )
