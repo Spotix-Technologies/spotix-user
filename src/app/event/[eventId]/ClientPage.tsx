@@ -15,7 +15,7 @@ import {
   authFetch,
   logout,
   type SessionUser,
-} from "@/app/lib/auth-client"
+} from "@/app/lib/auth-client-user"
 import UserHeader from "@/components/UserHeader"
 import Footer from "@/components/footer"
 import { ArrowLeft, X, Wallet, AlertCircle, Flag, Ticket } from "lucide-react"

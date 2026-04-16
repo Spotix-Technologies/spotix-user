@@ -1,87 +1,93 @@
 /**
  * app/api/v1/auth/logout/route.ts
  *
- * POST /api/v1/auth/logout — Log out from user portal
+ * POST /api/v1/auth/logout — Invalidate current session (or all sessions)
  *
- * Revokes the Firestore refresh token and clears all spotix_u_* cookies.
- * Accepts expired access tokens — logout is always idempotent.
+ * Body:
+ *   allDevices : boolean  — if true, revoke ALL sessions for this user
+ *                           if false (default), revoke only the current device
  *
- * Optional body:
- *   allDevices : boolean — revoke ALL refresh tokens for this user
+ * The access token is read from the spotix_u_at cookie to identify the user.
+ * If the access token is expired/invalid, the request is still processed
+ * (cookies are cleared regardless) — best-effort logout.
+ *
+ * On success: clears all three auth cookies and returns 200.
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { verifyAccessToken } from "@/app/lib/auth-tokens";
+import { verifyAccessToken }         from "@/app/lib/auth-tokens";
 import {
-  getRefreshTokenById,
   revokeRefreshToken,
   revokeAllTokensForUser,
 } from "@/app/lib/refresh-token-repo";
 import {
   COOKIE_ACCESS_TOKEN,
+  COOKIE_REFRESH_TOKEN,
   COOKIE_REFRESH_TOKEN_ID,
   clearAuthCookies,
-} from "@/app/api/v1/auth/route";
+} from "../route";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const AUDIENCE = "spotix-user" as const;
-const DEV_TAG = "API developed and maintained by Spotix Technologies";
+const DEV_TAG  = "API developed and maintained by Spotix Technologies";
 
-function ok<T extends object>(data: T) {
-  return NextResponse.json({ ...data, developer: DEV_TAG });
-}
-
-function err(error: string, message: string, status: number) {
-  return NextResponse.json({ error, message, developer: DEV_TAG }, { status });
-}
+// ── POST /api/v1/auth/logout ──────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
-  // Always clear cookies — logout is idempotent
-  const token = request.cookies.get(COOKIE_ACCESS_TOKEN)?.value;
-
-  if (!token) {
-    const res = ok({ success: true, message: "Logged out" });
-    clearAuthCookies(res);
-    return res;
-  }
-
-  // Expired tokens are fine here — we still want to clear the session
-  let payload;
-  try {
-    payload = await verifyAccessToken(token, AUDIENCE);
-  } catch {
-    const res = ok({ success: true, message: "Logged out" });
-    clearAuthCookies(res);
-    return res;
-  }
-
   let allDevices = false;
+
   try {
     const body = await request.json();
-    allDevices = body?.allDevices === true;
+    allDevices = Boolean(body?.allDevices);
   } catch {
-    // Body is optional
+    // Missing body — default to single-device logout
   }
 
-  if (allDevices) {
-    await revokeAllTokensForUser(payload.uid);
-    const res = ok({ success: true, message: "Logged out from all devices" });
-    clearAuthCookies(res);
-    return res;
-  }
+  // ── 1. Identify user from access token (best-effort) ─────────────────────
+  let uid:     string | null = null;
+  let tokenId: string | null = null;
 
-  // Single-device logout — revoke this device's refresh token
-  const refreshTokenId = request.cookies.get(COOKIE_REFRESH_TOKEN_ID)?.value;
-  if (refreshTokenId) {
-    const stored = await getRefreshTokenById(refreshTokenId);
-    if (stored && stored.userId === payload.uid) {
-      await revokeRefreshToken(refreshTokenId);
+  const accessToken = request.cookies.get(COOKIE_ACCESS_TOKEN)?.value;
+  if (accessToken) {
+    try {
+      const payload = await verifyAccessToken(accessToken, AUDIENCE);
+      uid = payload.uid;
+    } catch {
+      // Expired or invalid — still clear cookies below
     }
   }
 
-  const res = ok({ success: true, message: "Logged out successfully" });
-  clearAuthCookies(res);
-  return res;
+  // Refresh token ID is needed to revoke the specific device session
+  tokenId = request.cookies.get(COOKIE_REFRESH_TOKEN_ID)?.value || null;
+
+  // ── 2. Revoke Firestore token(s) ──────────────────────────────────────────
+  if (uid) {
+    try {
+      if (allDevices) {
+        await revokeAllTokensForUser(uid);
+      } else if (tokenId) {
+        await revokeRefreshToken(tokenId);
+      }
+    } catch (revokeErr) {
+      console.error("Logout revocation error:", revokeErr);
+      // Non-fatal — always clear cookies
+    }
+  }
+
+  // ── 3. Build response + clear all cookies ─────────────────────────────────
+  const response = NextResponse.json(
+    {
+      success:   true,
+      message:   allDevices
+        ? "Logged out from all devices"
+        : "Logged out successfully",
+      developer: DEV_TAG,
+    },
+    { status: 200 }
+  );
+
+  clearAuthCookies(response);
+  return response;
 }

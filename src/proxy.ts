@@ -29,7 +29,6 @@
  *
  *   x-user-id          ← uid from verified JWT
  *   x-user-email       ← email
- *   x-user-is-booker   ← "true" | "false"
  *   x-device-id        ← deviceId
  *
  * Usage in a server component or API route:
@@ -43,6 +42,17 @@ import { verifyAccessTokenEdge } from "@/app/lib/auth-edge";
 
 // ── Route sets ─────────────────────────────────────────────────────────────────
 
+/**
+ * Static and framework paths that should always pass through immediately
+ * with no token work — fast exit before any crypto.
+ */
+const BYPASS_PREFIXES = [
+  "/api/",
+  "/_next/static",
+  "/_next/image",
+  "/favicon.ico",
+];
+
 const PUBLIC_AUTH_ROUTES = new Set([
   "/auth/login",
   "/auth/signup",
@@ -52,8 +62,12 @@ const PUBLIC_AUTH_ROUTES = new Set([
 /**
  * Protected route prefixes — any path that starts with one of these
  * (including sub-paths) requires authentication.
+ *
+ * NOTE: /payment is listed in the JSDoc above but kept here explicitly
+ * so it is actually enforced.
  */
 const PROTECTED_PREFIXES = [
+  "/payment",
   "/ticket-history",
   "/profile",
   "/Referrals",
@@ -63,11 +77,15 @@ const PROTECTED_PREFIXES = [
   "/vote",
 ];
 
-// ── Cookie name (must match app/api/v1/auth/route.ts) ─────────────────────────
+// ── Cookie / audience ──────────────────────────────────────────────────────────
 const ACCESS_TOKEN_COOKIE = "spotix_u_at";
 const AUDIENCE = "spotix-user" as const;
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
+function isBypassPath(pathname: string): boolean {
+  return BYPASS_PREFIXES.some((p) => pathname.startsWith(p));
+}
 
 function isProtectedRoute(pathname: string): boolean {
   return PROTECTED_PREFIXES.some(
@@ -79,20 +97,27 @@ function isPublicAuthRoute(pathname: string): boolean {
   return PUBLIC_AUTH_ROUTES.has(pathname);
 }
 
-// ── proxy ─────────────────────────────────────────────────────────────────
+// ── proxy ──────────────────────────────────────────────────────────────────────
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // ── 0. Fast exit for static / API paths ─────────────────────────────────────
+  // No token work needed — let Next.js handle these normally.
+  if (isBypassPath(pathname)) {
+    return NextResponse.next();
+  }
+
   const token = request.cookies.get(ACCESS_TOKEN_COOKIE)?.value;
   const payload = await verifyAccessTokenEdge(token, AUDIENCE);
 
   // ── 1. Public auth routes (/auth/login, /auth/signup, etc.) ─────────────────
-if (isPublicAuthRoute(pathname)) {
-  if (payload) {
-    return NextResponse.redirect(new URL("/home", request.url));
+  if (isPublicAuthRoute(pathname)) {
+    if (payload) {
+      return NextResponse.redirect(new URL("/home", request.url));
+    }
+    return NextResponse.next();
   }
-  return NextResponse.next();
-}
 
   // ── 2. Protected routes ──────────────────────────────────────────────────────
   if (isProtectedRoute(pathname)) {
@@ -106,7 +131,6 @@ if (isPublicAuthRoute(pathname)) {
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set("x-user-id", payload.uid);
     requestHeaders.set("x-user-email", payload.email);
-    // requestHeaders.set("x-user-is-booker", String(payload.isBooker));
     requestHeaders.set("x-device-id", payload.deviceId);
 
     return NextResponse.next({ request: { headers: requestHeaders } });
@@ -119,7 +143,6 @@ if (isPublicAuthRoute(pathname)) {
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set("x-user-id", payload.uid);
     requestHeaders.set("x-user-email", payload.email);
-    // requestHeaders.set("x-user-is-booker", String(payload.isBooker));
     requestHeaders.set("x-device-id", payload.deviceId);
     return NextResponse.next({ request: { headers: requestHeaders } });
   }

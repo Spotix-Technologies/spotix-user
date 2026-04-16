@@ -4,11 +4,7 @@
  * POST /api/v1/user — Create a new user account
  *
  * ── Changes from original ─────────────────────────────────────────────────────
- *
- * 1. isBooker defaults to FALSE — the original hardcoded `isBooker: true` on
- *    every signup, which would have granted every user booker dashboard access.
- *    Regular users signing up through the user portal are not bookers.
- *    Booker status is granted separately (e.g. via admin or booker signup flow).
+ * 1. Analytics batching — instead of three separate Firestore writes for daily,   monthly, and yearly analytics, now uses a single batch write to update all three in one atomic operation, improving performance and consistency.
  *
  * 2. Referral code fetched once — the original hit Firestore twice for the same
  *    referral document (once to verify, once to process). Now fetched once and

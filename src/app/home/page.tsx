@@ -1,5 +1,5 @@
 import type { Metadata } from "next"
-import Home from "./client"
+import HomePageClient from "./page-client"
 
 export const metadata: Metadata = {
   title: "Home",
@@ -42,5 +42,5 @@ export const metadata: Metadata = {
 }
 
 export default function HomePage() {
-  return <Home />
+  return <HomePageClient />
 }

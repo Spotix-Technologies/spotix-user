@@ -1,125 +1,85 @@
 /**
- * lib/auth-tokens.ts
- * Handles access token (JWT) generation and refresh token hashing.
- * Access tokens are short-lived (15 min), generated in-memory — never stored.
- * Refresh tokens are bcrypt-hashed before storage in Firestore.
- */
-
-import * as jose from "jose";
-import bcrypt from "bcryptjs";
-import { randomUUID, randomBytes } from "crypto";
-
-// ── Environment ────────────────────────────────────────────────────────────────
-const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET;
-if (!ACCESS_TOKEN_SECRET) {
-  throw new Error("ACCESS_TOKEN_SECRET env var is required");
-}
-
-const secret = new TextEncoder().encode(ACCESS_TOKEN_SECRET);
-
-export const ACCESS_TOKEN_TTL_SECONDS = 15 * 60; // 15 minutes
-export const REFRESH_TOKEN_TTL_DAYS = 30;
-
-/**
- * JWT audience values — one per portal.
- * Tokens issued for one portal are cryptographically rejected by the other,
- * even though both portals share the same ACCESS_TOKEN_SECRET.
+ * app/lib/auth-tokens.ts
  *
- *   "spotix-booker"  → booker dashboard  (app/api/auth/*)
- *   "spotix-user"    → user portal       (app/api/v1/auth/*)
+ * Shared JWT infrastructure for both the Booker and User portals.
+ *
+ * ── Audiences ─────────────────────────────────────────────────────────────────
+ *   "spotix-booker"  — tokens issued at POST /api/v1/auth  (organiser portal)
+ *   "spotix-user"    — tokens issued at POST /api/v1/auth  (user portal)
+ *
+ * A token signed for one audience is REJECTED by the other portal's middleware
+ * even though both use the same ACCESS_TOKEN_SECRET.
+ *
+ * ── Required env vars ─────────────────────────────────────────────────────────
+ *   ACCESS_TOKEN_SECRET   — long random string; shared between both portals
+ *
+ * ── Token lifetimes ───────────────────────────────────────────────────────────
+ *   Access token  : 15 minutes  (ACCESS_TOKEN_TTL_SECONDS = 900)
+ *   Refresh token : 30 days     (REFRESH_TOKEN_TTL_DAYS   = 30)
  */
-export type TokenAudience = "spotix-booker" | "spotix-user";
 
-// ── Types ──────────────────────────────────────────────────────────────────────
-export interface AccessTokenPayload {
-  uid: string;
-  email: string;
-  isBooker: boolean;
-  deviceId: string;
-}
+import { SignJWT, jwtVerify, type JWTPayload } from "jose";
+import { randomUUID } from "crypto";
 
-export interface TokenPair {
-  accessToken: string;
-  /** Raw refresh token — send to client, hash before storing */
-  rawRefreshToken: string;
-  refreshTokenId: string;
-  expiresAt: Date;
+export const ACCESS_TOKEN_TTL_SECONDS = 900;       // 15 min
+export const REFRESH_TOKEN_TTL_DAYS   = 30;
+
+export type PortalAudience = "spotix-booker" | "spotix-user";
+
+export interface SpotixTokenPayload extends JWTPayload {
+  uid:       string;
+  email:     string;
+  isBooker:  boolean;
+  deviceId:  string;
 }
 
 export interface DeviceMeta {
-  platform?: string;
-  model?: string;
+  platform?:   string;
+  model?:      string;
   appVersion?: string;
 }
 
-// ── Access Tokens (JWT, in-memory only) ───────────────────────────────────────
+function getSecret(): Uint8Array {
+  const secret = process.env.ACCESS_TOKEN_SECRET;
+  if (!secret) throw new Error("ACCESS_TOKEN_SECRET env var is not set");
+  return new TextEncoder().encode(secret);
+}
 
 /**
- * Sign an access token for the specified portal audience.
- * Always pass the audience explicitly — never rely on a default.
+ * Sign a new access token.
+ *
+ * @param payload  - uid, email, isBooker, deviceId
+ * @param audience - "spotix-booker" | "spotix-user"
  */
 export async function signAccessToken(
-  payload: AccessTokenPayload,
-  audience: TokenAudience
+  payload: Omit<SpotixTokenPayload, keyof JWTPayload>,
+  audience: PortalAudience
 ): Promise<string> {
-  return new jose.SignJWT({ ...payload })
+  return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${ACCESS_TOKEN_TTL_SECONDS}s`)
-    .setIssuer("spotix")
     .setAudience(audience)
-    .sign(secret);
+    .setIssuer("spotix")
+    .sign(getSecret());
 }
 
 /**
- * Verify an access token, enforcing the expected audience.
- * A booker token passed to the user portal verifier (or vice-versa) will throw.
+ * Verify an access token and assert its audience.
+ * Throws jose errors on expiry, bad signature, wrong audience, etc.
  */
 export async function verifyAccessToken(
-  token: string,
-  audience: TokenAudience
-): Promise<AccessTokenPayload> {
-  const { payload } = await jose.jwtVerify(token, secret, {
-    issuer: "spotix",
+  token:    string,
+  audience: PortalAudience
+): Promise<SpotixTokenPayload> {
+  const { payload } = await jwtVerify(token, getSecret(), {
     audience,
+    issuer: "spotix",
   });
-
-  return {
-    uid: payload.uid as string,
-    email: payload.email as string,
-    isBooker: payload.isBooker as boolean,
-    deviceId: payload.deviceId as string,
-  };
+  return payload as SpotixTokenPayload;
 }
 
-// ── Refresh Tokens (bcrypt-hashed, stored in Firestore) ───────────────────────
-
-/** Generate a cryptographically random refresh token */
-export function generateRawRefreshToken(): string {
-  return randomBytes(48).toString("hex"); // 96-char hex string
-}
-
-/** Hash a raw token with bcrypt (cost 12) before Firestore storage */
-export async function hashRefreshToken(rawToken: string): Promise<string> {
-  return bcrypt.hash(rawToken, 12);
-}
-
-/** Verify a raw token against a stored bcrypt hash */
-export async function verifyRefreshTokenHash(
-  rawToken: string,
-  storedHash: string
-): Promise<boolean> {
-  return bcrypt.compare(rawToken, storedHash);
-}
-
-/** Generate a stable device ID if the client doesn't provide one */
+/** Generate a stable device UUID (server-side fallback). */
 export function newDeviceId(): string {
   return randomUUID();
-}
-
-/** Calculate refresh token expiry date (30 days from now) */
-export function refreshTokenExpiresAt(): Date {
-  const d = new Date();
-  d.setDate(d.getDate() + REFRESH_TOKEN_TTL_DAYS);
-  return d;
 }
