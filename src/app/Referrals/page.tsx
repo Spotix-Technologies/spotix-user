@@ -1,5 +1,5 @@
 import type { Metadata } from "next"
-import ReferralsClient from "./client"
+import ReferralsPageClient from "./page-client"
 
 export const metadata: Metadata = {
   title: "Referrals",
@@ -44,5 +44,5 @@ export const metadata: Metadata = {
 }
 
 export default function ReferralsPage() {
-  return <ReferralsClient />
+  return <ReferralsPageClient />
 }

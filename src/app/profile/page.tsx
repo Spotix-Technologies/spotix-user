@@ -1,5 +1,5 @@
 import type { Metadata } from "next"
-import Profile from "./client"
+import ProfilePageClient from "./page-client"
 
 export const metadata: Metadata = {
   title: "Profile",
@@ -42,5 +42,5 @@ export const metadata: Metadata = {
 }
 
 export default function ProfilePage() {
-  return <Profile />
+  return <ProfilePageClient />
 }

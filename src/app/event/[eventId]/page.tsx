@@ -1,4 +1,3 @@
-import ClientPage from "./ClientPage"
 import type { Metadata } from "next"
 import { adminDb } from "@/app/lib/firebase-admin"
 import { PhoneCall, Mail, ShieldOff } from "lucide-react"
@@ -240,6 +239,8 @@ function SuspendedPage({ eventData }: { eventData: EventType }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+import EventPageClientWrapper from "./page-client"
+
 export default async function EventPage({
   params,
 }: {
@@ -252,5 +253,10 @@ export default async function EventPage({
     return <SuspendedPage eventData={eventData} />
   }
 
-  return <ClientPage params={{ createdBy, eventId }} initialEventData={eventData} />
+  return (
+    <EventPageClientWrapper
+      params={{ createdBy, eventId }}
+      initialEventData={eventData}
+    />
+  )
 }
