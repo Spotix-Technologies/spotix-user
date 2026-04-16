@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { adminDb } from "@/app/lib/firebase-admin"
 import { FieldValue } from "firebase-admin/firestore"
-import { verifyAccessToken, type TokenAudience } from "@/app/lib/auth-tokens"
+import { verifyAccessToken } from "@/app/lib/auth-tokens"
 
-const AUDIENCE: TokenAudience = "spotix-user"
+const AUDIENCE = "spotix-user"
 
 // Shared auth helper
 async function authenticate(request: NextRequest) {
