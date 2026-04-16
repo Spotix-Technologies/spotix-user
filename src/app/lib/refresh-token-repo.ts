@@ -1,82 +1,148 @@
 /**
- * lib/refresh-token-repo.ts
- * All Firestore operations for the `refreshTokens/{tokenId}` collection.
+ * app/lib/refresh-token-repo.ts
  *
- * Schema:
- *   refreshTokens/{tokenId}
- *     userId      : string
- *     tokenHash   : string   (bcrypt)
- *     deviceId    : string   (UUID from client)
- *     deviceMeta  : { platform, model, appVersion }
- *     createdAt   : Timestamp
- *     expiresAt   : Timestamp  (30 days)
- *     isRevoked   : boolean
- *     lastUsedAt  : Timestamp
+ * Firestore helpers for the refreshTokens/{tokenId} collection.
+ *
+ * Schema (one document per active session):
+ * ┌──────────────────┬───────────────────────────────────────────────────────┐
+ * │ Field            │ Description                                           │
+ * ├──────────────────┼───────────────────────────────────────────────────────┤
+ * │ userId           │ Firebase UID                                          │
+ * │ deviceId         │ Stable UUID from the client                           │
+ * │ tokenHash        │ bcrypt hash of the raw token (cost factor 10)         │
+ * │ deviceMeta       │ { platform, model, appVersion }                       │
+ * │ createdAt        │ ISO string                                            │
+ * │ expiresAt        │ Firestore Timestamp (30 days from creation)           │
+ * │ revoked          │ boolean — false until logout / rotation               │
+ * │ revokedAt        │ ISO string | null                                     │
+ * └──────────────────┴───────────────────────────────────────────────────────┘
+ *
+ * Security properties:
+ *   - Raw token is NEVER stored; only its bcrypt hash.
+ *   - On every successful refresh the old token is revoked and a new one issued
+ *     (rolling window rotation).
+ *   - On login, all existing active tokens for the same userId+deviceId are
+ *     revoked first (single-session-per-device model).
  */
 
 import { adminDb } from "@/app/lib/firebase-admin";
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
-import { randomUUID } from "crypto";
-import {
-  hashRefreshToken,
-  generateRawRefreshToken,
-  refreshTokenExpiresAt,
-  type DeviceMeta,
-} from "./auth-tokens";
+import { Timestamp } from "firebase-admin/firestore";
+import bcrypt from "bcryptjs";
+import { randomBytes } from "crypto";
+import { REFRESH_TOKEN_TTL_DAYS, type DeviceMeta } from "./auth-tokens";
 
 const COLLECTION = "refreshTokens";
+const BCRYPT_ROUNDS = 10;
 
-// ── Types ──────────────────────────────────────────────────────────────────────
-export interface StoredRefreshToken {
-  id: string;
-  userId: string;
-  tokenHash: string;
-  deviceId: string;
-  deviceMeta: DeviceMeta;
-  createdAt: Date;
-  expiresAt: Date;
-  isRevoked: boolean;
-  lastUsedAt: Date;
-}
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-export interface IssueTokenResult {
-  tokenId: string;
-  rawToken: string;
+export interface IssuedRefreshToken {
+  tokenId:   string;    // Firestore document ID — stored in spotix_u_rtid cookie
+  rawToken:  string;    // Sent in spotix_u_rt cookie (never persisted)
   expiresAt: Date;
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
-function docToStoredToken(id: string, data: FirebaseFirestore.DocumentData): StoredRefreshToken {
+// ── Issue ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Create a new refresh token document.
+ * Returns the raw token (to be set as httpOnly cookie) and its Firestore ID.
+ */
+export async function issueRefreshToken(
+  userId:     string,
+  deviceId:   string,
+  deviceMeta: DeviceMeta = { platform: "unknown", model: "unknown", appVersion: "1.0.0" }
+): Promise<IssuedRefreshToken> {
+  const rawToken  = randomBytes(48).toString("hex");   // 96-char hex string
+  const tokenHash = await bcrypt.hash(rawToken, BCRYPT_ROUNDS);
+  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
+
+  const docRef = await adminDb.collection(COLLECTION).add({
+    userId,
+    deviceId,
+    tokenHash,
+    deviceMeta,
+    createdAt:  new Date().toISOString(),
+    expiresAt:  Timestamp.fromDate(expiresAt),
+    revoked:    false,
+    revokedAt:  null,
+  });
+
+  return { tokenId: docRef.id, rawToken, expiresAt };
+}
+
+// ── Verify ────────────────────────────────────────────────────────────────────
+
+/**
+ * Verify a refresh token by:
+ *   1. Fetching the Firestore document by tokenId.
+ *   2. Checking it's not revoked and not expired.
+ *   3. bcrypt-comparing the raw token against the stored hash.
+ *
+ * Returns the document data on success, throws on any failure.
+ */
+export async function verifyRefreshToken(
+  tokenId:  string,
+  rawToken: string
+): Promise<{ userId: string; deviceId: string; deviceMeta: DeviceMeta }> {
+  const docRef  = adminDb.collection(COLLECTION).doc(tokenId);
+  const docSnap = await docRef.get();
+
+  if (!docSnap.exists) {
+    throw new Error("Refresh token not found");
+  }
+
+  const data = docSnap.data()!;
+
+  if (data.revoked) {
+    throw new Error("Refresh token has been revoked");
+  }
+
+  const expiresAt: Date =
+    data.expiresAt instanceof Timestamp
+      ? data.expiresAt.toDate()
+      : new Date(data.expiresAt);
+
+  if (expiresAt < new Date()) {
+    throw new Error("Refresh token has expired");
+  }
+
+  const valid = await bcrypt.compare(rawToken, data.tokenHash);
+  if (!valid) {
+    throw new Error("Refresh token is invalid");
+  }
+
   return {
-    id,
-    userId: data.userId,
-    tokenHash: data.tokenHash,
-    deviceId: data.deviceId,
-    deviceMeta: data.deviceMeta || {},
-    createdAt: (data.createdAt as Timestamp).toDate(),
-    expiresAt: (data.expiresAt as Timestamp).toDate(),
-    isRevoked: data.isRevoked,
-    lastUsedAt: (data.lastUsedAt as Timestamp).toDate(),
+    userId:     data.userId,
+    deviceId:   data.deviceId,
+    deviceMeta: data.deviceMeta || { platform: "unknown", model: "unknown", appVersion: "1.0.0" },
   };
 }
 
-// ── Core Operations ────────────────────────────────────────────────────────────
+// ── Revoke ────────────────────────────────────────────────────────────────────
+
+/** Mark a single token as revoked (used during rolling refresh). */
+export async function revokeRefreshToken(tokenId: string): Promise<void> {
+  await adminDb.collection(COLLECTION).doc(tokenId).update({
+    revoked:   true,
+    revokedAt: new Date().toISOString(),
+  });
+}
 
 /**
- * Revoke all active (non-revoked, non-expired) refresh tokens
- * for a given userId + deviceId pair.
- * Called at login to prevent duplicate active sessions on the same device.
+ * Revoke ALL active tokens for a given userId + deviceId combo.
+ * Called at the start of login to enforce single-session-per-device.
  */
 export async function revokeActiveTokensForDevice(
-  userId: string,
+  userId:   string,
   deviceId: string
 ): Promise<void> {
   const now = Timestamp.now();
   const snap = await adminDb
     .collection(COLLECTION)
-    .where("userId", "==", userId)
+    .where("userId",   "==", userId)
     .where("deviceId", "==", deviceId)
-    .where("isRevoked", "==", false)
+    .where("revoked",  "==", false)
     .where("expiresAt", ">", now)
     .get();
 
@@ -84,130 +150,35 @@ export async function revokeActiveTokensForDevice(
 
   const batch = adminDb.batch();
   snap.docs.forEach((doc) => {
-    batch.update(doc.ref, { isRevoked: true });
+    batch.update(doc.ref, {
+      revoked:   true,
+      revokedAt: new Date().toISOString(),
+    });
   });
   await batch.commit();
 }
 
 /**
- * Issue a brand-new refresh token for a user/device.
- * Generates raw token → hashes it → stores in Firestore.
- * Returns the raw token (to send to client) + metadata.
- */
-export async function issueRefreshToken(
-  userId: string,
-  deviceId: string,
-  deviceMeta: DeviceMeta
-): Promise<IssueTokenResult> {
-  const rawToken = generateRawRefreshToken();
-  const tokenHash = await hashRefreshToken(rawToken);
-  const expiresAt = refreshTokenExpiresAt();
-  const now = new Date();
-  const tokenId = randomUUID();
-
-  await adminDb
-    .collection(COLLECTION)
-    .doc(tokenId)
-    .set({
-      userId,
-      tokenHash,
-      deviceId,
-      deviceMeta,
-      createdAt: Timestamp.fromDate(now),
-      expiresAt: Timestamp.fromDate(expiresAt),
-      isRevoked: false,
-      lastUsedAt: Timestamp.fromDate(now),
-    });
-
-  return { tokenId, rawToken, expiresAt };
-}
-
-/**
- * Fetch a stored refresh token by its document ID.
- * Returns null if not found.
- */
-export async function getRefreshTokenById(
-  tokenId: string
-): Promise<StoredRefreshToken | null> {
-  const doc = await adminDb.collection(COLLECTION).doc(tokenId).get();
-  if (!doc.exists) return null;
-  return docToStoredToken(doc.id, doc.data()!);
-}
-
-/**
- * Rotate a refresh token:
- *   1. Revoke the old token document
- *   2. Issue a new token for the same userId + deviceId
- * Returns the new raw token and metadata.
- */
-export async function rotateRefreshToken(
-  oldTokenId: string,
-  userId: string,
-  deviceId: string,
-  deviceMeta: DeviceMeta
-): Promise<IssueTokenResult> {
-  // Revoke old in a transaction alongside issuing new to prevent race conditions
-  const newTokenId = randomUUID();
-  const rawToken = generateRawRefreshToken();
-  const tokenHash = await hashRefreshToken(rawToken);
-  const expiresAt = refreshTokenExpiresAt();
-  const now = new Date();
-
-  await adminDb.runTransaction(async (tx) => {
-    const oldRef = adminDb.collection(COLLECTION).doc(oldTokenId);
-    const newRef = adminDb.collection(COLLECTION).doc(newTokenId);
-
-    tx.update(oldRef, { isRevoked: true });
-    tx.set(newRef, {
-      userId,
-      tokenHash,
-      deviceId,
-      deviceMeta,
-      createdAt: Timestamp.fromDate(now),
-      expiresAt: Timestamp.fromDate(expiresAt),
-      isRevoked: false,
-      lastUsedAt: Timestamp.fromDate(now),
-    });
-  });
-
-  return { tokenId: newTokenId, rawToken, expiresAt };
-}
-
-/**
- * Mark a token as recently used (update lastUsedAt).
- */
-export async function touchRefreshToken(tokenId: string): Promise<void> {
-  await adminDb
-    .collection(COLLECTION)
-    .doc(tokenId)
-    .update({ lastUsedAt: FieldValue.serverTimestamp() });
-}
-
-/**
- * Revoke a single token by ID (logout from one device).
- */
-export async function revokeRefreshToken(tokenId: string): Promise<void> {
-  await adminDb
-    .collection(COLLECTION)
-    .doc(tokenId)
-    .update({ isRevoked: true });
-}
-
-/**
- * Revoke ALL tokens for a user (logout from all devices).
+ * Revoke ALL active tokens for a userId (all devices).
+ * Used by POST /api/v1/auth/logout?allDevices=true.
  */
 export async function revokeAllTokensForUser(userId: string): Promise<void> {
+  const now  = Timestamp.now();
   const snap = await adminDb
     .collection(COLLECTION)
-    .where("userId", "==", userId)
-    .where("isRevoked", "==", false)
+    .where("userId",    "==", userId)
+    .where("revoked",   "==", false)
+    .where("expiresAt", ">", now)
     .get();
 
   if (snap.empty) return;
 
   const batch = adminDb.batch();
   snap.docs.forEach((doc) => {
-    batch.update(doc.ref, { isRevoked: true });
+    batch.update(doc.ref, {
+      revoked:   true,
+      revokedAt: new Date().toISOString(),
+    });
   });
   await batch.commit();
 }
