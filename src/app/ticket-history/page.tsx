@@ -1,5 +1,5 @@
 import type { Metadata } from "next"
-import TicketHistoryClient from "./client"
+import TicketHistoryPageClient from "./page-client"
 
 export const metadata: Metadata = {
   title: "Ticket History",
@@ -44,5 +44,5 @@ export const metadata: Metadata = {
 }
 
 export default function TicketHistoryPage() {
-  return <TicketHistoryClient />
+  return <TicketHistoryPageClient />
 }

@@ -34,9 +34,9 @@ export interface SpotixTokenPayload extends JWTPayload {
 }
 
 export interface DeviceMeta {
-  platform:   string;
-  model:      string;
-  appVersion: string;
+  platform?:   string;
+  model?:      string;
+  appVersion?: string;
 }
 
 function getSecret(): Uint8Array {

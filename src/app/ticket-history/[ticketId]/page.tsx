@@ -6,7 +6,7 @@ import { ArrowLeft, Calendar, Clock, MapPin, QrCode, Sparkles, Download, Scan, C
 import UserHeader from "@/components/UserHeader"
 import Footer from "@/components/footer"
 import QRCode from "react-qr-code"
-import html2canvas from "html2canvas"
+import jsPDF from "jspdf"
 import FaceEmbeddingModal from "@/components/FaceEmbeddingModal"
 import GiftTicket from "./helper/giftTicket"
 
@@ -168,80 +168,286 @@ export default function TicketHistoryInfo() {
    * Fix: before capturing, clone the element and replace all computed styles
    * that use oklch/lab with their rgb() fallbacks computed by the browser.
    */
-  const handleDownloadTicket = async () => {
-    if (!ticketRef.current || !ticketDetails || !qrCodeGenerated) return
-    setIsDownloading(true)
-    try {
-      // Build a safe style overrides map so html2canvas only sees rgb()
-      const allElements = [
-        ticketRef.current,
-        ...Array.from(ticketRef.current.querySelectorAll("*")),
-      ] as HTMLElement[]
 
-      const styleOverrides = new Map<HTMLElement, { property: string; value: string }[]>()
+const handleDownloadTicket = async () => {
+  if (!ticketDetails || !qrCodeGenerated) return
+  setIsDownloading(true)
 
-      const colorProps = [
-        "color", "background-color", "border-color",
-        "border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
-        "outline-color", "text-decoration-color", "fill", "stroke",
-      ]
+  try {
+    const doc = new jsPDF({ unit: "pt", format: "a4" })
+    const pageW = doc.internal.pageSize.getWidth()
+    const margin = 40
+    const contentW = pageW - margin * 2
+    let y = 0
 
-      allElements.forEach((el) => {
-        const computed = window.getComputedStyle(el)
-        const overrides: { property: string; value: string }[] = []
+    // ── Header Band ──────────────────────────────────────────────
+    doc.setFillColor(107, 47, 165)
+    doc.rect(0, 0, pageW, 110, "F")
 
-        colorProps.forEach((prop) => {
-          const value = computed.getPropertyValue(prop)
-          // Replace oklch/lab/lch/oklab with a dummy safe fallback only if needed
-          // The browser already resolves these to rgb() in getComputedStyle on
-          // Chromium — but if it doesn't (Safari/Firefox), we skip gracefully.
-          if (value && (value.includes("oklch") || value.includes("lab(") || value.includes("lch(") || value.includes("oklab("))) {
-            // Force the element to use the resolved rgb via a temporary inline style reset
-            overrides.push({ property: prop, value: "transparent" })
-          }
-        })
-
-        if (overrides.length) styleOverrides.set(el, overrides)
-      })
-
-      // Temporarily patch problematic elements
-      styleOverrides.forEach((overrides, el) => {
-        overrides.forEach(({ property, value }) => {
-          el.style.setProperty(property, value)
-        })
-      })
-
-      const canvas = await html2canvas(ticketRef.current, {
-        useCORS: true,
-        allowTaint: false,
-        backgroundColor: "#ffffff",
-        scale: 2, // retina quality
-        logging: false,
-        // Ignore elements that can't be rendered (like SVG QR codes need special handling)
-        ignoreElements: (element) => {
-          // html2canvas handles inline SVG fine; skip nothing by default
-          return false
-        },
-      })
-
-      // Restore patched styles
-      styleOverrides.forEach((overrides, el) => {
-        overrides.forEach(({ property }) => {
-          el.style.removeProperty(property)
-        })
-      })
-
-      const link = document.createElement("a")
-      link.href = canvas.toDataURL("image/png")
-      link.download = `ticket-${ticketDetails.ticketReference}.png`
-      link.click()
-    } catch (error) {
-      console.error("Error downloading ticket:", error)
-      alert("Failed to download ticket. Please try again.")
-    } finally {
-      setIsDownloading(false)
+    doc.setFillColor(130, 80, 190)
+    for (let cx = 20; cx < pageW; cx += 40) {
+      for (let cy = 5; cy < 110; cy += 40) {
+        doc.circle(cx, cy, 1.5, "F")
+      }
     }
+
+    doc.setFont("helvetica", "normal")
+    doc.setFontSize(9)
+    doc.setTextColor(200, 170, 230)
+    doc.text((ticketDetails.eventType || "EVENT").toUpperCase(), margin, 36)
+
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(22)
+    doc.setTextColor(255, 255, 255)
+    const eventNameLines = doc.splitTextToSize(ticketDetails.eventName, contentW - 80)
+    doc.text(eventNameLines, margin, 62)
+
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(11)
+    doc.setTextColor(220, 190, 255)
+    doc.text("SPOTIX", pageW - margin, 36, { align: "right" })
+
+    y = 130
+
+    // ── Tear-line ─────────────────────────────────────────────────
+    doc.setDrawColor(220, 220, 220)
+    doc.setLineDashPattern([4, 4], 0)
+    doc.line(margin, y, pageW - margin, y)
+    doc.setLineDashPattern([], 0)
+    doc.setFillColor(245, 245, 245)
+    doc.circle(margin - 10, y, 8, "F")
+    doc.circle(pageW - margin + 10, y, 8, "F")
+
+    y += 28
+
+    // ── Helpers ───────────────────────────────────────────────────
+    const label = (text: string, lx: number, ly: number) => {
+      doc.setFont("helvetica", "bold")
+      doc.setFontSize(7)
+      doc.setTextColor(160, 160, 160)
+      doc.text(text.toUpperCase(), lx, ly)
+    }
+
+    const value = (
+      text: string,
+      vx: number,
+      vy: number,
+      opts?: { color?: [number, number, number]; size?: number; mono?: boolean }
+    ) => {
+      doc.setFont(opts?.mono ? "courier" : "helvetica", "bold")
+      doc.setFontSize(opts?.size ?? 11)
+      doc.setTextColor(...(opts?.color ?? ([30, 30, 30] as [number, number, number])))
+      doc.text(text, vx, vy)
+    }
+
+    const divider = (dy: number) => {
+      doc.setDrawColor(230, 230, 230)
+      doc.setLineDashPattern([3, 3], 0)
+      doc.line(margin, dy, pageW - margin, dy)
+      doc.setLineDashPattern([], 0)
+    }
+
+    // ── Row 1: Date & Time | Venue ────────────────────────────────
+    const col1 = margin
+    const col2 = margin + contentW / 2 + 10
+
+    label("Date & Time", col1, y)
+    label("Venue", col2, y)
+    y += 16
+
+    const dateStr = ticketDetails.eventDate
+      ? formatDisplayDate(ticketDetails.eventDate)
+      : "Not specified"
+    value(dateStr, col1, y, { size: 10 })
+
+    const venueStr = ticketDetails.eventVenue || "Not specified"
+    const venueLines = doc.splitTextToSize(venueStr, contentW / 2 - 10)
+    value(venueLines[0], col2, y, { size: 10 })
+    y += 16
+
+    if (ticketDetails.eventStart) {
+      const timeStr = `${formatDisplayTime(ticketDetails.eventStart)}${
+        ticketDetails.eventEnd ? " – " + formatDisplayTime(ticketDetails.eventEnd) : ""
+      }`
+      doc.setFont("helvetica", "normal")
+      doc.setFontSize(9)
+      doc.setTextColor(107, 47, 165)
+      doc.text(timeStr, col1, y)
+    }
+
+    if (venueLines[1]) {
+      value(venueLines[1], col2, y, { size: 10 })
+    }
+
+    y += 30
+    divider(y)
+    y += 20
+
+    // ── Row 2: Ticket Type | Price | Reference ────────────────────
+    const thirdW = contentW / 3
+    const col3 = margin + thirdW
+    const col4 = margin + thirdW * 2
+
+    label("Ticket Type", col1, y)
+    label("Price", col3, y)
+    label("Reference", col4, y)
+    y += 16
+
+    value(ticketDetails.ticketType, col1, y)
+    value(
+      ticketDetails.ticketPrice === 0 ? "Free" : `N${ticketDetails.ticketPrice.toLocaleString()}`,
+      col3,
+      y,
+      { color: [107, 47, 165], size: 13 }
+    )
+    value(ticketDetails.ticketReference, col4, y, { mono: true, size: 9 })
+
+    y += 30
+    divider(y)
+    y += 20
+
+    // ── Row 3: Ticket ID ──────────────────────────────────────────
+    label("Ticket ID", col1, y)
+    y += 16
+    doc.setFont("courier", "bold")
+    doc.setFontSize(16)
+    doc.setTextColor(20, 20, 20)
+    doc.setCharSpace(2)
+    doc.text(ticketId, col1, y)
+    doc.setCharSpace(0)
+
+    y += 30
+    divider(y)
+    y += 20
+
+    // ── Row 4: Purchased | Time ───────────────────────────────────
+    label("Purchased", col1, y)
+    label("Time", col2, y)
+    y += 16
+    value(ticketDetails.purchaseDate, col1, y, { size: 10 })
+    value(ticketDetails.purchaseTime, col2, y, { size: 10 })
+    y += 34
+
+    // ── Gift Banner ───────────────────────────────────────────────
+    if (ticketDetails.giftedBy) {
+      const bannerH = ticketDetails.giftNote ? 56 : 36
+      doc.setFillColor(245, 237, 255)
+      doc.setDrawColor(200, 170, 230)
+      doc.roundedRect(margin, y, contentW, bannerH, 6, 6, "FD")
+      doc.setFont("helvetica", "bold")
+      doc.setFontSize(9)
+      doc.setTextColor(107, 47, 165)
+      doc.text(
+        `Gifted to you by ${ticketDetails.gifterName || ticketDetails.giftedBy}`,
+        margin + 12,
+        y + 16
+      )
+      if (ticketDetails.giftNote) {
+        doc.setFont("helvetica", "italic")
+        doc.setFontSize(8)
+        doc.setTextColor(130, 80, 180)
+        doc.text(`"${ticketDetails.giftNote}"`, margin + 12, y + 32)
+      }
+      y += bannerH + 16
+    }
+
+    // ── QR Code ───────────────────────────────────────────────────
+    // Locate the live SVG rendered by react-qr-code in the DOM
+    const qrSize = 120
+    const qrX = pageW / 2 - qrSize / 2
+
+    // react-qr-code renders a plain <svg> inside .qr-code-wrapper
+    const svgEl = document.querySelector<SVGElement>(".qr-code-wrapper svg")
+
+    if (svgEl) {
+      // Serialise the SVG, rasterise to canvas, embed as PNG
+      const svgData = new XMLSerializer().serializeToString(svgEl)
+      const svgBlob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" })
+      const svgUrl = URL.createObjectURL(svgBlob)
+
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const image = new Image()
+        // Must set dimensions — SVG blobs have no intrinsic size in some browsers
+        image.width = 220
+        image.height = 220
+        image.onload = () => resolve(image)
+        image.onerror = (e) => reject(e)
+        image.src = svgUrl
+      })
+
+      const cvs = document.createElement("canvas")
+      cvs.width = 220
+      cvs.height = 220
+      const ctx = cvs.getContext("2d")!
+      ctx.fillStyle = "#ffffff"
+      ctx.fillRect(0, 0, 220, 220)
+      ctx.drawImage(img, 0, 0, 220, 220)
+      URL.revokeObjectURL(svgUrl)
+
+      const pngData = cvs.toDataURL("image/png")
+      doc.addImage(pngData, "PNG", qrX, y, qrSize, qrSize)
+    } else {
+      // Fallback placeholder if QR isn't visible/generated yet
+      doc.setFillColor(245, 245, 245)
+      doc.setDrawColor(200, 200, 200)
+      doc.roundedRect(qrX, y, qrSize, qrSize, 4, 4, "FD")
+      doc.setFont("helvetica", "normal")
+      doc.setFontSize(8)
+      doc.setTextColor(150, 150, 150)
+      doc.text("QR Code unavailable", pageW / 2, y + qrSize / 2 + 3, { align: "center" })
+    }
+
+    y += qrSize + 10
+
+    doc.setFont("helvetica", "normal")
+    doc.setFontSize(8)
+    doc.setTextColor(150, 150, 150)
+    doc.text("Show only to official check-in staff", pageW / 2, y, { align: "center" })
+
+    y += 28
+
+    // ── Footer ────────────────────────────────────────────────────
+    divider(y)
+    y += 16
+
+    // "Verified by" and "SPOTIX" on the SAME baseline, side by side
+    const footerText = "Verified by"
+    doc.setFont("helvetica", "normal")
+    doc.setFontSize(8)
+    doc.setTextColor(180, 180, 180)
+    const verifiedWidth = doc.getTextWidth(footerText)
+
+    // Centre both words together as a unit
+    const spotixText = " SPOTIX"
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(8)
+    doc.setTextColor(107, 47, 165)
+    const spotixWidth = doc.getTextWidth(spotixText)
+
+    const totalWidth = verifiedWidth + spotixWidth
+    const startX = pageW / 2 - totalWidth / 2
+
+    // Draw "Verified by" first
+    doc.setFont("helvetica", "normal")
+    doc.setFontSize(8)
+    doc.setTextColor(180, 180, 180)
+    doc.text(footerText, startX, y)
+
+    // Draw "SPOTIX" immediately after
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(8)
+    doc.setTextColor(107, 47, 165)
+    doc.text(spotixText, startX + verifiedWidth, y)
+
+    // ── Save ──────────────────────────────────────────────────────
+    doc.save(`ticket-${ticketDetails.ticketReference}.pdf`)
+  } catch (error) {
+    console.error("Error generating PDF:", error)
+    alert("Failed to generate PDF. Please try again.")
+  } finally {
+    setIsDownloading(false)
   }
+}
 
   const handleAddToCalendar = () => {
     if (!ticketDetails?.eventDate) { alert("Event date not available"); return }
@@ -569,7 +775,6 @@ export default function TicketHistoryInfo() {
           router.push("/tickets")
         }}
       />
-
       <Footer />
     </div>
   )
