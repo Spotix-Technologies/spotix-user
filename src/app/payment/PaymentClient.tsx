@@ -7,7 +7,7 @@ import { auth, db } from "../lib/firebase"
 import { onAuthStateChanged } from "firebase/auth"
 import UserHeader from "@/components/UserHeader"
 import Footer from "@/components/footer"
-import { collection, getDocs, doc, getDoc } from "firebase/firestore"
+import { doc, getDoc } from "firebase/firestore"
 import PayWithPaystack from "@/components/PayWithPaystack"
 import { calculateVATFee } from "@/utils/priceUtility"
 
@@ -212,8 +212,8 @@ export default function PaymentClient() {
             setPaymentData(parsedData)
           }
 
-          if (parsedData.eventCreatorId && parsedData.eventId) {
-            fetchReferralCodes(parsedData.eventCreatorId, parsedData.eventId)
+          if (parsedData.eventId) {
+            fetchReferralCodes(parsedData.eventId)
           }
 
           const storedReferral = sessionStorage.getItem("selected_referral_code")
@@ -317,27 +317,20 @@ export default function PaymentClient() {
     }
   }
 
-  const fetchReferralCodes = async (eventCreatorId: string, eventId: string) => {
-    setReferralFetching(true)
-    try {
-      const referralsCollectionRef = collection(db, "events", eventCreatorId, "userEvents", eventId, "referrals")
-      const snapshot = await getDocs(referralsCollectionRef)
-
-      const referrals: ReferralCodeOption[] = []
-      snapshot.forEach((docSnap) => {
-        referrals.push({
-          code: docSnap.id,
-        })
-      })
-
-      setReferralCodes(referrals)
-    } catch (error) {
-      console.error("Error fetching referral codes:", error)
-      setReferralError("Failed to load referral codes")
-    } finally {
-      setReferralFetching(false)
-    }
+const fetchReferralCodes = async (eventId: string) => {
+  setReferralFetching(true)
+  try {
+    const response = await fetch(`/api/v1/referrals?eventId=${eventId}`)
+    if (!response.ok) throw new Error("Failed to fetch referral codes")
+    const data = await response.json()
+    setReferralCodes(data.referrals || [])
+  } catch (error) {
+    console.error("Error fetching referral codes:", error)
+    setReferralError("Failed to load referral codes")
+  } finally {
+    setReferralFetching(false)
   }
+}
 
   const validateDiscount = async () => {
     if (!discountCode.trim()) {

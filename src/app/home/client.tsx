@@ -14,6 +14,7 @@ import TodayEvents from "./components/Todayevents"
 import UpcomingEvents from "./components/UpcomingEvents"
 import EventCollections from "./components/EventCollections"
 import PastEvents from "./components/PastEvents"
+import { SessionUser } from "../lib/auth-client-user"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -34,6 +35,10 @@ interface EventCollection {
   eventImage: string
 }
 
+interface HomeProps {
+  user?: SessionUser | null
+}
+
 interface HomeData {
   events: {
     today: HomeEvent[]
@@ -50,7 +55,7 @@ interface SearchSuggestion {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-const Home: React.FC = () => {
+const Home: React.FC<HomeProps> = ({ user }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [username, setUsername] = useState("")
   const [loading, setLoading] = useState(true)

@@ -4,7 +4,7 @@ import { adminDb, adminAuth } from "@/app/lib/firebase-admin"
 interface DiscountValidationRequest {
   code: string
   eventId: string
-  eventCreatorId: string
+  // eventCreatorId: string
 }
 
 interface DiscountData {
@@ -19,26 +19,24 @@ interface DiscountData {
 export async function POST(request: NextRequest) {
   try {
     const body: DiscountValidationRequest = await request.json()
-    const { code, eventId, eventCreatorId } = body
+    const { code, eventId } = body
 
     // Validate required fields
-    if (!code || !eventId || !eventCreatorId) {
+    if (!code || !eventId) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
     }
 
-    // Verify user authentication
-    const authHeader = request.headers.get("authorization")
-    if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+    // // Verify user authentication
+    // const authHeader = request.headers.get("authorization")
+    // if (!authHeader?.startsWith("Bearer ")) {
+    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    // }
 
-    const token = authHeader.split("Bearer ")[1]
-    const decodedToken = await adminAuth.verifyIdToken(token)
+    // const token = authHeader.split("Bearer ")[1]
+    // const decodedToken = await adminAuth.verifyIdToken(token)
 
     const discountsCollectionRef = adminDb
       .collection("events")
-      .doc(eventCreatorId)
-      .collection("userEvents")
       .doc(eventId)
       .collection("discounts")
 

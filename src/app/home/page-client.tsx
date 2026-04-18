@@ -1,15 +1,11 @@
 'use client'
 
-import { withAuth } from "@/app/hooks/useAuth"
-import type { SessionUser } from "@/app/lib/auth-client-user"
+import { useAuth } from "@/app/hooks/useAuth"
 import Home from "./client"
 
-interface HomePageClientProps {
-  user: SessionUser
-}
+export default function HomePageClient() {
+  const { user, isLoading } = useAuth()
 
-function HomePageClient({ user }: HomePageClientProps) {
-  return <Home />
+  // Don't block rendering — pass user if available, null if not
+  return <Home user={isLoading ? null : user} />
 }
-
-export default withAuth(HomePageClient)

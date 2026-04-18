@@ -57,6 +57,7 @@ const PUBLIC_AUTH_ROUTES = new Set([
   "/auth/login",
   "/auth/signup",
   "/auth/forgot-password",
+  "/home"
 ]);
 
 /**
@@ -67,7 +68,6 @@ const PUBLIC_AUTH_ROUTES = new Set([
  * so it is actually enforced.
  */
 const PROTECTED_PREFIXES = [
-  "/payment",
   "/ticket-history",
   "/profile",
   "/Referrals",
