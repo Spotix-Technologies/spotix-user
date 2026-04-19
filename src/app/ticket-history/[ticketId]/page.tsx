@@ -28,7 +28,6 @@ interface TicketDetails {
   eventEnd?: string
   eventVenue?: string
   stopDate?: string
-  // Gift fields
   giftedBy?: string
   gifterName?: string
   giftNote?: string
@@ -40,6 +39,8 @@ export default function TicketHistoryInfo() {
   const params = useParams()
   const ticketId = params.ticketId as string
   const ticketRef = useRef<HTMLDivElement>(null)
+  // Direct ref to the QR wrapper div — more reliable than querySelector
+  const qrWrapperRef = useRef<HTMLDivElement>(null)
 
   const [loading, setLoading] = useState(true)
   const [ticketDetails, setTicketDetails] = useState<TicketDetails | null>(null)
@@ -81,15 +82,10 @@ export default function TicketHistoryInfo() {
     return timeString
   }
 
-  // Fetch ticket details
   useEffect(() => {
     const fetchTicketDetails = async () => {
       try {
-        if (!ticketId) {
-          setError("Ticket ID not found")
-          setLoading(false)
-          return
-        }
+        if (!ticketId) { setError("Ticket ID not found"); setLoading(false); return }
 
         const response = await fetch(`/api/v1/ticket/${ticketId}`, {
           method: "GET",
@@ -121,7 +117,6 @@ export default function TicketHistoryInfo() {
             eventEnd: data.ticket.eventEnd,
             eventVenue: data.ticket.eventVenue,
             stopDate: data.ticket.stopDate,
-            // Gift fields
             giftedBy: data.ticket.giftedBy,
             gifterName: data.ticket.gifterName,
             giftNote: data.ticket.giftNote,
@@ -130,7 +125,7 @@ export default function TicketHistoryInfo() {
         }
         setLoading(false)
       } catch (err) {
-        console.error("  Error fetching ticket:", err)
+        console.error("Error fetching ticket:", err)
         setError("Failed to load ticket details")
         setLoading(false)
       }
@@ -138,7 +133,6 @@ export default function TicketHistoryInfo() {
     fetchTicketDetails()
   }, [ticketId, router])
 
-  // Check if face embedding exists
   useEffect(() => {
     if (!ticketDetails?.id) return
     const checkEmbedding = async () => {
@@ -148,9 +142,7 @@ export default function TicketHistoryInfo() {
           const data = await res.json()
           setHasEmbedding(data.hasEmbedding ?? false)
         }
-      } catch {
-        // non-fatal
-      }
+      } catch { /* non-fatal */ }
     }
     checkEmbedding()
   }, [ticketDetails?.id, ticketId])
@@ -161,299 +153,311 @@ export default function TicketHistoryInfo() {
   }
 
   /**
-   * html2canvas fix: Tailwind CSS (and many modern CSS libs) use oklch/lab color
-   * functions that html2canvas doesn't understand, causing the
-   * "unsupported color function lab" console error and broken captures.
+   * Rasterise the react-qr-code SVG to a PNG data URL.
    *
-   * Fix: before capturing, clone the element and replace all computed styles
-   * that use oklch/lab with their rgb() fallbacks computed by the browser.
+   * Strategy:
+   *  1. Use qrWrapperRef to find the SVG directly — no querySelector guessing.
+   *  2. Clone the SVG and force explicit width/height attributes so the browser
+   *     can calculate intrinsic dimensions when loading as an Image.
+   *     Without this, drawImage() produces a blank result in Firefox/Safari.
+   *  3. Render onto a white-background canvas then export as PNG.
    */
+  const rasteriseQR = (): Promise<string | null> => {
+    return new Promise((resolve) => {
+      const svgEl = qrWrapperRef.current?.querySelector("svg")
+      if (!svgEl) { resolve(null); return }
 
-const handleDownloadTicket = async () => {
-  if (!ticketDetails || !qrCodeGenerated) return
-  setIsDownloading(true)
+      const SIZE = 300 // internal canvas resolution — higher = crisper in PDF
 
-  try {
-    const doc = new jsPDF({ unit: "pt", format: "a4" })
-    const pageW = doc.internal.pageSize.getWidth()
-    const margin = 40
-    const contentW = pageW - margin * 2
-    let y = 0
+      // Clone so we can mutate without touching the live DOM
+      const clone = svgEl.cloneNode(true) as SVGElement
+      clone.setAttribute("width", String(SIZE))
+      clone.setAttribute("height", String(SIZE))
+      // Ensure white background inside the SVG itself
+      clone.style.background = "#ffffff"
 
-    // ── Header Band ──────────────────────────────────────────────
-    doc.setFillColor(107, 47, 165)
-    doc.rect(0, 0, pageW, 110, "F")
+      const svgData = new XMLSerializer().serializeToString(clone)
+      const svgBlob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" })
+      const svgUrl  = URL.createObjectURL(svgBlob)
 
-    doc.setFillColor(130, 80, 190)
-    for (let cx = 20; cx < pageW; cx += 40) {
-      for (let cy = 5; cy < 110; cy += 40) {
-        doc.circle(cx, cy, 1.5, "F")
+      const img = new Image()
+      img.width  = SIZE
+      img.height = SIZE
+
+      img.onload = () => {
+        const cvs = document.createElement("canvas")
+        cvs.width  = SIZE
+        cvs.height = SIZE
+        const ctx  = cvs.getContext("2d")!
+        ctx.fillStyle = "#ffffff"
+        ctx.fillRect(0, 0, SIZE, SIZE)
+        ctx.drawImage(img, 0, 0, SIZE, SIZE)
+        URL.revokeObjectURL(svgUrl)
+        resolve(cvs.toDataURL("image/png"))
       }
-    }
 
-    doc.setFont("helvetica", "normal")
-    doc.setFontSize(9)
-    doc.setTextColor(200, 170, 230)
-    doc.text((ticketDetails.eventType || "EVENT").toUpperCase(), margin, 36)
+      img.onerror = () => {
+        URL.revokeObjectURL(svgUrl)
+        resolve(null)
+      }
 
-    doc.setFont("helvetica", "bold")
-    doc.setFontSize(22)
-    doc.setTextColor(255, 255, 255)
-    const eventNameLines = doc.splitTextToSize(ticketDetails.eventName, contentW - 80)
-    doc.text(eventNameLines, margin, 62)
+      img.src = svgUrl
+    })
+  }
 
-    doc.setFont("helvetica", "bold")
-    doc.setFontSize(11)
-    doc.setTextColor(220, 190, 255)
-    doc.text("SPOTIX", pageW - margin, 36, { align: "right" })
+  const handleDownloadTicket = async () => {
+    if (!ticketDetails || !qrCodeGenerated) return
+    setIsDownloading(true)
 
-    y = 130
+    try {
+      const doc = new jsPDF({ unit: "pt", format: "a4" })
+      const pageW    = doc.internal.pageSize.getWidth()
+      const margin   = 40
+      const contentW = pageW - margin * 2
+      let y = 0
 
-    // ── Tear-line ─────────────────────────────────────────────────
-    doc.setDrawColor(220, 220, 220)
-    doc.setLineDashPattern([4, 4], 0)
-    doc.line(margin, y, pageW - margin, y)
-    doc.setLineDashPattern([], 0)
-    doc.setFillColor(245, 245, 245)
-    doc.circle(margin - 10, y, 8, "F")
-    doc.circle(pageW - margin + 10, y, 8, "F")
+      // ── Header Band ──────────────────────────────────────────────
+      doc.setFillColor(107, 47, 165)
+      doc.rect(0, 0, pageW, 110, "F")
 
-    y += 28
+      doc.setFillColor(130, 80, 190)
+      for (let cx = 20; cx < pageW; cx += 40) {
+        for (let cy = 5; cy < 110; cy += 40) {
+          doc.circle(cx, cy, 1.5, "F")
+        }
+      }
 
-    // ── Helpers ───────────────────────────────────────────────────
-    const label = (text: string, lx: number, ly: number) => {
-      doc.setFont("helvetica", "bold")
-      doc.setFontSize(7)
-      doc.setTextColor(160, 160, 160)
-      doc.text(text.toUpperCase(), lx, ly)
-    }
-
-    const value = (
-      text: string,
-      vx: number,
-      vy: number,
-      opts?: { color?: [number, number, number]; size?: number; mono?: boolean }
-    ) => {
-      doc.setFont(opts?.mono ? "courier" : "helvetica", "bold")
-      doc.setFontSize(opts?.size ?? 11)
-      doc.setTextColor(...(opts?.color ?? ([30, 30, 30] as [number, number, number])))
-      doc.text(text, vx, vy)
-    }
-
-    const divider = (dy: number) => {
-      doc.setDrawColor(230, 230, 230)
-      doc.setLineDashPattern([3, 3], 0)
-      doc.line(margin, dy, pageW - margin, dy)
-      doc.setLineDashPattern([], 0)
-    }
-
-    // ── Row 1: Date & Time | Venue ────────────────────────────────
-    const col1 = margin
-    const col2 = margin + contentW / 2 + 10
-
-    label("Date & Time", col1, y)
-    label("Venue", col2, y)
-    y += 16
-
-    const dateStr = ticketDetails.eventDate
-      ? formatDisplayDate(ticketDetails.eventDate)
-      : "Not specified"
-    value(dateStr, col1, y, { size: 10 })
-
-    const venueStr = ticketDetails.eventVenue || "Not specified"
-    const venueLines = doc.splitTextToSize(venueStr, contentW / 2 - 10)
-    value(venueLines[0], col2, y, { size: 10 })
-    y += 16
-
-    if (ticketDetails.eventStart) {
-      const timeStr = `${formatDisplayTime(ticketDetails.eventStart)}${
-        ticketDetails.eventEnd ? " – " + formatDisplayTime(ticketDetails.eventEnd) : ""
-      }`
       doc.setFont("helvetica", "normal")
       doc.setFontSize(9)
-      doc.setTextColor(107, 47, 165)
-      doc.text(timeStr, col1, y)
-    }
+      doc.setTextColor(200, 170, 230)
+      doc.text((ticketDetails.eventType || "EVENT").toUpperCase(), margin, 36)
 
-    if (venueLines[1]) {
-      value(venueLines[1], col2, y, { size: 10 })
-    }
-
-    y += 30
-    divider(y)
-    y += 20
-
-    // ── Row 2: Ticket Type | Price | Reference ────────────────────
-    const thirdW = contentW / 3
-    const col3 = margin + thirdW
-    const col4 = margin + thirdW * 2
-
-    label("Ticket Type", col1, y)
-    label("Price", col3, y)
-    label("Reference", col4, y)
-    y += 16
-
-    value(ticketDetails.ticketType, col1, y)
-    value(
-      ticketDetails.ticketPrice === 0 ? "Free" : `N${ticketDetails.ticketPrice.toLocaleString()}`,
-      col3,
-      y,
-      { color: [107, 47, 165], size: 13 }
-    )
-    value(ticketDetails.ticketReference, col4, y, { mono: true, size: 9 })
-
-    y += 30
-    divider(y)
-    y += 20
-
-    // ── Row 3: Ticket ID ──────────────────────────────────────────
-    label("Ticket ID", col1, y)
-    y += 16
-    doc.setFont("courier", "bold")
-    doc.setFontSize(16)
-    doc.setTextColor(20, 20, 20)
-    doc.setCharSpace(2)
-    doc.text(ticketId, col1, y)
-    doc.setCharSpace(0)
-
-    y += 30
-    divider(y)
-    y += 20
-
-    // ── Row 4: Purchased | Time ───────────────────────────────────
-    label("Purchased", col1, y)
-    label("Time", col2, y)
-    y += 16
-    value(ticketDetails.purchaseDate, col1, y, { size: 10 })
-    value(ticketDetails.purchaseTime, col2, y, { size: 10 })
-    y += 34
-
-    // ── Gift Banner ───────────────────────────────────────────────
-    if (ticketDetails.giftedBy) {
-      const bannerH = ticketDetails.giftNote ? 56 : 36
-      doc.setFillColor(245, 237, 255)
-      doc.setDrawColor(200, 170, 230)
-      doc.roundedRect(margin, y, contentW, bannerH, 6, 6, "FD")
       doc.setFont("helvetica", "bold")
-      doc.setFontSize(9)
-      doc.setTextColor(107, 47, 165)
-      doc.text(
-        `Gifted to you by ${ticketDetails.gifterName || ticketDetails.giftedBy}`,
-        margin + 12,
-        y + 16
-      )
-      if (ticketDetails.giftNote) {
-        doc.setFont("helvetica", "italic")
-        doc.setFontSize(8)
-        doc.setTextColor(130, 80, 180)
-        doc.text(`"${ticketDetails.giftNote}"`, margin + 12, y + 32)
-      }
-      y += bannerH + 16
-    }
+      doc.setFontSize(22)
+      doc.setTextColor(255, 255, 255)
+      const eventNameLines = doc.splitTextToSize(ticketDetails.eventName, contentW - 80)
+      doc.text(eventNameLines, margin, 62)
 
-    // ── QR Code ───────────────────────────────────────────────────
-    // Locate the live SVG rendered by react-qr-code in the DOM
-    const qrSize = 120
-    const qrX = pageW / 2 - qrSize / 2
+      doc.setFont("helvetica", "bold")
+      doc.setFontSize(11)
+      doc.setTextColor(220, 190, 255)
+      doc.text("SPOTIX", pageW - margin, 36, { align: "right" })
 
-    // react-qr-code renders a plain <svg> inside .qr-code-wrapper
-    const svgEl = document.querySelector<SVGElement>(".qr-code-wrapper svg")
+      y = 130
 
-    if (svgEl) {
-      // Serialise the SVG, rasterise to canvas, embed as PNG
-      const svgData = new XMLSerializer().serializeToString(svgEl)
-      const svgBlob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" })
-      const svgUrl = URL.createObjectURL(svgBlob)
-
-      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const image = new Image()
-        // Must set dimensions — SVG blobs have no intrinsic size in some browsers
-        image.width = 220
-        image.height = 220
-        image.onload = () => resolve(image)
-        image.onerror = (e) => reject(e)
-        image.src = svgUrl
-      })
-
-      const cvs = document.createElement("canvas")
-      cvs.width = 220
-      cvs.height = 220
-      const ctx = cvs.getContext("2d")!
-      ctx.fillStyle = "#ffffff"
-      ctx.fillRect(0, 0, 220, 220)
-      ctx.drawImage(img, 0, 0, 220, 220)
-      URL.revokeObjectURL(svgUrl)
-
-      const pngData = cvs.toDataURL("image/png")
-      doc.addImage(pngData, "PNG", qrX, y, qrSize, qrSize)
-    } else {
-      // Fallback placeholder if QR isn't visible/generated yet
+      // ── Tear-line ─────────────────────────────────────────────────
+      doc.setDrawColor(220, 220, 220)
+      doc.setLineDashPattern([4, 4], 0)
+      doc.line(margin, y, pageW - margin, y)
+      doc.setLineDashPattern([], 0)
       doc.setFillColor(245, 245, 245)
-      doc.setDrawColor(200, 200, 200)
-      doc.roundedRect(qrX, y, qrSize, qrSize, 4, 4, "FD")
+      doc.circle(margin - 10, y, 8, "F")
+      doc.circle(pageW - margin + 10, y, 8, "F")
+
+      y += 28
+
+      // ── Helpers ───────────────────────────────────────────────────
+      const label = (text: string, lx: number, ly: number) => {
+        doc.setFont("helvetica", "bold")
+        doc.setFontSize(7)
+        doc.setTextColor(160, 160, 160)
+        doc.text(text.toUpperCase(), lx, ly)
+      }
+
+      const value = (
+        text: string,
+        vx: number,
+        vy: number,
+        opts?: { color?: [number, number, number]; size?: number; mono?: boolean }
+      ) => {
+        doc.setFont(opts?.mono ? "courier" : "helvetica", "bold")
+        doc.setFontSize(opts?.size ?? 11)
+        doc.setTextColor(...(opts?.color ?? ([30, 30, 30] as [number, number, number])))
+        doc.text(text, vx, vy)
+      }
+
+      const divider = (dy: number) => {
+        doc.setDrawColor(230, 230, 230)
+        doc.setLineDashPattern([3, 3], 0)
+        doc.line(margin, dy, pageW - margin, dy)
+        doc.setLineDashPattern([], 0)
+      }
+
+      // ── Row 1: Date & Time | Venue ────────────────────────────────
+      const col1 = margin
+      const col2 = margin + contentW / 2 + 10
+
+      label("Date & Time", col1, y)
+      label("Venue", col2, y)
+      y += 16
+
+      const dateStr = ticketDetails.eventDate ? formatDisplayDate(ticketDetails.eventDate) : "Not specified"
+      value(dateStr, col1, y, { size: 10 })
+
+      const venueStr   = ticketDetails.eventVenue || "Not specified"
+      const venueLines = doc.splitTextToSize(venueStr, contentW / 2 - 10)
+      value(venueLines[0], col2, y, { size: 10 })
+      y += 16
+
+      if (ticketDetails.eventStart) {
+        const timeStr = `${formatDisplayTime(ticketDetails.eventStart)}${
+          ticketDetails.eventEnd ? " – " + formatDisplayTime(ticketDetails.eventEnd) : ""
+        }`
+        doc.setFont("helvetica", "normal")
+        doc.setFontSize(9)
+        doc.setTextColor(107, 47, 165)
+        doc.text(timeStr, col1, y)
+      }
+      if (venueLines[1]) value(venueLines[1], col2, y, { size: 10 })
+
+      y += 30
+      divider(y)
+      y += 20
+
+      // ── Row 2: Ticket Type | Price | Reference ────────────────────
+      const thirdW = contentW / 3
+      const col3   = margin + thirdW
+      const col4   = margin + thirdW * 2
+
+      label("Ticket Type", col1, y)
+      label("Price",       col3, y)
+      label("Reference",   col4, y)
+      y += 16
+
+      value(ticketDetails.ticketType, col1, y)
+      value(
+        ticketDetails.ticketPrice === 0 ? "Free" : `N${ticketDetails.ticketPrice.toLocaleString()}`,
+        col3,
+        y,
+        { color: [107, 47, 165], size: 13 }
+      )
+      value(ticketDetails.ticketReference, col4, y, { mono: true, size: 9 })
+
+      y += 30
+      divider(y)
+      y += 20
+
+      // ── Row 3: Ticket ID ──────────────────────────────────────────
+      label("Ticket ID", col1, y)
+      y += 16
+      doc.setFont("courier", "bold")
+      doc.setFontSize(16)
+      doc.setTextColor(20, 20, 20)
+      doc.setCharSpace(2)
+      doc.text(ticketId, col1, y)
+      doc.setCharSpace(0)
+
+      y += 30
+      divider(y)
+      y += 20
+
+      // ── Row 4: Purchased | Time ───────────────────────────────────
+      label("Purchased", col1, y)
+      label("Time",      col2, y)
+      y += 16
+      value(ticketDetails.purchaseDate, col1, y, { size: 10 })
+      value(ticketDetails.purchaseTime, col2, y, { size: 10 })
+      y += 34
+
+      // ── Gift Banner ───────────────────────────────────────────────
+      if (ticketDetails.giftedBy) {
+        const bannerH = ticketDetails.giftNote ? 56 : 36
+        doc.setFillColor(245, 237, 255)
+        doc.setDrawColor(200, 170, 230)
+        doc.roundedRect(margin, y, contentW, bannerH, 6, 6, "FD")
+        doc.setFont("helvetica", "bold")
+        doc.setFontSize(9)
+        doc.setTextColor(107, 47, 165)
+        doc.text(
+          `Gifted to you by ${ticketDetails.gifterName || ticketDetails.giftedBy}`,
+          margin + 12,
+          y + 16
+        )
+        if (ticketDetails.giftNote) {
+          doc.setFont("helvetica", "italic")
+          doc.setFontSize(8)
+          doc.setTextColor(130, 80, 180)
+          doc.text(`"${ticketDetails.giftNote}"`, margin + 12, y + 32)
+        }
+        y += bannerH + 16
+      }
+
+      // ── QR Code ───────────────────────────────────────────────────
+      const qrSize = 130
+      const qrX    = pageW / 2 - qrSize / 2
+
+      const pngData = await rasteriseQR()
+
+      if (pngData) {
+        // White card behind the QR
+        doc.setFillColor(255, 255, 255)
+        doc.setDrawColor(220, 220, 220)
+        doc.roundedRect(qrX - 8, y - 8, qrSize + 16, qrSize + 16, 6, 6, "FD")
+        doc.addImage(pngData, "PNG", qrX, y, qrSize, qrSize)
+      } else {
+        // Should never reach here if Download button is only shown after QR is generated,
+        // but keep a graceful fallback just in case
+        doc.setFillColor(245, 245, 245)
+        doc.setDrawColor(200, 200, 200)
+        doc.roundedRect(qrX, y, qrSize, qrSize, 4, 4, "FD")
+        doc.setFont("helvetica", "normal")
+        doc.setFontSize(8)
+        doc.setTextColor(150, 150, 150)
+        doc.text("QR Code unavailable", pageW / 2, y + qrSize / 2 + 3, { align: "center" })
+      }
+
+      y += qrSize + 18
+
       doc.setFont("helvetica", "normal")
       doc.setFontSize(8)
       doc.setTextColor(150, 150, 150)
-      doc.text("QR Code unavailable", pageW / 2, y + qrSize / 2 + 3, { align: "center" })
+      doc.text("Show only to official check-in staff", pageW / 2, y, { align: "center" })
+
+      y += 28
+
+      // ── Footer ────────────────────────────────────────────────────
+      divider(y)
+      y += 16
+
+      const footerText  = "Verified by"
+      doc.setFont("helvetica", "normal")
+      doc.setFontSize(8)
+      doc.setTextColor(180, 180, 180)
+      const verifiedWidth = doc.getTextWidth(footerText)
+
+      const spotixText  = " SPOTIX"
+      doc.setFont("helvetica", "bold")
+      doc.setFontSize(8)
+      doc.setTextColor(107, 47, 165)
+      const spotixWidth = doc.getTextWidth(spotixText)
+
+      const totalWidth = verifiedWidth + spotixWidth
+      const startX     = pageW / 2 - totalWidth / 2
+
+      doc.setFont("helvetica", "normal")
+      doc.setFontSize(8)
+      doc.setTextColor(180, 180, 180)
+      doc.text(footerText, startX, y)
+
+      doc.setFont("helvetica", "bold")
+      doc.setFontSize(8)
+      doc.setTextColor(107, 47, 165)
+      doc.text(spotixText, startX + verifiedWidth, y)
+
+      doc.save(`ticket-${ticketDetails.ticketReference}.pdf`)
+    } catch (error) {
+      console.error("Error generating PDF:", error)
+      alert("Failed to generate PDF. Please try again.")
+    } finally {
+      setIsDownloading(false)
     }
-
-    y += qrSize + 10
-
-    doc.setFont("helvetica", "normal")
-    doc.setFontSize(8)
-    doc.setTextColor(150, 150, 150)
-    doc.text("Show only to official check-in staff", pageW / 2, y, { align: "center" })
-
-    y += 28
-
-    // ── Footer ────────────────────────────────────────────────────
-    divider(y)
-    y += 16
-
-    // "Verified by" and "SPOTIX" on the SAME baseline, side by side
-    const footerText = "Verified by"
-    doc.setFont("helvetica", "normal")
-    doc.setFontSize(8)
-    doc.setTextColor(180, 180, 180)
-    const verifiedWidth = doc.getTextWidth(footerText)
-
-    // Centre both words together as a unit
-    const spotixText = " SPOTIX"
-    doc.setFont("helvetica", "bold")
-    doc.setFontSize(8)
-    doc.setTextColor(107, 47, 165)
-    const spotixWidth = doc.getTextWidth(spotixText)
-
-    const totalWidth = verifiedWidth + spotixWidth
-    const startX = pageW / 2 - totalWidth / 2
-
-    // Draw "Verified by" first
-    doc.setFont("helvetica", "normal")
-    doc.setFontSize(8)
-    doc.setTextColor(180, 180, 180)
-    doc.text(footerText, startX, y)
-
-    // Draw "SPOTIX" immediately after
-    doc.setFont("helvetica", "bold")
-    doc.setFontSize(8)
-    doc.setTextColor(107, 47, 165)
-    doc.text(spotixText, startX + verifiedWidth, y)
-
-    // ── Save ──────────────────────────────────────────────────────
-    doc.save(`ticket-${ticketDetails.ticketReference}.pdf`)
-  } catch (error) {
-    console.error("Error generating PDF:", error)
-    alert("Failed to generate PDF. Please try again.")
-  } finally {
-    setIsDownloading(false)
   }
-}
 
   const handleAddToCalendar = () => {
     if (!ticketDetails?.eventDate) { alert("Event date not available"); return }
     try {
       const startDate = new Date(ticketDetails.eventDate)
-      const endDate = new Date(startDate)
+      const endDate   = new Date(startDate)
       endDate.setHours(endDate.getHours() + 2)
       const fmt = (d: Date) => d.toISOString().replace(/-|:|\.\d+/g, "")
       window.open(
@@ -469,7 +473,7 @@ const handleDownloadTicket = async () => {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4" />
           <p className="text-gray-500 text-sm">Loading ticket details...</p>
         </div>
       </div>
@@ -501,7 +505,6 @@ const handleDownloadTicket = async () => {
 
       <div className="flex-grow max-w-6xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 flex flex-col">
 
-        {/* Back Button */}
         <button
           onClick={() => router.back()}
           className="inline-flex items-center gap-2 text-gray-500 hover:text-gray-800 mb-8 font-medium w-fit transition-colors text-sm"
@@ -510,13 +513,11 @@ const handleDownloadTicket = async () => {
           Back to Tickets
         </button>
 
-        {/* Page Title */}
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-gray-900">Your Ticket</h1>
           <p className="text-gray-500 text-sm mt-1">Keep this safe — you'll need it at the event.</p>
         </div>
 
-        {/* Gifted Banner */}
         {isGiftedTicket && (
           <div className="mb-6 bg-purple-50 border border-purple-200 rounded-2xl px-5 py-4 flex items-start gap-3">
             <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -528,32 +529,27 @@ const handleDownloadTicket = async () => {
                 <span className="text-purple-600">{ticketDetails.gifterName || ticketDetails.giftedBy}</span>
               </p>
               {ticketDetails.giftNote && (
-                <p className="text-xs text-purple-600 mt-1 italic">
-                  "{ticketDetails.giftNote}"
-                </p>
+                <p className="text-xs text-purple-600 mt-1 italic">"{ticketDetails.giftNote}"</p>
               )}
               {ticketDetails.giftReason && (
-                <p className="text-xs text-purple-500 mt-0.5">
-                  Reason: {ticketDetails.giftReason}
-                </p>
+                <p className="text-xs text-purple-500 mt-0.5">Reason: {ticketDetails.giftReason}</p>
               )}
             </div>
           </div>
         )}
 
-        {/* Main Grid */}
         <div className="flex-grow grid grid-cols-1 lg:grid-cols-3 gap-6">
 
           {/* Ticket Card */}
           <div ref={ticketRef} className="lg:col-span-2">
             <div className="border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
 
-              {/* Ticket Header */}
               <div className="bg-gradient-to-r from-purple-600 to-purple-800 px-8 py-10 text-white relative overflow-hidden">
-                <div className="absolute inset-0 opacity-10"
+                <div
+                  className="absolute inset-0 opacity-10"
                   style={{
                     backgroundImage: "radial-gradient(circle at 20% 50%, white 1px, transparent 1px), radial-gradient(circle at 80% 20%, white 1px, transparent 1px)",
-                    backgroundSize: "40px 40px"
+                    backgroundSize: "40px 40px",
                   }}
                 />
                 <div className="relative">
@@ -564,16 +560,13 @@ const handleDownloadTicket = async () => {
                 </div>
               </div>
 
-              {/* Tear Line */}
               <div className="relative h-0 border-t-2 border-dashed border-gray-200">
                 <div className="absolute -left-3 -top-3 w-6 h-6 rounded-full bg-white border border-gray-200" />
                 <div className="absolute -right-3 -top-3 w-6 h-6 rounded-full bg-white border border-gray-200" />
               </div>
 
-              {/* Ticket Body */}
               <div className="p-8 bg-white">
 
-                {/* Date, Time & Venue */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8 pb-8 border-b border-dashed border-gray-200">
                   <div>
                     <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Date & Time</p>
@@ -598,7 +591,6 @@ const handleDownloadTicket = async () => {
                   </div>
                 </div>
 
-                {/* Ticket Type, Price, Reference */}
                 <div className="grid grid-cols-3 gap-4 mb-8 pb-8 border-b border-dashed border-gray-200">
                   <div>
                     <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Ticket Type</p>
@@ -616,13 +608,11 @@ const handleDownloadTicket = async () => {
                   </div>
                 </div>
 
-                {/* Ticket Number */}
                 <div className="mb-8 pb-8 border-b border-dashed border-gray-200">
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Ticket ID</p>
                   <p className="text-2xl font-mono font-bold text-gray-900 tracking-widest">{ticketId}</p>
                 </div>
 
-                {/* Purchase Info */}
                 <div className="grid grid-cols-2 gap-4 mb-6">
                   <div>
                     <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Purchased</p>
@@ -634,10 +624,11 @@ const handleDownloadTicket = async () => {
                   </div>
                 </div>
 
-                {/* Spotix Footer */}
                 <div className="flex items-center justify-center gap-2 pt-6 border-t border-gray-100">
                   <CheckCircle size={14} className="text-purple-500" />
-                  <p className="text-xs text-gray-400 font-medium">Verified by <span className="text-purple-600 font-semibold">Spotix</span></p>
+                  <p className="text-xs text-gray-400 font-medium">
+                    Verified by <span className="text-purple-600 font-semibold">Spotix</span>
+                  </p>
                 </div>
               </div>
             </div>
@@ -678,8 +669,21 @@ const handleDownloadTicket = async () => {
                 </div>
               ) : (
                 <div className="flex flex-col items-center w-full">
-                  <div className="p-3 bg-white border border-gray-200 rounded-xl mb-3 shadow-sm">
-                    <QRCode value={ticketId} size={160} level="H" fgColor="#7c3aed" bgColor="#ffffff" />
+                  {/*
+                    qr-code-wrapper — ref attached here so handleDownloadTicket can
+                    locate the SVG reliably without a DOM querySelector.
+                  */}
+                  <div
+                    ref={qrWrapperRef}
+                    className="qr-code-wrapper p-3 bg-white border border-gray-200 rounded-xl mb-3 shadow-sm"
+                  >
+                    <QRCode
+                      value={ticketId}
+                      size={160}
+                      level="H"
+                      fgColor="#7c3aed"
+                      bgColor="#ffffff"
+                    />
                   </div>
                   <p className="text-xs text-gray-400 text-center mb-3 leading-relaxed">
                     Show only to official check-in staff
@@ -712,7 +716,6 @@ const handleDownloadTicket = async () => {
                 {hasEmbedding ? "Manage Face ID" : "Register Face ID"}
               </button>
 
-              {/* Gift Ticket button — hidden if this ticket was already gifted to you */}
               {!isGiftedTicket && (
                 <button
                   onClick={() => setShowGiftModal(true)}
@@ -742,7 +745,8 @@ const handleDownloadTicket = async () => {
               </p>
               <p className="text-xs text-purple-500 leading-relaxed">
                 We store and process facial data securely in line with our{" "}
-                <a href="/privacy" target="_blank" className="text-purple-600 font-medium hover:underline">Privacy Policy</a>. You can delete your Face ID at any time from the "Manage Face ID" section.
+                <a href="/privacy" target="_blank" className="text-purple-600 font-medium hover:underline">Privacy Policy</a>.
+                You can delete your Face ID at any time from the "Manage Face ID" section.
               </p>
             </div>
           </div>
@@ -755,14 +759,8 @@ const handleDownloadTicket = async () => {
         eventId={ticketDetails?.eventId || ""}
         hasExistingEmbedding={hasEmbedding}
         onClose={() => setShowFaceEmbeddingModal(false)}
-        onSuccess={() => {
-          setHasEmbedding(true)
-          console.log("  Face embedding saved successfully")
-        }}
-        onDeleted={() => {
-          setHasEmbedding(false)
-          console.log("  Face embedding deleted")
-        }}
+        onSuccess={() => { setHasEmbedding(true) }}
+        onDeleted={() => { setHasEmbedding(false) }}
       />
 
       <GiftTicket
@@ -770,11 +768,11 @@ const handleDownloadTicket = async () => {
         ticketId={ticketId}
         onClose={() => setShowGiftModal(false)}
         onSuccess={(newTicketId: any) => {
-          console.log("  Ticket gifted, new ID:", newTicketId)
-          // Redirect away since old ticket no longer belongs to this user
+          console.log("Ticket gifted, new ID:", newTicketId)
           router.push("/tickets")
         }}
       />
+
       <Footer />
     </div>
   )

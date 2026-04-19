@@ -7,42 +7,46 @@ import { Loader2, AlertCircle, ScanFace } from "lucide-react"
 interface FaceMarkerProps {
   onEmbeddingComplete: (embedding: number[]) => void
   isProcessing: boolean
+  /** Pass true when FaceEmbeddingModal has already preloaded models — skips the reload */
+  modelsAlreadyLoaded?: boolean
 }
 
-const LOCK_THRESHOLD = 0.82     // confidence needed to consider face "locked"
-const LOCK_FRAMES    = 18       // consecutive high-conf frames before auto-capture
-const CONF_SMOOTH    = 0.12     // lerp factor for smoothing displayed confidence
+const MODEL_URL    = "/models/"
+const LOCK_THRESHOLD = 0.82
+const LOCK_FRAMES    = 18
+const CONF_SMOOTH    = 0.12
 
-export default function FaceMarker({ onEmbeddingComplete, isProcessing }: FaceMarkerProps) {
+export default function FaceMarker({ onEmbeddingComplete, isProcessing, modelsAlreadyLoaded = false }: FaceMarkerProps) {
   const videoRef      = useRef<HTMLVideoElement>(null)
   const canvasRef     = useRef<HTMLCanvasElement>(null)
-  const streamRef     = useRef<MediaStream | null>(null)       // ← own the stream here
+  const streamRef     = useRef<MediaStream | null>(null)
   const rafRef        = useRef<number | null>(null)
   const completedRef  = useRef(false)
-  const enrollingRef  = useRef(false)                          // gate: only record when user says go
+  const enrollingRef  = useRef(false)
   const lockFramesRef = useRef(0)
   const smoothConfRef = useRef(0)
 
-  const [modelsLoaded, setModelsLoaded]   = useState(false)
+  const [modelsLoaded, setModelsLoaded]   = useState(modelsAlreadyLoaded)
   const [cameraReady, setCameraReady]     = useState(false)
   const [error, setError]                 = useState<string | null>(null)
-  const [enrolling, setEnrolling]         = useState(false)   // drives button visibility
-  const [smoothConf, setSmoothConf]       = useState(0)       // displayed confidence
-  const [locked, setLocked]               = useState(false)   // face locked-in state
-  const [pendingEmbed, setPendingEmbed]   = useState<number[] | null>(null) // captured but not sent
+  const [enrolling, setEnrolling]         = useState(false)
+  const [smoothConf, setSmoothConf]       = useState(0)
+  const [locked, setLocked]               = useState(false)
+  const [pendingEmbed, setPendingEmbed]   = useState<number[] | null>(null)
 
-  // ── 1. Load models + start camera on mount ────────────────────────────────
+  // ── 1. Load models (skipped if parent already loaded them) + start camera ─
   useEffect(() => {
     let cancelled = false
 
     const init = async () => {
       try {
-        const MODEL_URL = "/models/"
-        await Promise.all([
-          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-        ])
+        if (!modelsAlreadyLoaded) {
+          await Promise.all([
+            faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+            faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+            faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+          ])
+        }
         if (cancelled) return
         setModelsLoaded(true)
         await startCamera()
@@ -63,20 +67,11 @@ export default function FaceMarker({ onEmbeddingComplete, isProcessing }: FaceMa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Keep enrollingRef in sync with state so the rAF loop can read it without closures
   useEffect(() => { enrollingRef.current = enrolling }, [enrolling])
 
   const cleanup = useCallback(() => {
-    // Cancel detection loop
-    if (rafRef.current !== null) {
-      cancelAnimationFrame(rafRef.current)
-      rafRef.current = null
-    }
-    // Stop every camera track
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop())
-      streamRef.current = null
-    }
+    if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null }
+    if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null }
     if (videoRef.current) videoRef.current.srcObject = null
   }, [])
 
@@ -105,7 +100,6 @@ export default function FaceMarker({ onEmbeddingComplete, isProcessing }: FaceMa
   // ── 2. Detection loop ─────────────────────────────────────────────────────
   const startDetectionLoop = () => {
     const detect = async () => {
-      // Always re-queue unless completed
       if (completedRef.current) return
 
       const video  = videoRef.current
@@ -129,12 +123,9 @@ export default function FaceMarker({ onEmbeddingComplete, isProcessing }: FaceMa
           lockFramesRef.current = 0
           setSmoothConf(0)
           smoothConfRef.current = 0
-
-          // Draw hint
           ctx.fillStyle = "rgba(239,68,68,0.85)"
           ctx.font = "bold 13px system-ui"
           ctx.fillText("No face detected — move closer or improve lighting", 10, 26)
-
           rafRef.current = requestAnimationFrame(detect)
           return
         }
@@ -144,11 +135,9 @@ export default function FaceMarker({ onEmbeddingComplete, isProcessing }: FaceMa
         const best    = resized.reduce((a, b) => a.detection.score > b.detection.score ? a : b)
         const score   = best.detection.score
 
-        // Smooth confidence
         smoothConfRef.current = smoothConfRef.current + (score - smoothConfRef.current) * CONF_SMOOTH
         const sc = smoothConfRef.current
 
-        // Lock frame counter — only when enrolling
         const isLocked = enrollingRef.current && score >= LOCK_THRESHOLD
         if (isLocked) {
           lockFramesRef.current = Math.min(lockFramesRef.current + 1, LOCK_FRAMES)
@@ -156,73 +145,52 @@ export default function FaceMarker({ onEmbeddingComplete, isProcessing }: FaceMa
           lockFramesRef.current = Math.max(lockFramesRef.current - 2, 0)
         }
 
-        const lockRatio  = lockFramesRef.current / LOCK_FRAMES  // 0 → 1
+        const lockRatio   = lockFramesRef.current / LOCK_FRAMES
         const fullyLocked = lockRatio >= 1 && enrollingRef.current
 
         setLocked(fullyLocked)
         setSmoothConf(sc)
 
-        // Choose colors
         const landmarkColor = fullyLocked ? "#22c55e" : sc > 0.65 ? "#a78bfa" : "#7c3aed"
         const textColor     = fullyLocked ? "#22c55e" : sc > 0.65 ? "#fbbf24" : "#f87171"
 
-        // Draw landmarks
         ctx.strokeStyle = landmarkColor
         ctx.fillStyle   = landmarkColor
         ctx.lineWidth   = fullyLocked ? 2 : 1.5
 
         const lm = best.landmarks
         const drawPoints = (pts: faceapi.Point[]) => {
-          for (const p of pts) {
-            ctx.beginPath()
-            ctx.arc(p.x, p.y, fullyLocked ? 2.5 : 2, 0, Math.PI * 2)
-            ctx.fill()
-          }
+          for (const p of pts) { ctx.beginPath(); ctx.arc(p.x, p.y, fullyLocked ? 2.5 : 2, 0, Math.PI * 2); ctx.fill() }
         }
         const drawCurve = (pts: faceapi.Point[]) => {
           if (pts.length < 2) return
-          ctx.beginPath()
-          ctx.moveTo(pts[0].x, pts[0].y)
+          ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y)
           for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y)
           ctx.stroke()
         }
 
-        drawCurve(lm.getJawOutline())
-        drawCurve(lm.getLeftEyeBrow())
-        drawCurve(lm.getRightEyeBrow())
-        drawCurve(lm.getLeftEye())
-        drawCurve(lm.getRightEye())
-        drawCurve(lm.getNose())
-        drawCurve(lm.getMouth())
+        drawCurve(lm.getJawOutline()); drawCurve(lm.getLeftEyeBrow()); drawCurve(lm.getRightEyeBrow())
+        drawCurve(lm.getLeftEye()); drawCurve(lm.getRightEye()); drawCurve(lm.getNose()); drawCurve(lm.getMouth())
         drawPoints(lm.positions)
 
-        // Draw bounding box with lock progress
         const box = best.detection.box
         const progressBarWidth = box.width * lockRatio
-        ctx.strokeStyle = landmarkColor
-        ctx.lineWidth = 2
+        ctx.strokeStyle = landmarkColor; ctx.lineWidth = 2
         ctx.strokeRect(box.x, box.y, box.width, box.height)
         if (enrollingRef.current && lockRatio > 0) {
           ctx.fillStyle = landmarkColor + "55"
           ctx.fillRect(box.x, box.y + box.height + 4, progressBarWidth, 4)
         }
 
-        // HUD text
         ctx.fillStyle = textColor
-        ctx.font      = "bold 13px system-ui"
+        ctx.font = "bold 13px system-ui"
         if (enrollingRef.current) {
           ctx.fillText(`Confidence: ${(sc * 100).toFixed(1)}%`, 10, 22)
-          if (fullyLocked) {
-            ctx.fillStyle = "#22c55e"
-            ctx.fillText("Face locked — capturing…", 10, 42)
-          } else {
-            ctx.fillText(`Lock: ${Math.round(lockRatio * 100)}%`, 10, 42)
-          }
+          ctx.fillText(fullyLocked ? "Face locked — capturing…" : `Lock: ${Math.round(lockRatio * 100)}%`, 10, 42)
         } else {
           ctx.fillText("Tracking active — click Start to enroll", 10, 22)
         }
 
-        // Auto-capture once fully locked
         if (fullyLocked && !completedRef.current) {
           const embedding = Array.from(best.descriptor)
           completedRef.current = true
@@ -230,7 +198,6 @@ export default function FaceMarker({ onEmbeddingComplete, isProcessing }: FaceMa
           cleanup()
           return
         }
-
       } catch (err) {
         console.error("[FaceMarker] Detection error:", err)
       }
@@ -243,37 +210,25 @@ export default function FaceMarker({ onEmbeddingComplete, isProcessing }: FaceMa
 
   // ── 3. User actions ───────────────────────────────────────────────────────
   const handleStartEnroll = () => {
-    lockFramesRef.current = 0
-    smoothConfRef.current = 0
-    completedRef.current  = false
-    setPendingEmbed(null)
-    setLocked(false)
-    setEnrolling(true)
+    lockFramesRef.current = 0; smoothConfRef.current = 0
+    completedRef.current = false; setPendingEmbed(null); setLocked(false); setEnrolling(true)
   }
 
-  const handleConfirm = () => {
-    if (pendingEmbed) onEmbeddingComplete(pendingEmbed)
-  }
+  const handleConfirm = () => { if (pendingEmbed) onEmbeddingComplete(pendingEmbed) }
 
   const handleRetry = () => {
-    completedRef.current  = false
-    lockFramesRef.current = 0
-    smoothConfRef.current = 0
-    setPendingEmbed(null)
-    setLocked(false)
-    setEnrolling(false)
-    setSmoothConf(0)
-    // Restart camera
+    completedRef.current = false; lockFramesRef.current = 0; smoothConfRef.current = 0
+    setPendingEmbed(null); setLocked(false); setEnrolling(false); setSmoothConf(0)
     startCamera()
   }
 
   // ── 4. Render ─────────────────────────────────────────────────────────────
+  // If models were preloaded, skip the models-loading step — only wait for camera
   const loading = !modelsLoaded || (!cameraReady && !error)
 
   return (
     <div className="w-full space-y-4">
 
-      {/* Loading state */}
       {loading && (
         <div className="flex flex-col items-center justify-center py-10 gap-3">
           <Loader2 className="animate-spin text-purple-600" size={32} />
@@ -283,7 +238,6 @@ export default function FaceMarker({ onEmbeddingComplete, isProcessing }: FaceMa
         </div>
       )}
 
-      {/* Error state */}
       {error && (
         <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-xl">
           <AlertCircle className="text-red-600 flex-shrink-0 mt-0.5" size={18} />
@@ -294,25 +248,11 @@ export default function FaceMarker({ onEmbeddingComplete, isProcessing }: FaceMa
         </div>
       )}
 
-      {/* Camera feed — always rendered so the video element exists; visibility controlled below */}
       {!error && (
-        <div
-          className="relative bg-black rounded-xl overflow-hidden"
-          style={{ display: loading ? "none" : "block" }}
-        >
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-auto block"
-          />
-          <canvas
-            ref={canvasRef}
-            className="absolute inset-0 w-full h-full pointer-events-none"
-          />
+        <div className="relative bg-black rounded-xl overflow-hidden" style={{ display: loading ? "none" : "block" }}>
+          <video ref={videoRef} autoPlay playsInline muted className="w-full h-auto block" />
+          <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
 
-          {/* "Start Enroll" overlay — shown when camera ready but user hasn't started */}
           {cameraReady && !enrolling && !pendingEmbed && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 backdrop-blur-[2px]">
               <button
@@ -328,44 +268,29 @@ export default function FaceMarker({ onEmbeddingComplete, isProcessing }: FaceMa
             </div>
           )}
 
-          {/* Lock overlay pulse when fully locked */}
           {locked && !pendingEmbed && (
             <div className="absolute inset-0 pointer-events-none border-4 border-green-400 rounded-xl animate-pulse" />
           )}
         </div>
       )}
 
-      {/* Post-capture confirmation */}
       {pendingEmbed && (
         <div className="space-y-3">
           <div className="p-4 bg-green-50 border border-green-200 rounded-xl">
             <p className="text-green-900 font-semibold text-sm">✓ Face captured successfully</p>
-            <p className="text-green-700 text-sm mt-0.5">
-              128-point embedding ready. Confirm to save your Face ID.
-            </p>
+            <p className="text-green-700 text-sm mt-0.5">128-point embedding ready. Confirm to save your Face ID.</p>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <button
-              onClick={handleRetry}
-              disabled={isProcessing}
-              className="px-4 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 disabled:opacity-50 transition-colors"
-            >
+            <button onClick={handleRetry} disabled={isProcessing} className="px-4 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 disabled:opacity-50 transition-colors">
               Retake
             </button>
-            <button
-              onClick={handleConfirm}
-              disabled={isProcessing}
-              className="px-4 py-2.5 bg-purple-600 text-white rounded-xl text-sm font-medium hover:bg-purple-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
-            >
-              {isProcessing
-                ? <><Loader2 size={15} className="animate-spin" /> Saving…</>
-                : "Confirm & Save"}
+            <button onClick={handleConfirm} disabled={isProcessing} className="px-4 py-2.5 bg-purple-600 text-white rounded-xl text-sm font-medium hover:bg-purple-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
+              {isProcessing ? <><Loader2 size={15} className="animate-spin" /> Saving…</> : "Confirm & Save"}
             </button>
           </div>
         </div>
       )}
 
-      {/* Live confidence bar — visible only while actively enrolling */}
       {enrolling && !pendingEmbed && cameraReady && (
         <div className="space-y-1.5">
           <div className="flex justify-between text-xs text-gray-500">
@@ -377,24 +302,14 @@ export default function FaceMarker({ onEmbeddingComplete, isProcessing }: FaceMa
           <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
             <div
               className="h-full rounded-full transition-all duration-200"
-              style={{
-                width: `${Math.min(smoothConf * 100, 100)}%`,
-                background: locked
-                  ? "#22c55e"
-                  : smoothConf > 0.65
-                  ? "#a78bfa"
-                  : "#7c3aed",
-              }}
+              style={{ width: `${Math.min(smoothConf * 100, 100)}%`, background: locked ? "#22c55e" : smoothConf > 0.65 ? "#a78bfa" : "#7c3aed" }}
             />
           </div>
         </div>
       )}
 
-      {/* Idle hint */}
       {!enrolling && !pendingEmbed && cameraReady && (
-        <p className="text-center text-gray-400 text-xs">
-          Make sure your face is well-lit and clearly visible before starting.
-        </p>
+        <p className="text-center text-gray-400 text-xs">Make sure your face is well-lit and clearly visible before starting.</p>
       )}
     </div>
   )

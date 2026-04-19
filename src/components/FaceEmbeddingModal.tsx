@@ -1,7 +1,8 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { X, Loader2, AlertCircle, CheckCircle, Trash2 } from "lucide-react"
+import * as faceapi from "@vladmandic/face-api"
 import FaceMarker from "./FaceMarker"
 
 interface FaceEmbeddingModalProps {
@@ -14,15 +15,9 @@ interface FaceEmbeddingModalProps {
   onDeleted?: () => void
 }
 
-// Internal view states
-// "idle"     — existing embedding, show manage options (no camera)
-// "confirm"  — first-time enroll: show instructions + "Open Camera" button (no camera yet)
-// "camera"   — FaceMarker is mounted and camera is live
-// "deleting" — DELETE in progress spinner
-// "success"  — POST succeeded
-// "deleted"  — DELETE succeeded
-// "error"    — any API error
 type View = "idle" | "confirm" | "camera" | "deleting" | "success" | "deleted" | "error"
+
+const MODEL_URL = "/models/"
 
 export default function FaceEmbeddingModal({
   isOpen,
@@ -33,22 +28,49 @@ export default function FaceEmbeddingModal({
   onSuccess,
   onDeleted,
 }: FaceEmbeddingModalProps) {
-  const [view, setView]               = useState<View>("idle")
-  const [isProcessing, setIsProcessing] = useState(false)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [view, setView]                   = useState<View>("idle")
+  const [isProcessing, setIsProcessing]   = useState(false)
+  const [errorMessage, setErrorMessage]   = useState<string | null>(null)
+  const [modelsReady, setModelsReady]     = useState(false)
+  const modelsLoadedRef                   = useRef(false)
 
-  // Reset every time the modal opens
+  // ── Preload face-api models as soon as the modal opens ───────────────────
+  // This runs in the background while the user reads the instructions,
+  // so by the time they click "Open Camera & Begin" models are already in memory.
+  useEffect(() => {
+    if (!isOpen) return
+    if (modelsLoadedRef.current) { setModelsReady(true); return }
+
+    let cancelled = false
+    Promise.all([
+      faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+      faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+      faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+    ])
+      .then(() => {
+        if (!cancelled) {
+          modelsLoadedRef.current = true
+          setModelsReady(true)
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) console.error("[FaceEmbeddingModal] Model preload failed:", err)
+        // Non-fatal — FaceMarker will show its own error if models aren't ready
+      })
+
+    return () => { cancelled = true }
+  }, [isOpen])
+
+  // ── Reset view each time the modal opens ─────────────────────────────────
   useEffect(() => {
     if (isOpen) {
-      // If they already have an embedding → manage screen (no camera)
-      // If they don't → instructions screen (still no camera)
       setView(hasExistingEmbedding ? "idle" : "confirm")
       setErrorMessage(null)
       setIsProcessing(false)
     }
   }, [isOpen, hasExistingEmbedding])
 
-  // ── API: save embedding ──────────────────────────────────────────────────
+  // ── API: save embedding ───────────────────────────────────────────────────
   const handleEmbeddingComplete = async (embeddingData: number[]) => {
     setIsProcessing(true)
     setErrorMessage(null)
@@ -62,21 +84,9 @@ export default function FaceEmbeddingModal({
 
       const data = await response.json()
 
-      if (response.status === 401) {
-        setErrorMessage("You must be logged in.")
-        setView("error")
-        return
-      }
-      if (response.status === 403) {
-        setErrorMessage("You don't have permission for this ticket.")
-        setView("error")
-        return
-      }
-      if (!response.ok || !data.success) {
-        setErrorMessage(data.message || "Failed to save. Please try again.")
-        setView("error")
-        return
-      }
+      if (response.status === 401) { setErrorMessage("You must be logged in."); setView("error"); return }
+      if (response.status === 403) { setErrorMessage("You don't have permission for this ticket."); setView("error"); return }
+      if (!response.ok || !data.success) { setErrorMessage(data.message || "Failed to save. Please try again."); setView("error"); return }
 
       setView("success")
       setTimeout(() => { onSuccess?.(); onClose() }, 2200)
@@ -88,7 +98,7 @@ export default function FaceEmbeddingModal({
     }
   }
 
-  // ── API: delete embedding ────────────────────────────────────────────────
+  // ── API: delete embedding ─────────────────────────────────────────────────
   const handleDelete = async () => {
     setView("deleting")
     try {
@@ -99,12 +109,7 @@ export default function FaceEmbeddingModal({
       })
 
       const data = await response.json()
-
-      if (!response.ok || !data.success) {
-        setErrorMessage(data.message || "Failed to delete.")
-        setView("error")
-        return
-      }
+      if (!response.ok || !data.success) { setErrorMessage(data.message || "Failed to delete."); setView("error"); return }
 
       setView("deleted")
       setTimeout(() => { onDeleted?.(); onClose() }, 2200)
@@ -119,12 +124,24 @@ export default function FaceEmbeddingModal({
   const canClose = !isProcessing && view !== "deleting"
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-xl">
+    // z-[1100] beats the sticky header's z-index: 1000
+    // pt-20 gives breathing room so the modal card clears the header on large screens
+    // items-start sm:items-center lets it sit naturally on mobile too
+    <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center p-4 pt-20 sm:pt-4 z-[1100] overflow-y-auto">
+      <div className="bg-white rounded-2xl max-w-2xl w-full shadow-xl my-auto">
 
         {/* ── Header ── */}
         <div className="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between rounded-t-2xl z-10">
-          <h2 className="text-xl font-bold text-gray-900">Face ID Registration</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-xl font-bold text-gray-900">Face ID Registration</h2>
+            {/* Show a small "Loading models…" pill while preloading in background */}
+            {!modelsReady && view === "confirm" && (
+              <span className="inline-flex items-center gap-1.5 text-xs text-purple-600 bg-purple-50 border border-purple-100 px-2.5 py-1 rounded-full">
+                <Loader2 size={11} className="animate-spin" />
+                Preparing…
+              </span>
+            )}
+          </div>
           <button
             onClick={onClose}
             disabled={!canClose}
@@ -177,11 +194,7 @@ export default function FaceEmbeddingModal({
                 </div>
               </div>
               <button
-                onClick={() => {
-                  setErrorMessage(null)
-                  // Go back to the right starting screen
-                  setView(hasExistingEmbedding ? "idle" : "confirm")
-                }}
+                onClick={() => { setErrorMessage(null); setView(hasExistingEmbedding ? "idle" : "confirm") }}
                 className="w-full px-4 py-2.5 bg-purple-600 text-white rounded-xl hover:bg-purple-700 text-sm font-medium transition-colors"
               >
                 Try Again
@@ -189,7 +202,7 @@ export default function FaceEmbeddingModal({
             </div>
           )}
 
-          {/* ── Idle: existing embedding → manage options (NO camera) ── */}
+          {/* ── Idle: existing embedding → manage options ── */}
           {view === "idle" && (
             <div className="space-y-4">
               <div className="flex items-start gap-3 p-4 bg-green-50 border border-green-200 rounded-xl">
@@ -219,8 +232,7 @@ export default function FaceEmbeddingModal({
             </div>
           )}
 
-          {/* ── Confirm: instructions before opening camera ── */}
-          {/* ── Confirm: instructions before opening camera ── */}
+          {/* ── Confirm: instructions while models load in background ── */}
           {view === "confirm" && (
             <div className="space-y-5">
               <div>
@@ -247,12 +259,19 @@ export default function FaceEmbeddingModal({
 
               <button
                 onClick={() => setView("camera")}
-                className="w-full px-4 py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+                disabled={!modelsReady}
+                className="w-full px-4 py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700 disabled:opacity-60 disabled:cursor-not-allowed text-sm font-semibold transition-colors flex items-center justify-center gap-2"
               >
-                Open Camera & Begin
+                {modelsReady ? (
+                  "Open Camera & Begin"
+                ) : (
+                  <>
+                    <Loader2 size={15} className="animate-spin" />
+                    Preparing camera…
+                  </>
+                )}
               </button>
 
-              {/* Allow going back to manage screen if they already had one */}
               {hasExistingEmbedding && (
                 <button
                   onClick={() => setView("idle")}
@@ -264,11 +283,12 @@ export default function FaceEmbeddingModal({
             </div>
           )}
 
-          {/* ── Camera: FaceMarker mounts HERE and only here ── */}
+          {/* ── Camera: FaceMarker mounts here and only here ── */}
           {view === "camera" && (
             <FaceMarker
               onEmbeddingComplete={handleEmbeddingComplete}
               isProcessing={isProcessing}
+              modelsAlreadyLoaded={modelsReady}
             />
           )}
 

@@ -1,7 +1,7 @@
 /**
  * Calculates the VAT fee for each ticket price
  * This is to ensure burden of fee is on users, not event creators
- * Formula: (2.5% of ticket price) + 100
+ * Formula: (5% of ticket price) + 100
  * @param ticketPrice - The original ticket price (must be a number)
  * @returns The VAT fee amount (as a number)
  */

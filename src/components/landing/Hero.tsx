@@ -14,7 +14,7 @@ interface Particle {
   duration: number
 }
 
-const PEEPHOLE_R     = 50
+const PEEPHOLE_R     = 20
 const HOLD_MS        = 1500
 const PARTICLE_COUNT = 24
 const RING_R         = PEEPHOLE_R + 10

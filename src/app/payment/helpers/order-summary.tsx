@@ -3,12 +3,12 @@
 "use client"
 
 import { CheckCircle, Ticket } from "lucide-react"
+import { getPricingBreakdown } from "@/utils/priceUtility"
 
 interface CartItem {
   ticketType: string
   quantity: number
   price: number
-  vat: number
 }
 
 interface OrderSummaryProps {
@@ -35,8 +35,14 @@ export default function OrderSummary({
   discountData,
   isFreeEvent,
 }: OrderSummaryProps) {
-  const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0)
-  const totalVat = cart.reduce((sum, item) => sum + (item.vat * item.quantity), 0)
+  // Use priceUtility to get the breakdown for every cart item
+  const pricedCart = cart.map((item) => {
+    const { originalPrice, vatFee, finalPrice } = getPricingBreakdown(item.price)
+    return { ...item, originalPrice, vatFee, finalPrice }
+  })
+
+  const subtotal = pricedCart.reduce((sum, item) => sum + item.originalPrice * item.quantity, 0)
+  const totalVat = pricedCart.reduce((sum, item) => sum + item.vatFee * item.quantity, 0)
   const computedTotal = Math.max(0, subtotal + totalVat - (discountAmount ?? 0))
 
   return (
@@ -72,19 +78,19 @@ export default function OrderSummary({
               <span className="text-sm font-bold text-emerald-600">Free</span>
             </div>
           ) : (
-            cart.map((item, index) => (
+            pricedCart.map((item, index) => (
               <div key={index} className="flex items-start justify-between gap-2">
                 <div className="flex items-start gap-2 flex-1 min-w-0">
                   <Ticket size={14} className="text-purple-500 flex-shrink-0 mt-0.5" />
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-gray-800 break-words">{item.ticketType}</p>
                     <p className="text-xs text-gray-500">
-                      ₦{formatNumber(item.price)} × {item.quantity}
+                      ₦{formatNumber(item.originalPrice)} × {item.quantity}
                     </p>
                   </div>
                 </div>
                 <span className="text-sm font-bold text-gray-900 whitespace-nowrap">
-                  ₦{formatNumber(item.price * item.quantity)}
+                  ₦{formatNumber(item.originalPrice * item.quantity)}
                 </span>
               </div>
             ))
@@ -101,7 +107,7 @@ export default function OrderSummary({
               </div>
 
               <div className="flex justify-between text-sm sm:text-base text-gray-700">
-                <span>VAT</span>
+                <span>VAT & Fees</span>
                 <span className="font-semibold whitespace-nowrap">₦{formatNumber(totalVat)}</span>
               </div>
             </>

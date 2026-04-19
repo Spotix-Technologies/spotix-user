@@ -57,7 +57,7 @@ const PUBLIC_AUTH_ROUTES = new Set([
   "/auth/login",
   "/auth/signup",
   "/auth/forgot-password",
-  "/home"
+  // "/home"
 ]);
 
 /**
