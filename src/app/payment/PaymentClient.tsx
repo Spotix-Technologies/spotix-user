@@ -426,8 +426,8 @@ const fetchReferralCodes = async (eventId: string) => {
       const subtotal = subtotalBeforeDiscount - discountAmount
       const totalAmount = subtotal + totalVat
 
-      // All events (free and paid) use the same reference creation endpoint
-      const endpoint = "/api/v1/create-pay-ref"
+      // Free events use a dedicated route that pre-sets status to "successful"
+      const endpoint = isFreeEvent ? "/api/v1/ref/free" : "/api/v1/create-pay-ref"
 
       // Create array of ticket types with quantities
       const ticketTypes = cart.map(item => ({

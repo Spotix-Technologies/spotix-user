@@ -112,16 +112,13 @@ export async function POST(request: NextRequest) {
     console.log(`[create-pay-ref] primaryTicketType: ${primaryTicketType}, totalTicketCount: ${totalTicketCount}`)
 
     // ── Validate remaining required fields ────────────────────────────────────
-    if (!eventId || !eventCreatorId) {
-      console.error("[create-pay-ref] Missing required fields", { eventId, eventCreatorId })
+    if (!eventId || !eventCreatorId || ticketPrice === undefined || totalAmount === undefined) {
+      console.error("[create-pay-ref] Missing required fields", { eventId, eventCreatorId, ticketPrice, totalAmount })
       return NextResponse.json(
-        { error: "Missing required fields: eventId, eventCreatorId" },
+        { error: "Missing required fields: eventId, eventCreatorId, ticketPrice, totalAmount" },
         { status: 400 }
       )
     }
-
-    // Derive amounts — for free events ticketPrice and totalAmount may be 0 or absent
-    const isFreeEvent = Number(ticketPrice) === 0 || (ticketPrice === undefined && totalAmount === undefined)
 
     // ── Generate reference ────────────────────────────────────────────────────
     const timestamp = Date.now()
@@ -155,8 +152,8 @@ export async function POST(request: NextRequest) {
       // Canonical ticket info — ticket.js reads ticketTypes to expand into seats
       ticketTypes: normalisedTicketTypes,
       ticketType: primaryTicketType,          // convenience / backwards compat
-      ticketPrice: Number(ticketPrice) || 0,       // subtotal before VAT (used for display)
-      totalAmount: Number(totalAmount) || 0,       // grand total inc. VAT after discount
+      ticketPrice: Number(ticketPrice),       // subtotal before VAT (used for display)
+      totalAmount: Number(totalAmount),       // grand total inc. VAT after discount
       transactionFee: Number(transactionFee) || 0, // VAT/fee sent from orderSummary
       totalTicketCount,
 
