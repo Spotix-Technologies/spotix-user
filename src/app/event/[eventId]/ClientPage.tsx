@@ -392,11 +392,13 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
 
     if (typeof window !== "undefined") {
       const firstItem = cart[0]
+      // Compute the total subtotal from the cart so free events (price=0) result in ticketPrice=0
+      const cartSubtotal = cart.reduce((sum: number, item: any) => sum + (item.price * item.quantity), 0)
       const paymentData = {
         eventId,
         eventName: eventData.eventName,
         ticketType: firstItem.ticketType,
-        ticketPrice: firstItem.price,
+        ticketPrice: cartSubtotal,
         eventCreatorId: createdBy,
         organizerId: eventData.organizerId || createdBy,
         eventVenue: eventData.eventVenue || "",

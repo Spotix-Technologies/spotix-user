@@ -63,18 +63,6 @@ function PaymentSuccessContent() {
           sessionStorage.getItem("spotix_payment_data") ||
           sessionStorage.getItem("paystack_payment_data")
 
-        let isFreeTicket = false
-
-        if (storedPaymentData) {
-          try {
-            const paymentData = JSON.parse(storedPaymentData)
-            isFreeTicket = paymentData.ticketPrice === 0
-            console.log("Ticket price:", paymentData.ticketPrice, "Is free:", isFreeTicket)
-          } catch (parseError) {
-            console.error("Error parsing payment data:", parseError)
-          }
-        }
-
         const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL
 
         if (!BACKEND_URL) {
@@ -83,9 +71,8 @@ function PaymentSuccessContent() {
           return
         }
 
-        const ticketEndpoint = isFreeTicket
-          ? `${BACKEND_URL}/v1/ticket/free`
-          : `${BACKEND_URL}/v1/ticket`
+        // Always use the unified ticket endpoint for both free and paid events
+        const ticketEndpoint = `${BACKEND_URL}/v1/ticket`
 
         console.log("Calling ticket endpoint:", ticketEndpoint)
 

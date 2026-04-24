@@ -426,8 +426,8 @@ const fetchReferralCodes = async (eventId: string) => {
       const subtotal = subtotalBeforeDiscount - discountAmount
       const totalAmount = subtotal + totalVat
 
-      // Use different endpoint for free events
-      const endpoint = isFreeEvent ? "/api/v1/ref/free" : "/api/v1/create-pay-ref"
+      // All events (free and paid) use the same reference creation endpoint
+      const endpoint = "/api/v1/create-pay-ref"
 
       // Create array of ticket types with quantities
       const ticketTypes = cart.map(item => ({
@@ -495,15 +495,13 @@ const fetchReferralCodes = async (eventId: string) => {
         }
       }
 
-      // Add payment-specific fields only for paid events
-      if (!isFreeEvent) {
-        requestBody.ticketPrice = subtotalBeforeDiscount
-        requestBody.totalAmount = totalAmount
-        requestBody.transactionFee = totalVat
-        requestBody.discountAmount = discountAmount
-        requestBody.discountCode = discountData?.code || null
-        requestBody.discountData = discountData || null
-      }
+      // Always include payment fields; they will be 0 for free events
+      requestBody.ticketPrice = isFreeEvent ? 0 : subtotalBeforeDiscount
+      requestBody.totalAmount = isFreeEvent ? 0 : totalAmount
+      requestBody.transactionFee = isFreeEvent ? 0 : totalVat
+      requestBody.discountAmount = isFreeEvent ? 0 : discountAmount
+      requestBody.discountCode = isFreeEvent ? null : (discountData?.code || null)
+      requestBody.discountData = isFreeEvent ? null : (discountData || null)
 
       const headers: any = {
         "Content-Type": "application/json",
@@ -550,7 +548,8 @@ const fetchReferralCodes = async (eventId: string) => {
       return
     }
 
-    // For free events, create reference and redirect to success
+    // For free events, create reference and redirect directly to success page.
+    // The success page will call the unified /v1/ticket endpoint to generate the ticket.
     if (isFreeEvent) {
       const reference = await createPaymentReference()
       if (!reference) return
@@ -558,13 +557,10 @@ const fetchReferralCodes = async (eventId: string) => {
       // Submit survey responses if they exist
       if (surveyResponses && Object.keys(surveyResponses).length > 0) {
         try {
-          // Use first ticket type from cart if available
           const primaryTicketType = cart.length > 0 ? cart[0].ticketType : paymentData.ticketType
           await fetch("/api/v1/survey/response", {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               userId: paymentData.eventCreatorId,
               eventId: paymentData.eventId,
@@ -578,30 +574,12 @@ const fetchReferralCodes = async (eventId: string) => {
           })
         } catch (error) {
           console.error("Error submitting survey responses:", error)
-          // Don't block payment if survey submission fails
+          // Don't block registration if survey submission fails
         }
       }
 
-      // Call the free ticket generation endpoint
-      try {
-        const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000"
-        const response = await fetch(`${BACKEND_URL}/v1/ticket/free`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ reference }),
-        })
-
-        if (response.ok) {
-          router.push(`/payment/success?reference=${reference}`)
-        } else {
-          alert("Failed to generate free ticket. Please try again.")
-        }
-      } catch (error) {
-        console.error("Error generating free ticket:", error)
-        alert("Failed to generate free ticket. Please try again.")
-      }
+      // Redirect to success — PaystackSuccessClient will call /v1/ticket to generate the ticket
+      router.push(`/payment/success?reference=${reference}`)
       return
     }
 

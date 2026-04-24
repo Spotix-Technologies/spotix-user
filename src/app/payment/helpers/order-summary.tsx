@@ -67,16 +67,23 @@ export default function OrderSummary({
         {/* Ticket Line Items */}
         <div className="p-3 sm:p-4 bg-purple-50 rounded-xl border border-purple-100 space-y-2">
           <p className="text-xs sm:text-sm text-gray-600 mb-2">
-            {isFreeEvent ? "Ticket" : `Tickets (${cart.reduce((sum, i) => sum + i.quantity, 0)} total)`}
+            {`Tickets (${cart.reduce((sum, i) => sum + i.quantity, 0)} total)`}
           </p>
           {isFreeEvent ? (
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Ticket size={14} className="text-purple-500 flex-shrink-0" />
-                <span className="text-sm font-semibold text-gray-800">Free Admission</span>
+            pricedCart.map((item, index) => (
+              <div key={index} className="flex items-start justify-between gap-2">
+                <div className="flex items-start gap-2 flex-1 min-w-0">
+                  <Ticket size={14} className="text-purple-500 flex-shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-800 break-words">{item.ticketType}</p>
+                    {item.quantity > 1 && (
+                      <p className="text-xs text-gray-500">× {item.quantity}</p>
+                    )}
+                  </div>
+                </div>
+                <span className="text-sm font-bold text-emerald-600 whitespace-nowrap">Free</span>
               </div>
-              <span className="text-sm font-bold text-emerald-600">Free</span>
-            </div>
+            ))
           ) : (
             pricedCart.map((item, index) => (
               <div key={index} className="flex items-start justify-between gap-2">

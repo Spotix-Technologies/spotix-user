@@ -190,7 +190,7 @@ export default function PaymentMethods({
         {creatingReference ? (
           "Processing..."
         ) : isFreeEvent ? (
-          <span className="break-words px-2">Register for Free Event</span>
+          <span className="break-words px-2">Proceed to Register</span>
         ) : (
           <span className="break-words px-2">
             Proceed with{" "}
