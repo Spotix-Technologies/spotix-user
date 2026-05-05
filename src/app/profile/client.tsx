@@ -3,6 +3,7 @@
 import { useState, useEffect, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
 import { auth } from "@/app/lib/firebase"
+import type { SessionUser } from "@/app/lib/auth-client-user"
 import { signOut } from "firebase/auth"
 import UserHeader from "@/components/UserHeader"
 import Footer from "@/components/footer"
@@ -69,7 +70,7 @@ const ConfirmDialog = ({ isOpen, message, onConfirm, onCancel }: ConfirmDialogPr
   )
 }
 
-const Profile = () => {
+const Profile = ({ user }: { user?: SessionUser }) => {
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState<UserProfile | null>(null)
   const [uploadProvider, setUploadProvider] = useState<string | null>(null)

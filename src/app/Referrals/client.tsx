@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
 import { auth, db } from "@/app/lib/firebase"
+import type { SessionUser } from "@/app/lib/auth-client-user"
 import { doc, getDoc, collection, setDoc, updateDoc, serverTimestamp, addDoc } from "firebase/firestore"
 import { ArrowRight, Users, Wallet, AlertCircle, CheckCircle, TrendingUp, ArrowDown, Copy, Check } from "lucide-react"
 import UserHeader from "@/components/UserHeader"
@@ -47,7 +48,7 @@ const formatJoinDate = (joinedAt: any): string => {
   }
 }
 
-export default function ReferralsClient() {
+export default function ReferralsClient({ user }: { user?: SessionUser }) {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [userData, setUserData] = useState<UserData | null>(null)

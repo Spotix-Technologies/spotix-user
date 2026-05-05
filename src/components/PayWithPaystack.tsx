@@ -5,6 +5,7 @@ import { auth, db } from "@/app/lib/firebase"
 import { doc, getDoc } from "firebase/firestore"
 import { Loader2, CreditCard, AlertCircle } from "lucide-react"
 import AddPhoneNumber from "./Addphonenumber"
+import { calculateFinalPrice } from "@/utils/priceUtility"
 
 interface PayWithPaystackProps {
   email: string
@@ -171,7 +172,7 @@ export default function PayWithPaystack({
       const handler = window.PaystackPop.setup({
         key: paystackPublicKey,
         email: email,
-        amount: amount * 100, // Convert to kobo
+        amount: Math.round(calculateFinalPrice(amount) * 100), // price + VAT, converted to kobo
         currency: "NGN",
         ref: reference,
         metadata: {

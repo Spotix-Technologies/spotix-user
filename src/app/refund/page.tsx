@@ -6,6 +6,8 @@ import { auth, db } from "@/app/lib/firebase"
 import { collection, getDocs, query, orderBy, addDoc, doc, setDoc, getDoc } from "firebase/firestore"
 import { ArrowLeft, AlertTriangle, CheckCircle, XCircle, Calendar, Clock, Tag } from "lucide-react"
 import UserHeader from "../../components/UserHeader"
+import { withAuth } from "@/app/hooks/useAuth"
+import type { SessionUser } from "@/app/lib/auth-client-user"
 import Footer from "../../components/footer"
 
 interface TicketItem {
@@ -44,7 +46,7 @@ const refundReasons = [
   "Other",
 ]
 
-export default function Refund() {
+function Refund({ user }: { user?: SessionUser }) {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [tickets, setTickets] = useState<TicketItem[]>([])
@@ -593,3 +595,5 @@ export default function Refund() {
     </div>
   )
 }
+-e 
+export default withAuth(Refund)

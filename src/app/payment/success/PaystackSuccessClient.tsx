@@ -1,11 +1,13 @@
 "use client"
 
 import { Suspense } from "react"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { CheckCircle, XCircle, Loader2, ArrowRight, Ticket, Download } from "lucide-react"
 import UserHeader from "@/components/UserHeader"
 import Footer from "@/components/footer"
+import QRCode from "react-qr-code"
+import { buildTicketPDF, rasteriseQRFromWrapper } from "@/lib/ticket"
 
 interface TicketData {
   success: boolean
@@ -44,6 +46,11 @@ function PaymentSuccessContent() {
   const [ticketData, setTicketData] = useState<TicketData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showConfetti, setShowConfetti] = useState(false)
+  const [downloadingPdfs, setDownloadingPdfs] = useState(false)
+  const [pdfsDownloaded, setPdfsDownloaded] = useState(false)
+
+  // One ref per ticket ID — keyed by ticketId string
+  const qrRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   useEffect(() => {
     const generateTicket = async () => {
@@ -56,13 +63,6 @@ function PaymentSuccessContent() {
           return
         }
 
-        console.log("Generating ticket for reference:", reference)
-
-        // Get stored payment data to determine if ticket is free
-        const storedPaymentData =
-          sessionStorage.getItem("spotix_payment_data") ||
-          sessionStorage.getItem("paystack_payment_data")
-
         const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL
 
         if (!BACKEND_URL) {
@@ -71,10 +71,7 @@ function PaymentSuccessContent() {
           return
         }
 
-        // Always use the unified ticket endpoint for both free and paid events
         const ticketEndpoint = `${BACKEND_URL}/v1/ticket`
-
-        console.log("Calling ticket endpoint:", ticketEndpoint)
 
         const response = await fetch(ticketEndpoint, {
           method: "POST",
@@ -113,7 +110,58 @@ function PaymentSuccessContent() {
     generateTicket()
   }, [searchParams])
 
-  // For multi-ticket purchases, "View Ticket" links to the first ticket
+  /**
+   * Auto-download all ticket PDFs once the QR codes have rendered.
+   * We wait one tick after ticketData is set so the QR SVGs are in the DOM.
+   */
+  const downloadAllPdfs = useCallback(async (data: TicketData) => {
+    setDownloadingPdfs(true)
+    try {
+      // Small delay to ensure QR SVGs are fully rendered
+      await new Promise((r) => setTimeout(r, 800))
+
+      for (const ticketId of data.ticketIds) {
+        const wrapperEl = qrRefs.current[ticketId]
+        const qrPngDataUrl = await rasteriseQRFromWrapper(wrapperEl)
+
+        buildTicketPDF({
+          ticketId,
+          eventName: data.eventName,
+          eventType: data.eventDetails.eventType || "EVENT",
+          ticketType: "General Admission",
+          ticketPrice: data.totalAmount / data.totalTickets,
+          ticketReference: data.ticketReference,
+          purchaseDate: new Date().toLocaleDateString("en-NG"),
+          purchaseTime: new Date().toLocaleTimeString("en-NG", { hour: "2-digit", minute: "2-digit" }),
+          eventDate: data.eventDetails.eventDate,
+          eventStart: data.eventDetails.eventStart,
+          eventEnd: data.eventDetails.eventEnd,
+          eventVenue: data.eventDetails.eventVenue,
+          qrPngDataUrl,
+        })
+
+        // Stagger downloads slightly so the browser doesn't block them
+        if (data.ticketIds.length > 1) {
+          await new Promise((r) => setTimeout(r, 400))
+        }
+      }
+
+      setPdfsDownloaded(true)
+    } catch (err) {
+      console.error("Auto PDF download failed:", err)
+    } finally {
+      setDownloadingPdfs(false)
+    }
+  }, [])
+
+  // Trigger auto-download once ticket data is ready
+  useEffect(() => {
+    if (ticketData && !pdfsDownloaded) {
+      downloadAllPdfs(ticketData)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticketData])
+
   const handleViewTicket = () => {
     if (ticketData?.ticketIds?.length) {
       router.push(`/ticket?id=${ticketData.ticketIds[0]}`)
@@ -211,6 +259,19 @@ function PaymentSuccessContent() {
         </div>
       )}
 
+      {/* Hidden QR codes — rendered off-screen so we can rasterise them */}
+      <div className="sr-only" aria-hidden="true">
+        {ticketData.ticketIds.map((id) => (
+          <div
+            key={id}
+            ref={(el) => { qrRefs.current[id] = el }}
+            className="p-2 bg-white"
+          >
+            <QRCode value={id} size={300} level="H" fgColor="#7c3aed" bgColor="#ffffff" />
+          </div>
+        ))}
+      </div>
+
       <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-purple-50 py-12 px-4">
         <div className="max-w-3xl mx-auto">
 
@@ -229,6 +290,19 @@ function PaymentSuccessContent() {
                 ? `${ticketData.totalTickets} tickets have been generated`
                 : "Your ticket has been generated"}
             </p>
+            {/* PDF download status */}
+            {downloadingPdfs && (
+              <div className="mt-4 flex items-center justify-center gap-2 text-sm text-purple-600">
+                <Loader2 size={15} className="animate-spin" />
+                Preparing your ticket PDF{isMultiTicket ? "s" : ""}…
+              </div>
+            )}
+            {pdfsDownloaded && !downloadingPdfs && (
+              <div className="mt-4 flex items-center justify-center gap-2 text-sm text-green-600">
+                <CheckCircle size={15} />
+                Ticket PDF{isMultiTicket ? "s" : ""} downloaded!
+              </div>
+            )}
           </div>
 
           {/* Ticket Details Card */}
@@ -301,7 +375,7 @@ function PaymentSuccessContent() {
                 </div>
               </div>
 
-              {/* Attendee Info — uses buyerInfo from new response shape */}
+              {/* Attendee Info */}
               <div className="border-t border-gray-200 pt-6">
                 <h3 className="text-lg font-bold text-gray-900 mb-4">Attendee Information</h3>
                 <div className="grid md:grid-cols-2 gap-4">
@@ -379,6 +453,18 @@ function PaymentSuccessContent() {
             </button>
           </div>
 
+          {/* Manual re-download if auto failed */}
+          {pdfsDownloaded === false && !downloadingPdfs && (
+            <div className="text-center mb-4">
+              <button
+                onClick={() => ticketData && downloadAllPdfs(ticketData)}
+                className="text-sm text-purple-600 hover:text-purple-800 underline"
+              >
+                Download ticket PDF{isMultiTicket ? "s" : ""} manually
+              </button>
+            </div>
+          )}
+
           {/* Info Box */}
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
             <div className="flex items-start gap-3">
@@ -386,7 +472,7 @@ function PaymentSuccessContent() {
                 <CheckCircle className="w-6 h-6 text-blue-600" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-blue-900 mb-2">What's Next?</h3>
+                <h3 className="text-lg font-bold text-blue-900 mb-2">What&apos;s Next?</h3>
                 <ul className="space-y-2 text-blue-800">
                   <li className="flex items-start gap-2">
                     <span className="text-blue-600 mt-1">✓</span>
@@ -476,3 +562,4 @@ export default function PaymentSuccessPage() {
     </>
   )
 }
+

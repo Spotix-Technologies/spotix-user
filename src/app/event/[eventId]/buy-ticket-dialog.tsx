@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from "react"
 import { X, Plus, Minus, ShoppingCart, Clock, AlertTriangle } from "lucide-react"
 import { formatNumber } from "@/utils/formatter"
+import { calculateVATFee, calculateFinalPrice } from "@/utils/priceUtility"
 import type { EventType } from "./page"
 
 interface CartItem {
@@ -32,8 +33,6 @@ interface BuyTicketDialogProps {
   onShowPassedDialog?: () => void
 }
 
-
-const VAT_RATE = 0.075
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -177,7 +176,7 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
         policy: t.policy,
         price: t.price,
         quantity: qty,
-        vat: parseFloat((t.price * VAT_RATE).toFixed(2)),
+        vat: calculateVATFee(t.price),
       }
     })
     .filter((item): item is CartItem => item !== null)
@@ -447,7 +446,7 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
                         <p className={`font-bold text-lg leading-none ${tierSoldOut ? "text-gray-400" : "text-[#6b2fa5]"}`}>
                           ₦{formatNumber(ticket.price)}
                           <span className="text-xs font-normal text-gray-400 ml-1.5">
-                            +₦{formatNumber(parseFloat((ticket.price * VAT_RATE).toFixed(2)))} VAT
+                            +₦{formatNumber(calculateVATFee(ticket.price))} VAT
                           </span>
                         </p>
 
@@ -566,8 +565,8 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
                 </div>
               ))}
               <div className="flex justify-between text-xs text-gray-400 pt-1.5 border-t border-gray-100">
-                <span>VAT (7.5%)</span>
-                <span>₦{formatNumber(parseFloat(totalVat.toFixed(2)))}</span>
+                <span>VAT & Fees</span>
+                <span>₦{formatNumber(totalVat)}</span>
               </div>
               <div className="flex justify-between items-center pt-2 border-t border-gray-200">
                 <div className="flex items-center gap-2">
@@ -577,7 +576,7 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
                   </span>
                 </div>
                 <span className="text-xl font-bold text-[#6b2fa5]">
-                  ₦{formatNumber(parseFloat(grandTotal.toFixed(2)))}
+                  ₦{formatNumber(Math.round(grandTotal))}
                 </span>
               </div>
             </div>

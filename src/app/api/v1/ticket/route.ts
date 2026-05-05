@@ -136,6 +136,7 @@ export async function GET(request: NextRequest) {
           eventEnd: data.eventEnd || "",
           eventVenue: data.eventVenue || "",
           stopDate: data.stopDate || "",
+          hasEmbedding: data.hasEmbedding === true,
         });
       });
 

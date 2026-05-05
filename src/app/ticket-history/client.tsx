@@ -2,10 +2,11 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { Ticket, Calendar, Clock, RefreshCw, AlertTriangle, SearchIcon } from "lucide-react"
+import { Ticket, Calendar, Clock, RefreshCw, AlertTriangle, SearchIcon, ScanFace } from "lucide-react"
 import UserHeader from "../../components/UserHeader"
 import Footer from "../../components/footer"
 import Link from "next/link"
+import { formatNumber } from "@/utils/formatter"
 
 interface TicketHistoryItem {
   id: string
@@ -18,6 +19,7 @@ interface TicketHistoryItem {
   purchaseDate: string
   purchaseTime: string
   paymentMethod: string
+  hasFaceEmbedding?: boolean
 }
 
 export default function TicketHistoryClient() {
@@ -27,9 +29,6 @@ export default function TicketHistoryClient() {
   const [filteredTickets, setFilteredTickets] = useState<TicketHistoryItem[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [refreshing, setRefreshing] = useState(false)
-
-  const CACHE_KEY = "user_ticket_history"
-  const CACHE_TTL = 15 * 60 * 1000
 
   useEffect(() => {
     fetchTicketHistory()
@@ -73,11 +72,11 @@ export default function TicketHistoryClient() {
           purchaseDate: ticket.purchaseDate,
           purchaseTime: ticket.purchaseTime,
           paymentMethod: ticket.paymentMethod,
+          hasFaceEmbedding: ticket.hasEmbedding === true,
         }))
 
         setTickets(ticketsList)
         setFilteredTickets(ticketsList)
-        localStorage.setItem(CACHE_KEY, JSON.stringify(ticketsList))
       }
 
       setLoading(false)
@@ -99,10 +98,6 @@ export default function TicketHistoryClient() {
       setFilteredTickets(filtered)
     }
   }, [searchQuery, tickets])
-
-  const formatNumber = (num: number): string => {
-    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")
-  }
 
   const handleTicketClick = (ticketId: string) => {
     router.push(`/ticket-history/${ticketId}`)
@@ -204,7 +199,16 @@ export default function TicketHistoryClient() {
                       <Ticket className="h-6 w-6 text-purple-600" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-gray-900 truncate">{ticket.eventName}</h3>
+                      <div className="flex items-center gap-1.5">
+                        <h3 className="font-semibold text-gray-900 truncate">{ticket.eventName}</h3>
+                        {ticket.hasFaceEmbedding && (
+                          <ScanFace
+                            size={15}
+                            className="text-purple-500 flex-shrink-0"
+                            title="Face ID registered"
+                          />
+                        )}
+                      </div>
                       <p className="text-sm text-gray-600">{ticket.ticketType}</p>
                       <p className="text-base font-medium text-purple-600 mt-1">₦{formatNumber(ticket.ticketPrice)}</p>
                     </div>
@@ -226,6 +230,12 @@ export default function TicketHistoryClient() {
                 {/* Ticket Footer */}
                 <div className="px-4 py-3 flex items-center justify-between bg-white border-t border-gray-100">
                   <div className="text-xs text-gray-500">Ref: {ticket.ticketReference}</div>
+                  {ticket.hasFaceEmbedding && (
+                    <span className="text-xs text-purple-600 font-medium flex items-center gap-1">
+                      <ScanFace size={12} />
+                      Face ID
+                    </span>
+                  )}
                 </div>
               </div>
             ))}

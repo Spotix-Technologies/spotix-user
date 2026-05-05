@@ -4,6 +4,7 @@
 
 import { CheckCircle, Ticket } from "lucide-react"
 import { getPricingBreakdown } from "@/utils/priceUtility"
+import { formatNumber } from "@/utils/formatter"
 
 interface CartItem {
   ticketType: string
@@ -21,11 +22,6 @@ interface OrderSummaryProps {
     discountValue: number
   } | null
   isFreeEvent: boolean
-}
-
-const formatNumber = (num: number): string => {
-  if (num === undefined || num === null || isNaN(num)) return "0"
-  return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")
 }
 
 export default function OrderSummary({
