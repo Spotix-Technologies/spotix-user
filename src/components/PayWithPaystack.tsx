@@ -172,7 +172,7 @@ export default function PayWithPaystack({
       const handler = window.PaystackPop.setup({
         key: paystackPublicKey,
         email: email,
-        amount: Math.round(calculateFinalPrice(amount) * 100), // price + VAT, converted to kobo
+        amount: Math.round((amount) * 100), // price + VAT, converted to kobo
         currency: "NGN",
         ref: reference,
         metadata: {
