@@ -205,7 +205,6 @@ export default function TicketHistoryClient() {
                           <ScanFace
                             size={15}
                             className="text-purple-500 flex-shrink-0"
-                            title="Face ID registered"
                           />
                         )}
                       </div>
