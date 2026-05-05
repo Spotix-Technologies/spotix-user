@@ -70,7 +70,7 @@ const ConfirmDialog = ({ isOpen, message, onConfirm, onCancel }: ConfirmDialogPr
   )
 }
 
-const Profile = ({ user }: { user?: SessionUser }) => {
+const Profile = ({ user: sessionUser }: { user?: SessionUser }) => {
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState<UserProfile | null>(null)
   const [uploadProvider, setUploadProvider] = useState<string | null>(null)
