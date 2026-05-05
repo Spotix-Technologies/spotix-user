@@ -595,5 +595,5 @@ function Refund({ user }: { user?: SessionUser }) {
     </div>
   )
 }
--e 
+
 export default withAuth(Refund)
