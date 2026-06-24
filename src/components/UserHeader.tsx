@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useState, useEffect } from "react"
-import { Menu, X, CalendarPlus, User, Bot, CreditCard, AppWindow, ClipboardCheck, LogOut } from "lucide-react"
+import { Menu, X, CalendarPlus, User, Globe, CreditCard, ClipboardCheck, LogOut } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
@@ -108,6 +108,9 @@ const UserHeader: React.FC = () => {
               <Link href="/home">Home</Link>
             </DesktopNavItem>
             <DesktopNavItem>
+              <Link href="/discover">Discover Events</Link>
+            </DesktopNavItem>
+            <DesktopNavItem>
               <Link href="/profile">My Profile</Link>
             </DesktopNavItem>
             <DesktopNavItem>
@@ -115,9 +118,6 @@ const UserHeader: React.FC = () => {
             </DesktopNavItem>
             <DesktopNavItem>
               <Link href="/Referrals">Referrals</Link>
-            </DesktopNavItem>
-            <DesktopNavItem>
-              <Link href="https://t.me/SpotixNG_bot">Telegram Bot</Link>
             </DesktopNavItem>
             <DesktopNavItem>
               <Link href="https://booker.spotix.com.ng/create-event">Create Event</Link>
@@ -139,6 +139,10 @@ const UserHeader: React.FC = () => {
             <Link href="/home">Home</Link>
           </NavItem>
           <NavItem onClick={() => setMenuOpen(false)}>
+            <Globe size={20} />
+            <Link href="/discover">Discover Events</Link>
+          </NavItem>
+          <NavItem onClick={() => setMenuOpen(false)}>
             <User size={20} />
             <Link href="/profile">My Profile</Link>
           </NavItem>
@@ -149,10 +153,6 @@ const UserHeader: React.FC = () => {
           <NavItem onClick={() => setMenuOpen(false)}>
             <ClipboardCheck size={20} />
             <Link href="/Referrals">Referrals</Link>
-          </NavItem>
-          <NavItem onClick={() => setMenuOpen(false)}>
-            <Bot size={20} />
-            <Link href="https://t.me/SpotixNG_bot">Telegram Bot</Link>
           </NavItem>
         </NavList>
 

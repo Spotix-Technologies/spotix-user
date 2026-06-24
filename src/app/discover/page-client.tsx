@@ -230,7 +230,7 @@ export default function DiscoverPageClient() {
         {locationLoading && (
           <div className="flex items-center gap-2.5 text-sm text-gray-600 bg-white border border-gray-200 rounded-xl px-4 py-3 shadow-sm">
             <Loader2 className="w-4 h-4 animate-spin text-[#6b2fa5]" />
-            Detecting your location…
+            We are detecting your location…
           </div>
         )}
         {locationError && (
