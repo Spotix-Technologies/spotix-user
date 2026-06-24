@@ -390,3 +390,335 @@ export async function downloadTicketPDF(
   const qrPngDataUrl = await rasteriseQRFromWrapper(qrWrapperEl)
   buildTicketPDF({ ...params, qrPngDataUrl })
 }
+
+// ── Multi-ticket single PDF ───────────────────────────────────────────────────
+//
+// Strategy: jsPDF doesn't support merging separate doc instances cleanly.
+// Instead we drive the same drawing primitives used by buildTicketPDF but
+// accept a jsPDF instance + a Y-page offset so we can render each ticket
+// onto its own page inside a *single* document.
+//
+// buildAllTicketsPDF is the public entry point; it creates the doc, adds a
+// page per ticket (reusing the drawTicketPage helper), then saves once as
+// `{ticketReference}.pdf`.
+
+export interface MultiTicketPDFParams {
+  tickets: Array<{
+    ticketId: string
+    ticketType: string
+    ticketPrice: number
+    qrPngDataUrl: string | null
+  }>
+  eventName: string
+  eventType: string
+  ticketReference: string
+  purchaseDate: string
+  purchaseTime: string
+  totalAmount: number
+  eventDate?: string
+  eventStart?: string
+  eventEnd?: string
+  eventVenue?: string
+  buyerName?: string
+  buyerEmail?: string
+}
+
+/**
+ * Build one PDF containing all tickets — one A4 page per ticket.
+ * The file is saved as `{ticketReference}.pdf`.
+ *
+ * jsPDF doesn't expose a safe API to merge separate doc instances, so we
+ * use a different strategy: call `buildTicketPDF(…, false)` for each ticket
+ * to get its raw PDF bytes, then embed each as a page using `addPage` +
+ * the public `jsPDF.addSVGAsImage` / raw-content approach won't work either.
+ *
+ * Cleanest real solution: we use `buildTicketPDF` with `save=false` for every
+ * ticket and then concatenate them into one file via the PDFMerger pattern —
+ * but since we only have jsPDF available, we instead call `buildTicketPDF`
+ * once per ticket into the *same* jsPDF document by passing an existing doc
+ * and a page-start flag.
+ *
+ * We achieve this by re-exporting a `buildTicketPage` variant that takes an
+ * existing doc + whether to add a new page first, then `buildAllTicketsPDF`
+ * stitches them together.
+ */
+export function buildAllTicketsPDF(params: MultiTicketPDFParams): jsPDF {
+  const {
+    tickets,
+    eventName,
+    eventType,
+    ticketReference,
+    purchaseDate,
+    purchaseTime,
+    eventDate,
+    eventStart,
+    eventEnd,
+    eventVenue,
+  } = params
+
+  // Create the shared document
+  const doc = new jsPDF({ unit: "pt", format: "a4" })
+
+  tickets.forEach((ticket, idx) => {
+    if (idx > 0) doc.addPage()
+
+    // Delegate to the internal drawing function that takes an existing doc
+    drawTicketOntoDoc(doc, {
+      ticketId: ticket.ticketId,
+      eventName,
+      eventType,
+      ticketType: ticket.ticketType || "General Admission",
+      ticketPrice: ticket.ticketPrice,
+      ticketReference,
+      purchaseDate,
+      purchaseTime,
+      eventDate,
+      eventStart,
+      eventEnd,
+      eventVenue,
+      qrPngDataUrl: ticket.qrPngDataUrl,
+    })
+  })
+
+  doc.save(`${ticketReference}.pdf`)
+  return doc
+}
+
+/**
+ * Draws a single ticket onto an existing jsPDF document (current page).
+ * This is the same layout logic as buildTicketPDF, extracted so it can be
+ * called multiple times into one doc.
+ */
+function drawTicketOntoDoc(doc: jsPDF, params: TicketPDFParams): void {
+  const {
+    ticketId,
+    eventName,
+    eventType,
+    ticketType,
+    ticketPrice,
+    ticketReference,
+    purchaseDate,
+    purchaseTime,
+    eventDate,
+    eventStart,
+    eventEnd,
+    eventVenue,
+    giftedBy,
+    gifterName,
+    giftNote,
+    qrPngDataUrl,
+  } = params
+
+  const pageW    = doc.internal.pageSize.getWidth()
+  const margin   = 40
+  const contentW = pageW - margin * 2
+  let y = 0
+
+  // Header Band
+  doc.setFillColor(107, 47, 165)
+  doc.rect(0, 0, pageW, 110, "F")
+
+  doc.setFillColor(130, 80, 190)
+  for (let cx = 20; cx < pageW; cx += 40) {
+    for (let cy = 5; cy < 110; cy += 40) {
+      doc.circle(cx, cy, 1.5, "F")
+    }
+  }
+
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(9)
+  doc.setTextColor(200, 170, 230)
+  doc.text((eventType || "EVENT").toUpperCase(), margin, 36)
+
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(22)
+  doc.setTextColor(255, 255, 255)
+  const eventNameLines = doc.splitTextToSize(eventName, contentW - 80)
+  doc.text(eventNameLines, margin, 62)
+
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(11)
+  doc.setTextColor(220, 190, 255)
+  doc.text("SPOTIX", pageW - margin, 36, { align: "right" })
+
+  y = 130
+
+  // Tear-line
+  doc.setDrawColor(220, 220, 220)
+  doc.setLineDashPattern([4, 4], 0)
+  doc.line(margin, y, pageW - margin, y)
+  doc.setLineDashPattern([], 0)
+  doc.setFillColor(245, 245, 245)
+  doc.circle(margin - 10, y, 8, "F")
+  doc.circle(pageW - margin + 10, y, 8, "F")
+
+  y += 28
+
+  const label = (text: string, lx: number, ly: number) => {
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(7)
+    doc.setTextColor(160, 160, 160)
+    doc.text(text.toUpperCase(), lx, ly)
+  }
+
+  const value = (
+    text: string,
+    vx: number,
+    vy: number,
+    opts?: { color?: [number, number, number]; size?: number; mono?: boolean }
+  ) => {
+    doc.setFont(opts?.mono ? "courier" : "helvetica", "bold")
+    doc.setFontSize(opts?.size ?? 11)
+    doc.setTextColor(...(opts?.color ?? ([30, 30, 30] as [number, number, number])))
+    doc.text(text, vx, vy)
+  }
+
+  const divider = (dy: number) => {
+    doc.setDrawColor(230, 230, 230)
+    doc.setLineDashPattern([3, 3], 0)
+    doc.line(margin, dy, pageW - margin, dy)
+    doc.setLineDashPattern([], 0)
+  }
+
+  const col1 = margin
+  const col2 = margin + contentW / 2 + 10
+
+  label("Date & Time", col1, y)
+  label("Venue", col2, y)
+  y += 16
+
+  const dateStr = eventDate ? formatDisplayDate(eventDate) : "Not specified"
+  value(dateStr, col1, y, { size: 10 })
+
+  const venueStr   = eventVenue || "Not specified"
+  const venueLines = doc.splitTextToSize(venueStr, contentW / 2 - 10)
+  value(venueLines[0], col2, y, { size: 10 })
+  y += 16
+
+  if (eventStart) {
+    const timeStr = `${formatDisplayTime(eventStart)}${eventEnd ? " – " + formatDisplayTime(eventEnd) : ""}`
+    doc.setFont("helvetica", "normal")
+    doc.setFontSize(9)
+    doc.setTextColor(107, 47, 165)
+    doc.text(timeStr, col1, y)
+  }
+  if (venueLines[1]) value(venueLines[1], col2, y, { size: 10 })
+
+  y += 30
+  divider(y)
+  y += 20
+
+  const thirdW = contentW / 3
+  const col3   = margin + thirdW
+  const col4   = margin + thirdW * 2
+
+  label("Ticket Type", col1, y)
+  label("Price",       col3, y)
+  label("Reference",   col4, y)
+  y += 16
+
+  value(ticketType, col1, y)
+  value(
+    ticketPrice === 0 ? "Free" : `N${ticketPrice.toLocaleString()}`,
+    col3,
+    y,
+    { color: [107, 47, 165], size: 13 }
+  )
+  value(ticketReference, col4, y, { mono: true, size: 9 })
+
+  y += 30
+  divider(y)
+  y += 20
+
+  label("Ticket ID", col1, y)
+  y += 16
+  doc.setFont("courier", "bold")
+  doc.setFontSize(16)
+  doc.setTextColor(20, 20, 20)
+  doc.setCharSpace(2)
+  doc.text(ticketId, col1, y)
+  doc.setCharSpace(0)
+
+  y += 30
+  divider(y)
+  y += 20
+
+  label("Purchased", col1, y)
+  label("Time",      col2, y)
+  y += 16
+  value(purchaseDate, col1, y, { size: 10 })
+  value(purchaseTime, col2, y, { size: 10 })
+  y += 34
+
+  if (giftedBy) {
+    const bannerH = giftNote ? 56 : 36
+    doc.setFillColor(245, 237, 255)
+    doc.setDrawColor(200, 170, 230)
+    doc.roundedRect(margin, y, contentW, bannerH, 6, 6, "FD")
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(9)
+    doc.setTextColor(107, 47, 165)
+    doc.text(`Gifted to you by ${gifterName || giftedBy}`, margin + 12, y + 16)
+    if (giftNote) {
+      doc.setFont("helvetica", "italic")
+      doc.setFontSize(8)
+      doc.setTextColor(130, 80, 180)
+      doc.text(`"${giftNote}"`, margin + 12, y + 32)
+    }
+    y += bannerH + 16
+  }
+
+  const qrSize = 130
+  const qrX    = pageW / 2 - qrSize / 2
+
+  if (qrPngDataUrl) {
+    doc.setFillColor(255, 255, 255)
+    doc.setDrawColor(220, 220, 220)
+    doc.roundedRect(qrX - 8, y - 8, qrSize + 16, qrSize + 16, 6, 6, "FD")
+    doc.addImage(qrPngDataUrl, "PNG", qrX, y, qrSize, qrSize)
+  } else {
+    doc.setFillColor(245, 245, 245)
+    doc.setDrawColor(200, 200, 200)
+    doc.roundedRect(qrX, y, qrSize, qrSize, 4, 4, "FD")
+    doc.setFont("helvetica", "normal")
+    doc.setFontSize(8)
+    doc.setTextColor(150, 150, 150)
+    doc.text("QR Code unavailable", pageW / 2, y + qrSize / 2 + 3, { align: "center" })
+  }
+
+  y += qrSize + 18
+
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(8)
+  doc.setTextColor(150, 150, 150)
+  doc.text("Show only to official check-in staff", pageW / 2, y, { align: "center" })
+
+  y += 28
+  divider(y)
+  y += 16
+
+  const footerText  = "Verified by"
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(8)
+  doc.setTextColor(180, 180, 180)
+  const verifiedWidth = doc.getTextWidth(footerText)
+
+  const spotixText  = " SPOTIX"
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(8)
+  doc.setTextColor(107, 47, 165)
+  const spotixWidth = doc.getTextWidth(spotixText)
+
+  const totalWidth = verifiedWidth + spotixWidth
+  const startX     = pageW / 2 - totalWidth / 2
+
+  doc.setFont("helvetica", "normal")
+  doc.setFontSize(8)
+  doc.setTextColor(180, 180, 180)
+  doc.text(footerText, startX, y)
+
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(8)
+  doc.setTextColor(107, 47, 165)
+  doc.text(spotixText, startX + verifiedWidth, y)
+}

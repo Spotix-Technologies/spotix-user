@@ -3,16 +3,23 @@
 import { Suspense } from "react"
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { CheckCircle, XCircle, Loader2, ArrowRight, Ticket, Download } from "lucide-react"
+import { CheckCircle, Loader2, ArrowRight, Ticket } from "lucide-react"
 import UserHeader from "@/components/UserHeader"
 import Footer from "@/components/footer"
-import QRCode from "react-qr-code"
-import { buildTicketPDF, rasteriseQRFromWrapper } from "@/lib/ticket"
+
+// Sub-components
+import LoadingState from "./components/LoadingState"
+import ErrorState from "./components/ErrorState"
+import Confetti from "./components/Confetti"
+import TicketQRCard from "./components/TicketQRCard"
+import SaveTicketsBanner from "./components/SaveTicketsBanner"
+
+// PDF helpers
+import { rasteriseQRFromWrapper, buildAllTicketsPDF } from "@/lib/ticket"
 
 interface TicketData {
   success: boolean
   message: string
-  // Multi-ticket fields (new shape)
   ticketIds: string[]
   totalTickets: number
   ticketReference: string
@@ -38,20 +45,21 @@ interface TicketData {
   referralUsed: boolean
 }
 
-// Separate component that uses useSearchParams
 function PaymentSuccessContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [loading, setLoading] = useState(true)
-  const [ticketData, setTicketData] = useState<TicketData | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [showConfetti, setShowConfetti] = useState(false)
-  const [downloadingPdfs, setDownloadingPdfs] = useState(false)
-  const [pdfsDownloaded, setPdfsDownloaded] = useState(false)
 
-  // One ref per ticket ID — keyed by ticketId string
+  const [loading, setLoading]               = useState(true)
+  const [ticketData, setTicketData]         = useState<TicketData | null>(null)
+  const [error, setError]                   = useState<string | null>(null)
+  const [showConfetti, setShowConfetti]     = useState(false)
+  const [downloading, setDownloading]       = useState(false)
+  const [downloaded, setDownloaded]         = useState(false)
+
+  // One ref per ticket ID
   const qrRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
+  // ── Fetch / generate ticket on mount ──────────────────────────────────────
   useEffect(() => {
     const generateTicket = async () => {
       try {
@@ -64,44 +72,65 @@ function PaymentSuccessContent() {
         }
 
         const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL
-
         if (!BACKEND_URL) {
           setError("Configuration error. Please contact support.")
           setLoading(false)
           return
         }
 
-        const ticketEndpoint = `${BACKEND_URL}/v1/ticket`
+        // Retry loop — if the backend returns 409 it means another request is
+        // mid-flight for the same reference (race on double-POST). Poll with
+        // backoff until the winner finishes and the reference is marked complete.
+        const MAX_ATTEMPTS = 6
+        const RETRY_DELAY_MS = 2500
+        let lastError = ""
 
-        const response = await fetch(ticketEndpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reference }),
-        })
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+          const response = await fetch(`${BACKEND_URL}/v1/ticket`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reference }),
+          })
 
-        const data = await response.json()
+          const data = await response.json()
 
-        if (!response.ok) {
-          setError(data.message || "Failed to generate ticket. Please try again.")
+          if (response.status === 409) {
+            // Another request is processing — wait and retry
+            if (attempt < MAX_ATTEMPTS) {
+              await new Promise((r) => setTimeout(r, RETRY_DELAY_MS))
+              continue
+            }
+            // Max retries hit — fall through to error
+            lastError = "Ticket generation is taking longer than expected. Please refresh the page."
+            break
+          }
+
+          if (!response.ok) {
+            setError(data.message || "Failed to generate ticket. Please try again.")
+            setLoading(false)
+            return
+          }
+
+          if (data.success) {
+            setTicketData(data)
+            setShowConfetti(true)
+            setTimeout(() => setShowConfetti(false), 5000)
+            sessionStorage.removeItem("paystack_payment_data")
+            sessionStorage.removeItem("spotix_payment_data")
+            sessionStorage.removeItem("selected_referral_code")
+            setLoading(false)
+            return
+          }
+
+          setError(data.message || "Ticket generation failed")
           setLoading(false)
           return
         }
 
-        if (data.success) {
-          setTicketData(data)
-          setShowConfetti(true)
-          setTimeout(() => setShowConfetti(false), 5000)
-
-          sessionStorage.removeItem("paystack_payment_data")
-          sessionStorage.removeItem("spotix_payment_data")
-          sessionStorage.removeItem("selected_referral_code")
-        } else {
-          setError(data.message || "Ticket generation failed")
-        }
-
+        setError(lastError || "Ticket generation failed. Please refresh or contact support.")
         setLoading(false)
-      } catch (error) {
-        console.error("Ticket generation error:", error)
+      } catch (err) {
+        console.error("Ticket generation error:", err)
         setError("An unexpected error occurred. Please contact support.")
         setLoading(false)
       }
@@ -110,172 +139,87 @@ function PaymentSuccessContent() {
     generateTicket()
   }, [searchParams])
 
-  /**
-   * Auto-download all ticket PDFs once the QR codes have rendered.
-   * We wait one tick after ticketData is set so the QR SVGs are in the DOM.
-   */
-  const downloadAllPdfs = useCallback(async (data: TicketData) => {
-    setDownloadingPdfs(true)
+  // ── Single-PDF download (all tickets, named by reference) ─────────────────
+  const handleDownloadPDF = useCallback(async (data: TicketData) => {
+    setDownloading(true)
     try {
-      // Small delay to ensure QR SVGs are fully rendered
+      // Let QR SVGs fully paint before we rasterise
       await new Promise((r) => setTimeout(r, 800))
 
-      for (const ticketId of data.ticketIds) {
-        const wrapperEl = qrRefs.current[ticketId]
-        const qrPngDataUrl = await rasteriseQRFromWrapper(wrapperEl)
-
-        buildTicketPDF({
-          ticketId,
-          eventName: data.eventName,
-          eventType: data.eventDetails.eventType || "EVENT",
-          ticketType: "General Admission",
-          ticketPrice: data.totalAmount / data.totalTickets,
-          ticketReference: data.ticketReference,
-          purchaseDate: new Date().toLocaleDateString("en-NG"),
-          purchaseTime: new Date().toLocaleTimeString("en-NG", { hour: "2-digit", minute: "2-digit" }),
-          eventDate: data.eventDetails.eventDate,
-          eventStart: data.eventDetails.eventStart,
-          eventEnd: data.eventDetails.eventEnd,
-          eventVenue: data.eventDetails.eventVenue,
-          qrPngDataUrl,
+      const ticketsWithQR = await Promise.all(
+        data.ticketIds.map(async (ticketId, idx) => {
+          const wrapperEl = qrRefs.current[ticketId]
+          const qrPngDataUrl = await rasteriseQRFromWrapper(wrapperEl)
+          return {
+            ticketId,
+            ticketType: `Ticket ${idx + 1}`,
+            ticketPrice: data.totalAmount / data.totalTickets,
+            qrPngDataUrl,
+          }
         })
+      )
 
-        // Stagger downloads slightly so the browser doesn't block them
-        if (data.ticketIds.length > 1) {
-          await new Promise((r) => setTimeout(r, 400))
-        }
-      }
+      buildAllTicketsPDF({
+        tickets: ticketsWithQR,
+        eventName: data.eventName,
+        eventType: data.eventDetails.eventType || "EVENT",
+        ticketReference: data.ticketReference,
+        purchaseDate: new Date().toLocaleDateString("en-NG"),
+        purchaseTime: new Date().toLocaleTimeString("en-NG", { hour: "2-digit", minute: "2-digit" }),
+        totalAmount: data.totalAmount,
+        eventDate: data.eventDetails.eventDate,
+        eventStart: data.eventDetails.eventStart,
+        eventEnd: data.eventDetails.eventEnd,
+        eventVenue: data.eventDetails.eventVenue,
+        buyerName: data.buyerInfo.fullName,
+        buyerEmail: data.buyerInfo.email,
+      })
 
-      setPdfsDownloaded(true)
+      setDownloaded(true)
     } catch (err) {
-      console.error("Auto PDF download failed:", err)
+      console.error("PDF download failed:", err)
     } finally {
-      setDownloadingPdfs(false)
+      setDownloading(false)
     }
   }, [])
 
-  // Trigger auto-download once ticket data is ready
-  useEffect(() => {
-    if (ticketData && !pdfsDownloaded) {
-      downloadAllPdfs(ticketData)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ticketData])
-
-  const handleViewTicket = () => {
-    if (ticketData?.ticketIds?.length) {
-      router.push(`/ticket?id=${ticketData.ticketIds[0]}`)
-    }
+  const handleGoHome      = () => router.push("/home")
+  const handleViewTicket  = () => {
+    if (ticketData?.ticketIds?.length) router.push(`/ticket?id=${ticketData.ticketIds[0]}`)
   }
-
-  const handleGoHome = () => router.push("/home")
   const handleViewTickets = () => router.push("/ticket-history")
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-purple-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full text-center">
-          <Loader2 className="w-16 h-16 animate-spin text-purple-600 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Processing Your Registration</h2>
-          <p className="text-gray-600">Please wait while we generate your ticket...</p>
-          <div className="mt-6 space-y-2">
-            <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
-              <div className="w-2 h-2 bg-purple-600 rounded-full animate-pulse"></div>
-              <span>Verifying registration</span>
-            </div>
-            <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
-              <div className="w-2 h-2 bg-purple-600 rounded-full animate-pulse delay-100"></div>
-              <span>Generating ticket</span>
-            </div>
-            <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
-              <div className="w-2 h-2 bg-purple-600 rounded-full animate-pulse delay-200"></div>
-              <span>Sending confirmation</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
+  // ── Render states ──────────────────────────────────────────────────────────
+  if (loading) return <LoadingState />
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-red-50 via-white to-red-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
-          <div className="flex justify-center mb-4">
-            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center">
-              <XCircle className="w-10 h-10 text-red-600" />
-            </div>
-          </div>
-          <h2 className="text-2xl font-bold text-gray-900 text-center mb-4">Registration Issue</h2>
-          <p className="text-gray-600 text-center mb-6">{error}</p>
-          <div className="space-y-3">
-            <button
-              onClick={() => window.location.reload()}
-              className="w-full py-3 px-6 bg-purple-600 text-white font-semibold rounded-xl hover:bg-purple-700 transition-colors"
-            >
-              Try Again
-            </button>
-            <button
-              onClick={handleGoHome}
-              className="w-full py-3 px-6 border-2 border-gray-300 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors"
-            >
-              Back to Home
-            </button>
-          </div>
-          <p className="text-center text-sm text-gray-500 mt-6">
-            If you need assistance, please contact support with reference:{" "}
-            {searchParams.get("reference")}
-          </p>
-        </div>
-      </div>
+      <ErrorState
+        error={error}
+        reference={searchParams.get("reference")}
+        onRetry={() => window.location.reload()}
+        onGoHome={handleGoHome}
+      />
     )
   }
 
   if (!ticketData) return null
 
-  const isFreeTicket = ticketData.totalAmount === 0
+  // Defensive fallback: buyerInfo should always exist but guard against
+  // a partial response (e.g. backend alreadyGenerated path missing the field)
+  const buyerInfo = ticketData.buyerInfo ?? { fullName: "", email: "", isGuest: false }
+
+  const isFreeTicket  = ticketData.totalAmount === 0
   const isMultiTicket = ticketData.totalTickets > 1
 
   return (
     <>
-      {/* Confetti Effect */}
-      {showConfetti && (
-        <div className="fixed inset-0 pointer-events-none z-50">
-          <div className="confetti-container">
-            {[...Array(50)].map((_, i) => (
-              <div
-                key={i}
-                className="confetti"
-                style={{
-                  left: `${Math.random() * 100}%`,
-                  animationDelay: `${Math.random() * 3}s`,
-                  backgroundColor: ["#6b2fa5", "#8b5cf6", "#a78bfa", "#c4b5fd", "#fbbf24", "#34d399"][
-                    Math.floor(Math.random() * 6)
-                  ],
-                }}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Hidden QR codes — rendered off-screen so we can rasterise them */}
-      <div className="sr-only" aria-hidden="true">
-        {ticketData.ticketIds.map((id) => (
-          <div
-            key={id}
-            ref={(el) => { qrRefs.current[id] = el }}
-            className="p-2 bg-white"
-          >
-            <QRCode value={id} size={300} level="H" fgColor="#7c3aed" bgColor="#ffffff" />
-          </div>
-        ))}
-      </div>
+      {showConfetti && <Confetti />}
 
       <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-purple-50 py-12 px-4">
         <div className="max-w-3xl mx-auto">
 
-          {/* Success Header */}
+          {/* ── Success Header ─────────────────────────────────────────── */}
           <div className="bg-white rounded-2xl shadow-2xl p-8 mb-6 text-center">
             <div className="flex justify-center mb-4">
               <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center animate-bounce">
@@ -290,24 +234,41 @@ function PaymentSuccessContent() {
                 ? `${ticketData.totalTickets} tickets have been generated`
                 : "Your ticket has been generated"}
             </p>
-            {/* PDF download status */}
-            {downloadingPdfs && (
-              <div className="mt-4 flex items-center justify-center gap-2 text-sm text-purple-600">
-                <Loader2 size={15} className="animate-spin" />
-                Preparing your ticket PDF{isMultiTicket ? "s" : ""}…
-              </div>
-            )}
-            {pdfsDownloaded && !downloadingPdfs && (
-              <div className="mt-4 flex items-center justify-center gap-2 text-sm text-green-600">
-                <CheckCircle size={15} />
-                Ticket PDF{isMultiTicket ? "s" : ""} downloaded!
-              </div>
-            )}
           </div>
 
-          {/* Ticket Details Card */}
+          {/* ── Screenshot / download nudge + PDF button ───────────────── */}
+          <SaveTicketsBanner
+            isMultiTicket={isMultiTicket}
+            isGuest={buyerInfo.isGuest}
+            email={buyerInfo.email}
+            onDownload={() => handleDownloadPDF(ticketData)}
+            downloading={downloading}
+            downloaded={downloaded}
+          />
+
+          {/* ── QR Codes ───────────────────────────────────────────────── */}
+          <div className="bg-white rounded-2xl shadow-xl p-6 mb-6">
+            <h2 className="text-lg font-bold text-gray-900 mb-1">Your QR Code{isMultiTicket ? "s" : ""}</h2>
+            <p className="text-sm text-gray-500 mb-5">
+              Present {isMultiTicket ? "each QR code" : "this QR code"} at the event entrance for check-in.
+            </p>
+
+            <div className={`grid gap-4 ${isMultiTicket ? "sm:grid-cols-2" : "place-items-center"}`}>
+              {ticketData.ticketIds.map((ticketId, idx) => (
+                <TicketQRCard
+                  key={ticketId}
+                  ticketId={ticketId}
+                  index={idx}
+                  total={ticketData.totalTickets}
+                  qrRef={(el) => { qrRefs.current[ticketId] = el }}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* ── Ticket Details Card ────────────────────────────────────── */}
           <div className="bg-white rounded-2xl shadow-xl overflow-hidden mb-6">
-            {/* Ticket Header */}
+            {/* Header */}
             <div className="bg-gradient-to-r from-purple-600 to-purple-800 p-6 text-white">
               <div className="flex items-center justify-between">
                 <div>
@@ -318,10 +279,9 @@ function PaymentSuccessContent() {
               </div>
             </div>
 
-            {/* Ticket Body */}
+            {/* Body */}
             <div className="p-6 space-y-6">
-
-              {/* Ticket ID(s) */}
+              {/* Ticket IDs */}
               <div className="bg-gradient-to-r from-purple-50 to-purple-100 rounded-xl p-4 border-2 border-purple-200">
                 <p className="text-sm text-purple-700 font-medium mb-2">
                   {isMultiTicket ? `Ticket IDs (${ticketData.totalTickets})` : "Ticket ID"}
@@ -364,7 +324,7 @@ function PaymentSuccessContent() {
                 <div>
                   <p className="text-sm text-gray-600 mb-1">Time</p>
                   <p className="text-lg font-semibold text-gray-900">
-                    {ticketData.eventDetails.eventStart} - {ticketData.eventDetails.eventEnd}
+                    {ticketData.eventDetails.eventStart} – {ticketData.eventDetails.eventEnd}
                   </p>
                 </div>
                 <div className="md:col-span-2">
@@ -382,16 +342,16 @@ function PaymentSuccessContent() {
                   <div>
                     <p className="text-sm text-gray-600 mb-1">Name</p>
                     <p className="text-lg font-semibold text-gray-900">
-                      {ticketData.buyerInfo.fullName || "—"}
+                      {buyerInfo.fullName || "—"}
                     </p>
                   </div>
                   <div>
                     <p className="text-sm text-gray-600 mb-1">Email</p>
                     <p className="text-lg font-semibold text-gray-900">
-                      {ticketData.buyerInfo.email}
+                      {buyerInfo.email}
                     </p>
                   </div>
-                  {ticketData.buyerInfo.isGuest && (
+                  {buyerInfo.isGuest && (
                     <div className="md:col-span-2">
                       <span className="px-3 py-1 bg-gray-100 text-gray-700 text-sm font-semibold rounded-full">
                         👤 Guest Purchase
@@ -401,7 +361,7 @@ function PaymentSuccessContent() {
                 </div>
               </div>
 
-              {/* Special Badges */}
+              {/* Badges */}
               {(ticketData.discountApplied || ticketData.referralUsed || isFreeTicket) && (
                 <div className="flex flex-wrap gap-2">
                   {isFreeTicket && (
@@ -422,7 +382,7 @@ function PaymentSuccessContent() {
                 </div>
               )}
 
-              {/* Reference Number */}
+              {/* Reference */}
               <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
                 <p className="text-sm text-gray-600 mb-1">
                   {isFreeTicket ? "Registration Reference" : "Payment Reference"}
@@ -434,7 +394,7 @@ function PaymentSuccessContent() {
             </div>
           </div>
 
-          {/* Action Buttons */}
+          {/* ── Action Buttons ─────────────────────────────────────────── */}
           <div className="grid md:grid-cols-2 gap-4 mb-6">
             <button
               onClick={handleViewTicket}
@@ -448,24 +408,12 @@ function PaymentSuccessContent() {
               onClick={handleViewTickets}
               className="w-full py-4 px-6 bg-white border-2 border-purple-600 text-purple-600 font-bold rounded-xl hover:bg-purple-50 transition-all flex items-center justify-center gap-2"
             >
-              <Download size={20} />
+              <Ticket size={20} />
               View All Tickets
             </button>
           </div>
 
-          {/* Manual re-download if auto failed */}
-          {pdfsDownloaded === false && !downloadingPdfs && (
-            <div className="text-center mb-4">
-              <button
-                onClick={() => ticketData && downloadAllPdfs(ticketData)}
-                className="text-sm text-purple-600 hover:text-purple-800 underline"
-              >
-                Download ticket PDF{isMultiTicket ? "s" : ""} manually
-              </button>
-            </div>
-          )}
-
-          {/* Info Box */}
+          {/* ── What's Next ────────────────────────────────────────────── */}
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
             <div className="flex items-start gap-3">
               <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
@@ -477,21 +425,27 @@ function PaymentSuccessContent() {
                   <li className="flex items-start gap-2">
                     <span className="text-blue-600 mt-1">✓</span>
                     <span>
-                      A confirmation email has been sent to {ticketData.buyerInfo.email}
+                      A confirmation email has been sent to{" "}
+                      <span className="font-semibold">{buyerInfo.email}</span>
                     </span>
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-blue-600 mt-1">✓</span>
-                    <span>Your ticket{isMultiTicket ? "s are" : " is"} now available in your ticket history</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-blue-600 mt-1">✓</span>
-                    <span>Present your ticket ID at the event entrance for verification</span>
+                    <span>
+                      Your ticket{isMultiTicket ? "s are" : " is"} now available in your ticket history
+                    </span>
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-blue-600 mt-1">✓</span>
                     <span>
-                      For questions, contact: {ticketData.eventDetails.bookerEmail}
+                      Present your QR code{isMultiTicket ? "s" : ""} at the event entrance for verification
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-blue-600 mt-1">✓</span>
+                    <span>
+                      For questions, contact:{" "}
+                      <span className="font-semibold">{ticketData.eventDetails.bookerEmail}</span>
                     </span>
                   </li>
                 </ul>
@@ -499,7 +453,7 @@ function PaymentSuccessContent() {
             </div>
           </div>
 
-          {/* Home Button */}
+          {/* ── Back to Home ───────────────────────────────────────────── */}
           <div className="text-center mt-8">
             <button
               onClick={handleGoHome}
@@ -508,29 +462,15 @@ function PaymentSuccessContent() {
               ← Back to Home
             </button>
           </div>
+
         </div>
       </div>
 
       <style jsx>{`
-        @keyframes confetti-fall {
-          to {
-            transform: translateY(100vh) rotate(360deg);
-          }
-        }
-
-        .confetti {
-          position: absolute;
-          width: 10px;
-          height: 10px;
-          top: -10px;
-          animation: confetti-fall 3s linear infinite;
-        }
-
         @keyframes bounce {
           0%, 100% { transform: translateY(0); }
           50% { transform: translateY(-10px); }
         }
-
         .animate-bounce {
           animation: bounce 1s ease-in-out infinite;
         }
@@ -562,4 +502,3 @@ export default function PaymentSuccessPage() {
     </>
   )
 }
-

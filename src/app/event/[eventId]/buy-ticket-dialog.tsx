@@ -63,10 +63,11 @@ function isSaleStoppingToday(stopDate?: string): boolean {
   )
 }
 
-/** Remaining tickets for a tier, or null if unlimited */
+/** Remaining tickets for a tier, or null if unlimited (no availableTickets field set) */
 function getRemaining(ticket: TicketPrice): number | null {
   if (ticket.availableTickets === undefined || ticket.availableTickets === null) return null
-  return Math.max(0, ticket.availableTickets - (ticket.ticketsSold ?? 0))
+  // availableTickets IS the remaining count — the backend decrements it on each purchase
+  return Math.max(0, ticket.availableTickets)
 }
 
 // ── Free event sold-out check ──────────────────────────────────────────────────
@@ -132,13 +133,17 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
   const freeEventMaxQty = getFreeEventMaxQty(eventData)
   const freeEventEffectivelyClosed = effectivelyClosed || freeEventSoldOut
 
-  // ── Quantity controls (paid events) ──────────────────────────────────────
+  /** Max tickets a user can add per ticket type in one order (paid events) */
+const MAX_QTY_PER_TYPE = 10
+
+// ── Quantity controls (paid events) ──────────────────────────────────────
 
   const increment = (index: number) => {
     const ticket = (eventData.ticketPrices ?? [])[index] as TicketPrice
     const remaining = getRemaining(ticket)
     const current = quantities[index] ?? 0
-    if (remaining !== null && current >= remaining) return
+    if (current >= MAX_QTY_PER_TYPE) return                      // 10-ticket cap
+    if (remaining !== null && current >= remaining) return        // availability cap
     setQuantities((prev) => ({ ...prev, [index]: current + 1 }))
   }
 
@@ -171,12 +176,13 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
       const qty = quantities[index] ?? 0
       if (qty === 0) return null
       const t = ticket as TicketPrice
+      const price = Number(t.price) || 0
       return {
         ticketType: t.policy,
         policy: t.policy,
-        price: t.price,
+        price,
         quantity: qty,
-        vat: calculateVATFee(t.price),
+        vat: calculateVATFee(price),
       }
     })
     .filter((item): item is CartItem => item !== null)
@@ -395,7 +401,11 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
                 const tierSoldOut = remaining !== null && remaining === 0
                 const tierDisabled = effectivelyClosed || tierSoldOut
 
-                // Availability badge
+                // Availability badge — driven purely by availableTickets
+                // null  → unlimited, show nothing
+                // 0     → sold out
+                // 1–10  → urgency: red "Only N left!" banner
+                // >10   → no badge (no noise)
                 let availBadge: React.ReactNode = null
                 if (remaining !== null) {
                   if (tierSoldOut) {
@@ -404,16 +414,10 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
                         Sold out
                       </span>
                     )
-                  } else if (remaining <= 20) {
+                  } else if (remaining <= 10) {
                     availBadge = (
-                      <span className="text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
-                        Only {remaining} left
-                      </span>
-                    )
-                  } else {
-                    availBadge = (
-                      <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
-                        {ticket.ticketsSold ?? 0} / {ticket.availableTickets} sold
+                      <span className="text-xs font-semibold text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full animate-pulse">
+                        🔥 Only {remaining} left!
                       </span>
                     )
                   }
@@ -444,11 +448,20 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
 
                         {/* Price + VAT */}
                         <p className={`font-bold text-lg leading-none ${tierSoldOut ? "text-gray-400" : "text-[#6b2fa5]"}`}>
-                          ₦{formatNumber(ticket.price)}
-                          <span className="text-xs font-normal text-gray-400 ml-1.5">
-                            +₦{formatNumber(calculateVATFee(ticket.price))} VAT
-                          </span>
+                          ₦{formatNumber(Number(ticket.price) || 0)}
+                          {(Number(ticket.price) || 0) > 0 && (
+                            <span className="text-xs font-normal text-gray-400 ml-1.5">
+                              +₦{formatNumber(calculateVATFee(Number(ticket.price)))} VAT
+                            </span>
+                          )}
                         </p>
+
+                        {/* Per-type cap hint */}
+                        {!tierDisabled && (
+                          <p className="text-xs text-gray-400 leading-relaxed pt-0.5">
+                            Max {MAX_QTY_PER_TYPE} per order
+                          </p>
+                        )}
 
                         {/* Description */}
                         {ticket.description && (
@@ -461,7 +474,7 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
                       {/* Right: quantity control */}
                       <div className="flex-shrink-0 self-center">
                         {tierSoldOut ? (
-                          <span className="text-sm font-semibold text-gray-400 px-3 py-2 border border-gray-200 rounded-xl bg-white">
+                          <span className="text-sm font-semibold text-red-500 px-3 py-2 border border-red-200 rounded-xl bg-red-50">
                             Sold out
                           </span>
                         ) : effectivelyClosed ? (
@@ -490,7 +503,10 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
                             </span>
                             <button
                               onClick={() => increment(index)}
-                              disabled={remaining !== null && qty >= remaining}
+                              disabled={
+                                qty >= MAX_QTY_PER_TYPE ||
+                                (remaining !== null && qty >= remaining)
+                              }
                               className="w-9 h-9 flex items-center justify-center bg-[#6b2fa5] text-white hover:bg-purple-700 active:scale-95 transition-all disabled:bg-purple-300"
                               aria-label="Add one"
                             >
@@ -537,7 +553,7 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
                   <div className="flex items-center gap-2">
                     <ShoppingCart size={16} className="text-[#6b2fa5]" />
                     <span className="font-bold text-gray-900 text-sm">
-                      Total — {freeQty} ticket{freeQty !== 1 ? "s" : ""}
+                      Total of {freeQty} ticket{freeQty !== 1 ? "s" : ""}
                     </span>
                   </div>
                   <span className="text-xl font-bold text-emerald-600">Free</span>
@@ -561,23 +577,33 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
                     {item.ticketType}{" "}
                     <span className="text-gray-400 font-normal">× {item.quantity}</span>
                   </span>
-                  <span className="font-semibold">₦{formatNumber(item.price * item.quantity)}</span>
+                  {item.price === 0 ? (
+                    <span className="font-semibold text-emerald-600">Free</span>
+                  ) : (
+                    <span className="font-semibold">₦{formatNumber(item.price * item.quantity)}</span>
+                  )}
                 </div>
               ))}
-              <div className="flex justify-between text-xs text-gray-400 pt-1.5 border-t border-gray-100">
-                <span>VAT & Fees</span>
-                <span>₦{formatNumber(totalVat)}</span>
-              </div>
+              {totalVat > 0 && (
+                <div className="flex justify-between text-xs text-gray-400 pt-1.5 border-t border-gray-100">
+                  <span>VAT & Fees</span>
+                  <span>₦{formatNumber(totalVat)}</span>
+                </div>
+              )}
               <div className="flex justify-between items-center pt-2 border-t border-gray-200">
                 <div className="flex items-center gap-2">
                   <ShoppingCart size={16} className="text-[#6b2fa5]" />
                   <span className="font-bold text-gray-900 text-sm">
-                    Total — {totalTickets} ticket{totalTickets !== 1 ? "s" : ""}
+                    Total of {totalTickets} ticket{totalTickets !== 1 ? "s" : ""}
                   </span>
                 </div>
-                <span className="text-xl font-bold text-[#6b2fa5]">
-                  ₦{formatNumber(Math.round(grandTotal))}
-                </span>
+                {grandTotal === 0 ? (
+                  <span className="text-xl font-bold text-emerald-600">Free</span>
+                ) : (
+                  <span className="text-xl font-bold text-[#6b2fa5]">
+                    ₦{formatNumber(Math.round(grandTotal))}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -585,7 +611,7 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
               onClick={handleProceed}
               className="w-full bg-[#6b2fa5] text-white py-3.5 px-4 rounded-xl font-semibold text-base hover:bg-purple-700 active:scale-[0.99] transition-all shadow-md hover:shadow-lg"
             >
-              Proceed to Payment
+              {grandTotal === 0 ? "Proceed to Register" : "Proceed to Payment"}
             </button>
           </div>
         ) : effectivelyClosed ? (

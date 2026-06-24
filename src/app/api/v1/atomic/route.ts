@@ -5,24 +5,28 @@ import { FieldValue } from "firebase-admin/firestore";
 /**
  * Atomic Operations API Route
  * Handles event statistics updates atomically
- * POST /api/v1/atomic-operations
+ * POST /api/v1/atomic
+ *
+ * Strictly deducts `quantity` from the matching ticketPrices[].availableTickets
+ * (when set) and adds `quantity` to ticketPrices[].ticketsSold, plus the
+ * top-level event ticketsSold — all in one Firestore transaction.
  */
 
 interface AtomicOperationsRequest {
   creatorId: string;
   eventId: string;
-  ticketType: string;
+  ticketType: string;          // must match ticketPrices[].policy exactly
   ticketPrice: number;
-  quantity?: number;           // number of seats purchased for this ticket type
+  quantity?: number;           // seats purchased for this ticket type
   discountCode?: string | null;
-  ticketId: string;            // used as idempotency key (first ticketId of the batch)
+  ticketId: string;            // idempotency key (first ticketId of the batch)
 }
 
-interface TicketPrice {
+interface TicketPriceEntry {
   policy: string;
   price: number;
   ticketsSold?: number;
-  availableTickets: number | null | undefined;
+  availableTickets?: number | null;
   [key: string]: any;
 }
 
@@ -39,7 +43,7 @@ export async function POST(req: NextRequest) {
     const body: AtomicOperationsRequest = await req.json();
     const { creatorId, eventId, ticketType, ticketPrice, quantity, discountCode, ticketId } = body;
 
-    // Validate required fields
+    // ── Validate required fields ───────────────────────────────────────────────
     if (!creatorId || !eventId || !ticketType || ticketPrice === undefined || !ticketId) {
       return NextResponse.json(
         {
@@ -50,30 +54,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Quantity defaults to 1 for backwards compatibility
+    // qty is exactly what the user purchased — minimum 1
     const qty = Math.max(1, Number(quantity) || 1);
 
-    console.log(`[Atomic Ops] Processing ticketId: ${ticketId}, eventId: ${eventId}, type: ${ticketType}, qty: ${qty}`);
+    console.log(`[Atomic] ticketId=${ticketId} | event=${eventId} | type="${ticketType}" | qty=${qty}`);
 
-    // ── Flat event document: events/{eventId} ─────────────────────────────────
-    const eventDocRef = adminDb.collection("events").doc(eventId);
-
-    // ── Organizer user document: users/{creatorId} ────────────────────────────
+    const eventDocRef     = adminDb.collection("events").doc(eventId);
     const organizerDocRef = adminDb.collection("users").doc(creatorId);
 
-    // ── Idempotency check — also flat ─────────────────────────────────────────
+    // ── Idempotency guard (outside transaction — cheap read) ──────────────────
     const processedRef = eventDocRef.collection("_processedTickets").doc(ticketId);
     const processedDoc = await processedRef.get();
 
     if (processedDoc.exists) {
-      console.log(`[Atomic Ops] Ticket ${ticketId} already processed — skipping`);
+      console.log(`[Atomic] ${ticketId} already processed — skipping`);
       return NextResponse.json(
-        {
-          success: true,
-          message: "Operation already processed (idempotent)",
-          ticketId,
-          alreadyProcessed: true,
-        },
+        { success: true, message: "Already processed (idempotent)", ticketId, alreadyProcessed: true },
         { status: 200 }
       );
     }
@@ -86,83 +82,113 @@ export async function POST(req: NextRequest) {
       organizerStatsUpdated: false,
     };
 
-    await adminDb.runTransaction(async (transaction) => {
-      const eventDoc = await transaction.get(eventDocRef);
-      const organizerDoc = await transaction.get(organizerDocRef);
+    // ── Single Firestore transaction ───────────────────────────────────────────
+    await adminDb.runTransaction(async (tx) => {
+      const eventDoc     = await tx.get(eventDocRef);
+      const organizerDoc = await tx.get(organizerDocRef);
 
       if (!eventDoc.exists) {
-        throw new Error(`Event not found: ${eventId}`);
+        throw Object.assign(new Error(`Event not found: ${eventId}`), { statusCode: 404 });
       }
 
-      const eventData = eventDoc.data();
-      const ticketPrices: TicketPrice[] = eventData?.ticketPrices || [];
+      const eventData = eventDoc.data()!;
+      const ticketPrices: TicketPriceEntry[] = Array.isArray(eventData.ticketPrices)
+        ? eventData.ticketPrices
+        : [];
 
-      // Update the matching ticket type entry inside the ticketPrices array:
-      //   - increment ticketsSold by qty
-      //   - decrement availableTickets by qty (if finite)
-      const updatedTicketPrices = ticketPrices.map((ticket) => {
-        if (ticket.policy !== ticketType) return ticket;
+      // ── Find the matching tier ─────────────────────────────────────────────
+      const tierIndex = ticketPrices.findIndex((t) => t.policy === ticketType);
 
-        const currentSold = Number(ticket.ticketsSold) || 0;
-        const updated: TicketPrice = {
-          ...ticket,
-          ticketsSold: currentSold + qty,
-        };
+      if (tierIndex === -1) {
+        // Type not found in ticketPrices — log and continue without array update
+        // (event may not have typed tiers; top-level count still increments)
+        console.warn(`[Atomic] Ticket type "${ticketType}" not found in ticketPrices — skipping tier update`);
+      }
 
-        if (
-          ticket.availableTickets !== null &&
-          ticket.availableTickets !== undefined
-        ) {
-          const remaining = ticket.availableTickets - qty;
-          if (remaining < 0) {
-            console.warn(`[Atomic Ops] availableTickets for ${ticketType} would go below 0 — clamping to 0`);
+      // ── Build the updated ticketPrices array ──────────────────────────────
+      let availableTicketsDecremented = false;
+      const updatedTicketPrices = ticketPrices.map((tier, i) => {
+        if (i !== tierIndex) return tier; // leave every other tier untouched
+
+        // ticketsSold: treat missing/undefined as 0
+        const currentSold = Number(tier.ticketsSold) || 0;
+
+        // availableTickets: only present when the organizer set a limit
+        const hasLimit =
+          tier.availableTickets !== null &&
+          tier.availableTickets !== undefined;
+
+        if (hasLimit) {
+          const currentAvailable = Number(tier.availableTickets);
+
+          // Hard guard — reject the whole transaction if overselling
+          if (currentAvailable < qty) {
+            throw Object.assign(
+              new Error(
+                currentAvailable === 0
+                  ? `Ticket type "${ticketType}" is sold out.`
+                  : `Only ${currentAvailable} ticket(s) left for "${ticketType}". Requested: ${qty}.`
+              ),
+              { statusCode: 409 }
+            );
           }
-          updated.availableTickets = Math.max(0, remaining);
-          operationsPerformed.availableTicketsDecremented = true;
-        } else {
-          // Unlimited — no decrement needed
-          console.log(`[Atomic Ops] Ticket type ${ticketType} has unlimited availability`);
+
+          availableTicketsDecremented = true;
+          return {
+            ...tier,
+            ticketsSold: currentSold + qty,           // +qty to this tier's sold count
+            availableTickets: currentAvailable - qty,  // −qty from this tier's available count
+          };
         }
 
-        return updated;
+        // No limit set — only increment ticketsSold
+        return {
+          ...tier,
+          ticketsSold: currentSold + qty,
+        };
       });
 
-      // Top-level event stats — increment by qty / qty * price
-      transaction.update(eventDocRef, {
-        ticketsSold: FieldValue.increment(qty),
+      operationsPerformed.availableTicketsDecremented = availableTicketsDecremented;
+
+      // ── Write event document 
+      // ticketsSold (top-level) uses FieldValue.increment so concurrent
+      // transactions don't race on that scalar field.
+      // ticketPrices array is written back in full (Firestore has no
+      // per-element array increment — this is the correct pattern).
+      tx.update(eventDocRef, {
+        ticketsSold:  FieldValue.increment(qty),
         totalRevenue: FieldValue.increment(Number(ticketPrice) * qty),
-        ticketPrices: updatedTicketPrices,
+        ...(tierIndex !== -1 ? { ticketPrices: updatedTicketPrices } : {}),
       });
 
       operationsPerformed.ticketsSoldIncremented = true;
-      operationsPerformed.revenueUpdated = true;
+      operationsPerformed.revenueUpdated         = true;
 
-      // Organizer stats — users/{creatorId}
+      // ── Write organizer document ───────────────────────────────────────────
       if (organizerDoc.exists) {
-        transaction.update(organizerDocRef, {
+        tx.update(organizerDocRef, {
           totalTicketsSold: FieldValue.increment(qty),
-          totalRevenue: FieldValue.increment(Number(ticketPrice) * qty),
+          totalRevenue:     FieldValue.increment(Number(ticketPrice) * qty),
         });
         operationsPerformed.organizerStatsUpdated = true;
-        console.log(`[Atomic Ops] Organizer ${creatorId} stats updated — qty: ${qty}, revenue: +${Number(ticketPrice) * qty}`);
       } else {
-        console.warn(`[Atomic Ops] Organizer doc not found for creatorId: ${creatorId} — skipping user stats update`);
+        console.warn(`[Atomic] Organizer doc not found for ${creatorId} — skipping user stats`);
       }
 
-      // Mark processed to prevent duplicate runs
-      transaction.set(processedRef, {
+      // ── Mark processed (idempotency record) ───────────────────────────────
+      tx.set(processedRef, {
         ticketId,
         ticketType,
-        ticketPrice: Number(ticketPrice),
-        quantity: qty,
-        processedAt: FieldValue.serverTimestamp(),
-        createdAt: new Date().toISOString(),
+        ticketPrice:  Number(ticketPrice),
+        quantity:     qty,
+        processedAt:  FieldValue.serverTimestamp(),
+        createdAt:    new Date().toISOString(),
       });
 
-      console.log(`[Atomic Ops] Transaction complete — ticketId: ${ticketId}, qty: ${qty}`);
+      console.log(`[Atomic] Transaction committed — type="${ticketType}", qty=${qty}, availDecremented=${availableTicketsDecremented}`);
     });
 
-    // ── Discount usage — flat path: events/{eventId}/discounts/{code} ─────────
+    // ── Discount usage (non-blocking, outside transaction) ────────────────────
     if (discountCode) {
       try {
         const discountDocRef = adminDb
@@ -172,16 +198,13 @@ export async function POST(req: NextRequest) {
           .doc(discountCode);
 
         const discountDoc = await discountDocRef.get();
-
         if (discountDoc.exists) {
-          await discountDocRef.update({
-            usedCount: FieldValue.increment(qty),
-          });
+          await discountDocRef.update({ usedCount: FieldValue.increment(qty) });
           operationsPerformed.discountUpdated = true;
-          console.log(`[Atomic Ops] Discount ${discountCode} usedCount incremented by ${qty}`);
+          console.log(`[Atomic] Discount "${discountCode}" usedCount +${qty}`);
         }
       } catch (discountError) {
-        console.error(`[Atomic Ops] Error updating discount (non-blocking):`, discountError);
+        console.error("[Atomic] Discount update error (non-blocking):", discountError);
       }
     }
 
@@ -197,25 +220,21 @@ export async function POST(req: NextRequest) {
       { status: 200 }
     );
   } catch (error) {
-    console.error("[Atomic Ops] Error:", error);
+    console.error("[Atomic] Error:", error);
+    const statusCode = (error as any)?.statusCode ?? 500;
     return NextResponse.json(
       {
-        error: "Internal Server Error",
-        message: "Failed to perform atomic operations",
-        details: error instanceof Error ? error.message : String(error),
+        error: statusCode === 409 ? "Conflict" : statusCode === 404 ? "Not Found" : "Internal Server Error",
+        message: error instanceof Error ? error.message : "Failed to perform atomic operations",
       },
-      { status: 500 }
+      { status: statusCode }
     );
   }
 }
 
 export async function GET() {
   return NextResponse.json(
-    {
-      status: "healthy",
-      service: "Atomic Operations API",
-      timestamp: new Date().toISOString(),
-    },
+    { status: "healthy", service: "Atomic Operations API", timestamp: new Date().toISOString() },
     { status: 200 }
   );
-} 
+}

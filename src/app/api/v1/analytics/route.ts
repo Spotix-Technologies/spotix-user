@@ -33,7 +33,8 @@ export async function POST(request: NextRequest) {
     const { ticketPrice, ticketId, ticketCount, transactionFee, eventId, timestamp } = body;
 
     // ── Validation ────────────────────────────────────────────────
-    if (!ticketPrice || !ticketId) {
+    // Use explicit undefined/null check — ticketPrice of 0 is valid (free tickets)
+    if (ticketPrice === undefined || ticketPrice === null || !ticketId) {
       return NextResponse.json(
         {
           error: "Bad Request",
@@ -49,7 +50,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error: "Bad Request",
-          message: "Invalid ticket price. Must be a positive number.",
+          message: "Invalid ticket price. Must be a non-negative number.",
           developer: "API developed and maintained by Spotix Technologies",
         },
         { status: 400 }

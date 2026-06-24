@@ -1,11 +1,14 @@
 /**
- * Calculates the VAT fee for each ticket price
+ * Calculates the OUR MONEY for each ticket price
  * This is to ensure burden of fee is on users, not event creators
  * Formula: (5% of ticket price) + 100
  * @param ticketPrice - The original ticket price (must be a number)
  * @returns The VAT fee amount (as a number)
  */
 export const calculateVATFee = (ticketPrice: number): number => {
+  // Free tickets have no VAT or platform fee
+  if (ticketPrice === 0) return 0;
+  
   const percentageFee = ticketPrice * 0.05; // 5% of ticket price
   const flatFee = 100; // Fixed flat fee
   const totalVATFee = percentageFee + flatFee; // Add them together

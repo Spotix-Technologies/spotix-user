@@ -32,6 +32,7 @@ export default function OrderSummary({
   isFreeEvent,
 }: OrderSummaryProps) {
   // Use priceUtility to get the breakdown for every cart item
+  // getPricingBreakdown already returns vatFee=0 for price=0 tickets
   const pricedCart = cart.map((item) => {
     const { originalPrice, vatFee, finalPrice } = getPricingBreakdown(item.price)
     return { ...item, originalPrice, vatFee, finalPrice }
@@ -39,6 +40,7 @@ export default function OrderSummary({
 
   const subtotal = pricedCart.reduce((sum, item) => sum + item.originalPrice * item.quantity, 0)
   const totalVat = pricedCart.reduce((sum, item) => sum + item.vatFee * item.quantity, 0)
+  const isTrulyFree = isFreeEvent || subtotal === 0
   const computedTotal = Math.max(0, subtotal + totalVat - (discountAmount ?? 0))
 
   return (
@@ -65,7 +67,7 @@ export default function OrderSummary({
           <p className="text-xs sm:text-sm text-gray-600 mb-2">
             {`Tickets (${cart.reduce((sum, i) => sum + i.quantity, 0)} total)`}
           </p>
-          {isFreeEvent ? (
+          {isTrulyFree ? (
             pricedCart.map((item, index) => (
               <div key={index} className="flex items-start justify-between gap-2">
                 <div className="flex items-start gap-2 flex-1 min-w-0">
@@ -102,7 +104,7 @@ export default function OrderSummary({
 
         {/* Price Breakdown */}
         <div className="pt-4 border-t border-gray-200 space-y-2">
-          {!isFreeEvent && (
+          {!isTrulyFree && (
             <>
               <div className="flex justify-between text-sm sm:text-base text-gray-700">
                 <span>Subtotal</span>
@@ -116,7 +118,7 @@ export default function OrderSummary({
             </>
           )}
 
-          {discountData && !isFreeEvent && (
+          {discountData && !isTrulyFree && (
             <div className="flex justify-between text-sm sm:text-base text-green-600 font-medium">
               <span className="break-words pr-2">
                 Discount ({discountData.discountType === "percentage" ? `${discountData.discountValue}%` : "Fixed"})
@@ -131,7 +133,7 @@ export default function OrderSummary({
           >
             <span>Total Amount</span>
             <span className="whitespace-nowrap">
-              {isFreeEvent ? "Free" : `₦${formatNumber(computedTotal)}`}
+              {isTrulyFree ? "Free" : `₦${formatNumber(computedTotal)}`}
             </span>
           </div>
         </div>

@@ -125,7 +125,60 @@ const Home: React.FC<HomeProps> = ({ user }) => {
         const json = await response.json()
 
         if (json.success && json.data) {
-          setHomeData(json.data)
+          const now = Date.now()
+
+          // Helper: parse any date value the API might return
+          const toMs = (v: string | undefined): number => {
+            if (!v) return 0
+            const ms = new Date(v).getTime()
+            return isNaN(ms) ? 0 : ms
+          }
+
+          // Sort helper (ascending by start date)
+          const byDate = (a: HomeEvent, b: HomeEvent) =>
+            toMs(a.eventStartDate) - toMs(b.eventStartDate)
+
+          const rawData: HomeData = json.data
+          const buckets = { today: [...rawData.events.today], upcoming: [...rawData.events.upcoming], past: [...rawData.events.past] }
+
+          // Re-categorise: move any "today/upcoming" event that has already
+          // ended into "past", and mark it via the API (fire-and-forget).
+          const misplacedIds: string[] = []
+
+          const recheck = (list: HomeEvent[]) => {
+            const stillActive: HomeEvent[] = []
+            for (const ev of list) {
+              const startMs = toMs(ev.eventStartDate)
+              if (startMs > 0 && startMs < now) {
+                buckets.past.push(ev)
+                misplacedIds.push(ev.eventId)
+              } else {
+                stillActive.push(ev)
+              }
+            }
+            return stillActive
+          }
+
+          buckets.today    = recheck(buckets.today)
+          buckets.upcoming = recheck(buckets.upcoming)
+
+          // Sort each bucket by date
+          buckets.today.sort(byDate)
+          buckets.upcoming.sort(byDate)
+          buckets.past.sort((a, b) => toMs(b.eventStartDate) - toMs(a.eventStartDate)) // most recent past first
+
+          setHomeData({ events: buckets, collections: rawData.collections })
+
+          // Fire-and-forget: let the server know these have passed
+          if (misplacedIds.length > 0) {
+            misplacedIds.forEach((eventId) => {
+              fetch("/api/v1/home/mark-past", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ eventId }),
+              }).catch(() => {/* silent */})
+            })
+          }
         } else {
           console.error("[Home] API returned error:", json.error)
         }
