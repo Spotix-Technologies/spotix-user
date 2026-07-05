@@ -18,40 +18,79 @@ const NIGERIAN_STATES = [
 
 const GENRES = ["All","Music","Arts & Culture","Technology","Food & Drinks","Sports","Business","Fashion","Comedy","Education","Religious","Social","Other"]
 
-// Normalize Nominatim state names to our list
-function normalizeStateName(raw: string): string {
-  const cleaned = raw.replace(/ State$/i, "").replace(/ Capital Territory$/i, "").trim()
-  const match = NIGERIAN_STATES.find(
-    (s) => s.toLowerCase() === cleaned.toLowerCase() ||
-           s.toLowerCase().replace(" ", "") === cleaned.toLowerCase().replace(" ", "")
-  )
-  return match || cleaned
+interface TicketTier {
+  label: string
+  price: string
 }
 
 interface DiscoverEvent {
   id: string; state: string; eventName: string; description: string
   host: string; location: string; genre: string; eventStart: string
-  eventEnd: string | null; ticketPolicy: string; isSpotixEvent: boolean
+  eventEnd: string | null; ticketPolicy: string; ticketTiers: TicketTier[] | null
+  isSpotixEvent: boolean
   spotixEventId: string | null; ticketLink: string | null
   imageUrl: string; postedBy: string
 }
 
+// Lowest price among ticket tiers (for the "From ₦X" summary on the card)
+function lowestTierPrice(tiers: TicketTier[] | null): number | null {
+  if (!tiers || tiers.length === 0) return null
+  const prices = tiers
+    .map(t => Number(t.price))
+    .filter(p => !Number.isNaN(p) && p >= 0)
+  if (prices.length === 0) return null
+  return Math.min(...prices)
+}
+
 // ── Geolocation helpers ───────────────────────────────────────────────────────
-async function reverseGeocodeNigerianState(lat: number, lon: number): Promise<string | null> {
+// State detection now goes through our own server route (/api/v1/geo/state),
+// which does the reverse-geocoding / IP-lookup server-side — this avoids
+// browsers silently stripping the User-Agent header Nominatim expects, and
+// gives us an IP-based fallback for the (common) case where the user denies
+// the browser's location permission prompt.
+//
+// The route also reports back *how* it resolved the state ("coordinates" /
+// "edge-coordinates" from real lat/lon vs. "edge-region" / "ip" from a coarse
+// network-level guess). We surface that distinction in the UI below, since a
+// coarse guess can land in the wrong state entirely (e.g. Nigerian mobile
+// gateways for South-East traffic are frequently geolocated to Rivers).
+type GeoSource = "coordinates" | "edge-coordinates" | "edge-region" | "ip" | null
+const PRECISE_SOURCES: GeoSource[] = ["coordinates", "edge-coordinates"]
+
+async function fetchStateFromServer(coords?: { lat: number; lon: number }): Promise<{ state: string | null; source: GeoSource }> {
   try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&addressdetails=1`,
-      { headers: { "Accept-Language": "en-US,en", "User-Agent": "SpotixApp/1.0" } }
-    )
-    if (!res.ok) return null
+    const params = coords ? `?lat=${coords.lat}&lon=${coords.lon}` : ""
+    const res = await fetch(`/api/v1/geo/state${params}`)
+    if (!res.ok) return { state: null, source: null }
     const data = await res.json()
-    const rawState: string =
-      data.address?.state || data.address?.county || data.address?.region || ""
-    if (!rawState) return null
-    return normalizeStateName(rawState)
+    const state = data?.state && NIGERIAN_STATES.includes(data.state) ? data.state : null
+    return { state, source: state ? (data?.source ?? null) : null }
   } catch {
-    return null
+    return { state: null, source: null }
   }
+}
+
+// Wraps navigator.geolocation.getCurrentPosition in a promise that always
+// resolves (never rejects) so callers can await a single outcome regardless
+// of whether the browser grants, denies, or times out on the permission.
+function resolvePreciseState(): Promise<{ state: string | null; source: GeoSource }> {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      resolve({ state: null, source: null })
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const result = await fetchStateFromServer({ lat: pos.coords.latitude, lon: pos.coords.longitude })
+        resolve(result)
+      },
+      () => resolve({ state: null, source: null }),
+      // maximumAge: 0 forces a fresh fix rather than reusing a cached one —
+      // important here since this same call path is used for "Retry", where
+      // a stale cached position would just reproduce the wrong result.
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    )
+  })
 }
 
 // ── Event card ────────────────────────────────────────────────────────────────
@@ -96,10 +135,26 @@ function DiscoverCard({ event, onClick }: { event: DiscoverEvent; onClick: () =>
           <Calendar className="w-3.5 h-3.5 shrink-0" />
           <span>{start.toLocaleDateString("en-NG", { weekday:"short", day:"numeric", month:"short", year:"numeric" })}</span>
         </div>
-        <div className="flex items-center justify-between pt-1">
-          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${event.ticketPolicy === "free" ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-600"}`}>
-            {event.ticketPolicy === "free" ? "Free" : "Paid"}
-          </span>
+        <div className="flex items-center justify-between pt-1 gap-2">
+          {event.ticketPolicy === "free" ? (
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Free</span>
+          ) : event.ticketPolicy === "listed" && event.ticketTiers && event.ticketTiers.length > 0 ? (
+            (() => {
+              const lowest = lowestTierPrice(event.ticketTiers)
+              const singleTier = event.ticketTiers.length === 1
+              return (
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#6b2fa5]/10 text-[#6b2fa5]" title={event.ticketTiers.map(t => `${t.label || "Ticket"}: ₦${Number(t.price || 0).toLocaleString("en-NG")}`).join(", ")}>
+                  {lowest !== null
+                    ? `${singleTier ? "" : "From "}₦${lowest.toLocaleString("en-NG")}${!singleTier ? "" : event.ticketTiers[0].label ? ` · ${event.ticketTiers[0].label}` : ""}`
+                    : "Paid"}
+                </span>
+              )
+            })()
+          ) : (
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+              {event.ticketPolicy === "tbd" ? "Pricing TBD" : "Paid"}
+            </span>
+          )}
           {event.host && <span className="text-xs text-gray-400 truncate max-w-[100px]">by {event.host}</span>}
         </div>
       </div>
@@ -133,6 +188,7 @@ export default function DiscoverPageClient() {
   const [locationLoading, setLocationLoading] = useState(false)
   const [locationError, setLocationError] = useState<string | null>(null)
   const [locationGranted, setLocationGranted] = useState(false)
+  const [locationSource, setLocationSource] = useState<GeoSource>(null)
 
   // ── Fetch events ─────────────────────────────────────────────────────────
   const fetchEvents = useCallback(async (state: string, genre: string) => {
@@ -157,8 +213,12 @@ export default function DiscoverPageClient() {
     if (selectedState) fetchEvents(selectedState, selectedGenre)
   }, [selectedState, selectedGenre, fetchEvents])
 
-  // ── Geolocation ───────────────────────────────────────────────────────────
-  const requestLocation = () => {
+  // ── Location detection ──────────────────────────────────────────────────
+  // 1. Resolve an immediate default from the request's IP (no permission
+  //    prompt, works for everyone) so the page shows relevant events right away.
+  // 2. If the browser grants precise geolocation, refine/override with that —
+  //    both paths are resolved server-side via /api/v1/geo/state.
+  const requestPreciseLocation = () => {
     if (!navigator.geolocation) {
       setLocationError("Geolocation is not supported by your browser.")
       return
@@ -167,18 +227,14 @@ export default function DiscoverPageClient() {
 
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
-        const state = await reverseGeocodeNigerianState(pos.coords.latitude, pos.coords.longitude)
+        const { state, source } = await fetchStateFromServer({ lat: pos.coords.latitude, lon: pos.coords.longitude })
         setLocationLoading(false)
-        if (state && NIGERIAN_STATES.includes(state)) {
+        if (state) {
           setSelectedState(state)
+          setLocationSource(source)
           setLocationGranted(true)
-        } else if (state) {
-          // Try a partial match
-          const partial = NIGERIAN_STATES.find(s => s.toLowerCase().includes(state.toLowerCase()))
-          if (partial) { setSelectedState(partial); setLocationGranted(true) }
-          else setLocationError(`Could not map "${state}" to a Nigerian state. Please select manually.`)
         } else {
-          setLocationError("Could not determine your state. Please select manually.")
+          setLocationError("Could not determine your state precisely. Please select manually.")
         }
       },
       (err) => {
@@ -186,12 +242,52 @@ export default function DiscoverPageClient() {
         if (err.code === err.PERMISSION_DENIED) setLocationError("Location access denied. Please select your state manually.")
         else setLocationError("Could not get your location. Please select manually.")
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     )
   }
 
-  // Auto-request on mount
-  useEffect(() => { requestLocation() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // Auto-detect on mount: IP-based default first (shows content immediately
+  // if it succeeds), then a silent GPS refinement in the background.
+  // The "could not determine automatically" error is only surfaced once BOTH
+  // the IP lookup and the GPS attempt have failed — previously it fired as
+  // soon as the IP lookup alone came back empty, before GPS had a chance to
+  // resolve, so it would flash even when GPS went on to succeed.
+  useEffect(() => {
+    let cancelled = false
+    setLocationLoading(true)
+    setLocationError(null)
+
+    fetchStateFromServer().then(async ({ state: ipState, source: ipSource }) => {
+      if (cancelled) return
+
+      if (ipState) {
+        // Got a usable default right away — show content now, refine silently after.
+        setSelectedState(ipState)
+        setLocationSource(ipSource)
+        setLocationLoading(false)
+      }
+
+      const precise = await resolvePreciseState()
+      if (cancelled) return
+
+      if (precise.state) {
+        setSelectedState(precise.state)
+        setLocationSource(precise.source)
+        setLocationGranted(true)
+        setLocationError(null)
+        setLocationLoading(false)
+      } else if (!ipState) {
+        // Both the IP lookup and GPS failed — now it's fair to ask the user to pick manually.
+        setLocationError("Could not determine your state automatically. Please select manually.")
+        setLocationLoading(false)
+      } else {
+        // GPS didn't pan out, but the IP-based default already applied above.
+        setLocationLoading(false)
+      }
+    })
+
+    return () => { cancelled = true }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleEventClick = (event: DiscoverEvent) => {
     if (event.isSpotixEvent && event.spotixEventId) {
@@ -236,8 +332,20 @@ export default function DiscoverPageClient() {
         {locationError && (
           <div className="flex items-start justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
             <span>{locationError}</span>
-            <button onClick={requestLocation} className="shrink-0 text-[#6b2fa5] font-semibold hover:underline text-xs flex items-center gap-1">
+            <button onClick={requestPreciseLocation} className="shrink-0 text-[#6b2fa5] font-semibold hover:underline text-xs flex items-center gap-1">
               <RefreshCw className="w-3 h-3" /> Retry
+            </button>
+          </div>
+        )}
+
+        {/* Selected state came from a coarse network-level guess (IP/edge region),
+            not real device coordinates — this can occasionally land on the wrong
+            state, so keep the option to get a precise fix visible and easy to find. */}
+        {!locationError && selectedState && !locationLoading && !PRECISE_SOURCES.includes(locationSource) && (
+          <div className="flex items-start justify-between gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm text-blue-800">
+            <span>Showing events for {selectedState}, estimated from your network — not always exact.</span>
+            <button onClick={requestPreciseLocation} className="shrink-0 text-[#6b2fa5] font-semibold hover:underline text-xs flex items-center gap-1 whitespace-nowrap">
+              <MapPin className="w-3 h-3" /> Use precise location
             </button>
           </div>
         )}

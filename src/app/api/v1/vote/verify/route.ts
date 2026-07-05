@@ -1,3 +1,27 @@
+/**
+ * src/app/api/v1/vote/verify/route.ts
+ *
+ * POST /api/v1/vote/verify
+ *
+ * Legacy manual vote-crediting endpoint. Not currently called anywhere in
+ * the app — the live callback flow (polls/[poll-name]/callback/page.tsx)
+ * only calls GET /api/v1/polls/verify, which is read-only and relies on the
+ * backend webhook (v1/voting.js) to have already credited the vote.
+ *
+ * Kept here for backward compatibility, brought in line with the rest of
+ * the payment system: single "Reference" collection (was incorrectly
+ * checking a duplicate lowercase "references" collection), and an
+ * idempotency guard so calling this after the webhook has already run
+ * cannot double-credit votes.
+ *
+ * Works with FLAT voting/{pollId} collection (new booker architecture).
+ * Falls back to nested voting/{creatorId}/votes/{voteId} for legacy polls.
+ * Does NOT support group polls (categoryId) — only single-poll contestants[].
+ * If this route is ever wired back up for real traffic, it should be
+ * replaced with a call into the same logic v1/voting.js uses server-side,
+ * so group polls and the entries/votingHistory writes stay in sync.
+ */
+
 import { NextRequest, NextResponse } from "next/server"
 import { adminDb } from "@/app/lib/firebase-admin"
 import { FieldValue } from "firebase-admin/firestore"
@@ -11,97 +35,164 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
     }
 
-    // Get the payment reference document
-    const refDoc = await adminDb.collection("Reference").doc(reference).get()
+    // ── Locate reference doc ──────────────────────────────────────────────────
+    const refCollection = "Reference"
+    const refSnap = await adminDb.collection(refCollection).doc(reference).get()
 
-    if (!refDoc.exists) {
+    if (!refSnap.exists) {
       return NextResponse.json({ error: "Payment reference not found" }, { status: 404 })
     }
 
-    const refData = refDoc.data()
+    const refData = refSnap.data()!
 
-    // Update payment status
-    const updateData: any = {
-      status: status,
+    // ── Idempotency guard ────────────────────────────────────────────────────
+    // If the webhook (v1/voting.js) already resolved this reference, don't
+    // credit votes a second time.
+    if (refData.status === "successful" || refData.status === "success" || refData.status === "failed") {
+      return NextResponse.json(
+        { success: true, message: `Payment already recorded as "${refData.status}"`, alreadyProcessed: true },
+        { status: 200 },
+      )
+    }
+
+    const updateData: Record<string, any> = {
+      status,
       updatedAt: new Date().toISOString(),
     }
 
     if (status === "success") {
-      updateData.transactionReference = transactionReference
-      updateData.paymentReference = paymentReference
-      updateData.paymentCompletedAt = new Date().toISOString()
+      updateData.transactionReference  = transactionReference
+      updateData.paymentReference      = paymentReference
+      updateData.paymentCompletedAt    = new Date().toISOString()
 
-      // Increment contestant votes
-      if (refData) {
-        const { creatorId, voteId, contestantId, voteCount } = refData
+      // ── Credit votes ─────────────────────────────────────────────────────
+      const {
+        pollId,
+        voteId,
+        creatorId,
+        contestantId,
+        voteCount,
+        totalAmount,
+        pollPrice,
+        contestantName,
+        userId,
+        guestEmail,
+        isGuest,
+      } = refData
 
+      // Determine the flat pollId (booker stores pollId; legacy stored voteId + creatorId)
+      const flatId = pollId ?? voteId ?? null
+
+      if (flatId) {
         try {
-          // Get the vote document
-          const voteDocRef = adminDb.collection("voting").doc(creatorId).collection("votes").doc(voteId)
-          const voteDoc = await voteDocRef.get()
+          // ── Try flat voting/{pollId} first ──────────────────────────────
+          const flatRef  = adminDb.collection("voting").doc(flatId)
+          const flatSnap = await flatRef.get()
 
-          if (voteDoc.exists) {
-            const voteData = voteDoc.data()
-            const contestants = voteData?.contestants || []
+          if (flatSnap.exists && flatSnap.data()?.pollName) {
+            // Flat document — use atomic array-safe update
+            const flatData   = flatSnap.data()!
+            const contestants: any[] = flatData.contestants ?? []
 
-            // Find and update the specific contestant
-            const updatedContestants = contestants.map((contestant: any) => {
-              if (contestant.contestantId === contestantId) {
-                return {
-                  ...contestant,
-                  votes: (contestant.votes || 0) + voteCount,
-                }
-              }
-              return contestant
-            })
+            const updatedContestants = contestants.map((c: any) =>
+              c.contestantId === contestantId
+                ? { ...c, votes: (c.votes ?? 0) + Number(voteCount) }
+                : c
+            )
 
-            // Update the vote document with new contestant votes and increment poll count
-            await voteDocRef.update({
-              contestants: updatedContestants,
-              pollCount: FieldValue.increment(voteCount),
-              pollAmount: FieldValue.increment(refData.totalAmount),
-            })
-
-            // Add vote entry to pollEntries
             const voteEntry = {
-              uid: refData.userId || refData.guestEmail,
-              voteCount: voteCount,
-              price: refData.pollPrice,
-              contestantId: contestantId,
-              contestantName: refData.contestantName,
-              date: new Date().toISOString(),
-              reference: reference,
-              isGuest: refData.isGuest || false,
+              uid:            userId ?? guestEmail ?? null,
+              voteCount:      Number(voteCount),
+              price:          pollPrice ?? 0,
+              contestantId,
+              contestantName: contestantName ?? "",
+              date:           new Date().toISOString(),
+              reference,
+              isGuest:        isGuest ?? false,
             }
 
-            await voteDocRef.update({
-              pollEntries: FieldValue.arrayUnion(voteEntry),
+            await flatRef.update({
+              contestants:                    updatedContestants,
+              pollCount:                      FieldValue.increment(Number(voteCount)),
+              pollAmount:                     FieldValue.increment(Number(totalAmount ?? 0)),
+              updatedAt:                      FieldValue.serverTimestamp(),
             })
 
-            console.log(`Successfully incremented votes for contestant ${contestantId}`)
+            // Scalable per-vote records (mirrors v1/voting.js) instead of an
+            // unbounded pollEntries array on the poll document.
+            await flatRef.collection("entries").doc(reference).set(voteEntry)
+            await adminDb.collection("votingHistory").doc(reference).set({
+              ...voteEntry,
+              pollId:   flatId,
+              pollName: flatData.pollName ?? "",
+              pollType: flatData.pollType ?? "single",
+              creatorId: flatData.creatorId ?? flatData.organizerId ?? null,
+            })
+
+            console.log(`[vote/verify] Credited ${voteCount} votes to ${contestantId} in flat voting/${flatId}`)
+          } else if (creatorId) {
+            // ── Fallback: nested voting/{creatorId}/votes/{voteId} ─────────
+            const nestedRef  = adminDb.collection("voting").doc(creatorId).collection("votes").doc(flatId)
+            const nestedSnap = await nestedRef.get()
+
+            if (nestedSnap.exists) {
+              const nestedData   = nestedSnap.data()!
+              const contestants: any[] = nestedData.contestants ?? []
+
+              const updatedContestants = contestants.map((c: any) =>
+                c.contestantId === contestantId
+                  ? { ...c, votes: (c.votes ?? 0) + Number(voteCount) }
+                  : c
+              )
+
+              const voteEntry = {
+                uid:            userId ?? guestEmail ?? null,
+                voteCount:      Number(voteCount),
+                price:          pollPrice ?? 0,
+                contestantId,
+                contestantName: contestantName ?? "",
+                date:           new Date().toISOString(),
+                reference,
+                isGuest:        isGuest ?? false,
+              }
+
+              await nestedRef.update({
+                contestants:  updatedContestants,
+                pollCount:    FieldValue.increment(Number(voteCount)),
+                pollAmount:   FieldValue.increment(Number(totalAmount ?? 0)),
+              })
+
+              await nestedRef.collection("entries").doc(reference).set(voteEntry)
+              await adminDb.collection("votingHistory").doc(reference).set({
+                ...voteEntry,
+                pollId:    flatId,
+                pollName:  nestedData.pollName ?? "",
+                pollType:  nestedData.pollType ?? "single",
+                creatorId,
+              })
+
+              console.log(`[vote/verify] Credited ${voteCount} votes (nested path) for ${contestantId}`)
+            }
           }
-        } catch (error) {
-          console.error("Error updating contestant votes:", error)
-          // Continue with payment reference update even if vote increment fails
+        } catch (err) {
+          console.error("[vote/verify] Error crediting votes:", err)
+          // Non-fatal — still record payment success below
         }
       }
     } else if (status === "failed") {
-      updateData.failureMessage = message || "Payment failed"
+      updateData.failureMessage  = message ?? "Payment failed"
       updateData.paymentFailedAt = new Date().toISOString()
     }
 
-    // Update the reference document
-    await adminDb.collection("Reference").doc(reference).update(updateData)
+    // ── Update reference doc ────────────────────────────────────────────────
+    await adminDb.collection(refCollection).doc(reference).update(updateData)
 
     return NextResponse.json(
-      {
-        success: true,
-        message: `Payment ${status} recorded successfully`,
-      },
+      { success: true, message: `Payment ${status} recorded successfully` },
       { status: 200 }
     )
   } catch (error) {
-    console.error("Error verifying payment:", error)
+    console.error("[vote/verify] Unexpected error:", error)
     return NextResponse.json(
       {
         error: "Internal server error",

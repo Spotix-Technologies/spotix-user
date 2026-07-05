@@ -1,11 +1,9 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { auth, db } from "@/app/lib/firebase"
-import { doc, getDoc } from "firebase/firestore"
+import { authFetch } from "@/app/lib/auth-client-user"
 import { Loader2, CreditCard, AlertCircle } from "lucide-react"
 import AddPhoneNumber from "./Addphonenumber"
-import { calculateFinalPrice } from "@/utils/priceUtility"
 
 interface PayWithPaystackProps {
   email: string
@@ -13,6 +11,18 @@ interface PayWithPaystackProps {
   reference: string
   isGuest?: boolean
   userId?: string | null
+  /**
+   * Full name of the payer.
+   * For logged-in users this is pulled from /api/v1/user/me inside the component.
+   * For guests it should be passed in directly from the checkout form.
+   */
+  fullName?: string | null
+  /**
+   * Phone number of the payer.
+   * For logged-in users this is pulled from /api/v1/user/me inside the component.
+   * For guests it should be passed in directly from the checkout form.
+   */
+  phone?: string | null
   metadata: {
     eventId: string
     eventName: string
@@ -40,22 +50,28 @@ export default function PayWithPaystack({
   reference,
   isGuest = false,
   userId = null,
+  fullName: propFullName = null,
+  phone: propPhone = null,
   metadata,
   onSuccess,
   onClose,
 }: PayWithPaystackProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [phoneNumber, setPhoneNumber] = useState<string | null>(null)
+
+  // Resolved payer identity — populated from Firestore for auth users,
+  // or from props for guests.
+  const [resolvedFullName, setResolvedFullName] = useState<string | null>(propFullName)
+  const [phoneNumber, setPhoneNumber] = useState<string | null>(propPhone)
+
   const [showPhoneNumberModal, setShowPhoneNumberModal] = useState(false)
-  const [checkingPhone, setCheckingPhone] = useState(!isGuest) // Skip phone check for guests
+  const [checkingProfile, setCheckingProfile] = useState(!isGuest)
   const [scriptLoaded, setScriptLoaded] = useState(false)
   const [paymentInitialized, setPaymentInitialized] = useState(false)
 
   // Load Paystack inline script
   useEffect(() => {
     if (window.PaystackPop) {
-      console.log("Paystack already loaded")
       setScriptLoaded(true)
       setLoading(false)
       return
@@ -65,122 +81,122 @@ export default function PayWithPaystack({
     script.src = "https://js.paystack.co/v1/inline.js"
     script.async = true
     script.onload = () => {
-      console.log("Paystack script loaded successfully")
       setScriptLoaded(true)
       setLoading(false)
     }
     script.onerror = () => {
-      console.error("Failed to load Paystack script")
       setError("Failed to load Paystack. Please check your internet connection.")
       setLoading(false)
     }
-
     document.body.appendChild(script)
 
     return () => {
-      if (script.parentNode) {
-        document.body.removeChild(script)
-      }
+      if (script.parentNode) document.body.removeChild(script)
     }
   }, [])
 
-  // Check if user has phone number (skip for guests)
+  // Resolve profile for authenticated users 
   useEffect(() => {
     if (isGuest) {
-      // For guests, we don't need a phone number - proceed directly
-      setPhoneNumber("guest")
-      setCheckingPhone(false)
+      // Props already set; nothing to fetch
+      setCheckingProfile(false)
       return
     }
 
-    const checkPhoneNumber = async () => {
+    const fetchProfile = async () => {
       try {
-        const user = auth.currentUser
-        if (!user) {
+        // Don't use Firebase client auth state here — the app's real
+        // session is the spotix_u_at JWT cookie. Same endpoint used by the
+        // payment page and vote modal for prefilling logged-in users.
+        const res = await authFetch("/api/v1/user/me")
+        if (!res.ok) {
           setError("You must be logged in to proceed")
-          setCheckingPhone(false)
+          setCheckingProfile(false)
           return
         }
 
-        const userDocRef = doc(db, "users", user.uid)
-        const userDoc = await getDoc(userDocRef)
-
-        if (userDoc.exists()) {
-          const userData = userDoc.data()
-          const userPhone = userData.phoneNumber
-
-          if (userPhone && userPhone.trim() !== "") {
-            console.log("Phone number found:", userPhone)
-            setPhoneNumber(userPhone)
-            setCheckingPhone(false)
-          } else {
-            console.log("No phone number found, showing modal")
-            setShowPhoneNumberModal(true)
-            setCheckingPhone(false)
-          }
-        } else {
-          console.log("User document not found, showing phone modal")
-          setShowPhoneNumberModal(true)
-          setCheckingPhone(false)
+        const data = await res.json()
+        if (!data.authenticated) {
+          setError("You must be logged in to proceed")
+          setCheckingProfile(false)
+          return
         }
-      } catch (error) {
-        console.error("Error checking phone number:", error)
+
+        const name = data.fullName || null
+        setResolvedFullName(name)
+
+        const phone = data.phoneNumber || null
+        if (phone?.trim()) {
+          setPhoneNumber(phone.trim())
+          setCheckingProfile(false)
+        } else {
+          // No phone — ask for one before proceeding
+          setShowPhoneNumberModal(true)
+          setCheckingProfile(false)
+        }
+      } catch (err) {
+        console.error("[PayWithPaystack] Error fetching profile:", err)
         setError("Failed to verify your information. Please try again.")
-        setCheckingPhone(false)
+        setCheckingProfile(false)
       }
     }
 
-    checkPhoneNumber()
+    fetchProfile()
   }, [isGuest])
 
   const handlePhoneNumberAdded = (phone: string) => {
-    console.log("Phone number added:", phone)
     setPhoneNumber(phone)
     setShowPhoneNumberModal(false)
   }
 
-  // Memoize the initialization function
+  // ── Initialize Paystack ────────────────────────────────────────────────────
   const initializePayment = useCallback(() => {
-    console.log("Attempting to initialize payment...")
-    console.log("PaystackPop available:", !!window.PaystackPop)
-    console.log("Phone number:", phoneNumber)
-    console.log("Reference:", reference)
-    console.log("Amount:", amount)
-
     if (!window.PaystackPop) {
-      console.error("Paystack not loaded")
       setError("Paystack is not loaded. Please refresh the page.")
       return
     }
 
-    if (!phoneNumber) {
-      console.log("No phone number, showing modal")
-      setShowPhoneNumberModal(true)
-      return
-    }
-
     const paystackPublicKey = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY
-
     if (!paystackPublicKey) {
-      console.error("Paystack public key not configured")
       setError("Payment configuration error. Please contact support.")
       return
     }
 
+    // Split fullName into first/last for Paystack prefill
+    const nameParts = (resolvedFullName ?? "").trim().split(/\s+/)
+    const firstName = nameParts[0] ?? ""
+    const lastName  = nameParts.slice(1).join(" ") || firstName
+
     try {
-      console.log("Setting up Paystack handler...")
       const handler = window.PaystackPop.setup({
         key: paystackPublicKey,
-        email: email,
-        amount: Math.round((amount) * 100), // price + VAT, converted to kobo
+        email,
+        amount: Math.round(amount * 100), // kobo
         currency: "NGN",
         ref: reference,
+
+        // ── Payer prefill — THIS was the missing fix ───────────────────────
+        first_name: firstName,
+        last_name:  lastName,
+        phone:      phoneNumber ?? "",
+        // ──────────────────────────────────────────────────────────────────
+
         metadata: {
           custom_fields: [
             {
               display_name: "Transaction Type",
               variable_name: "type",
               value: "ticket_purchase",
+            },
+            {
+              display_name: "Full Name",
+              variable_name: "full_name",
+              value: resolvedFullName ?? "",
+            },
+            {
+              display_name: "Phone Number",
+              variable_name: "phone_number",
+              value: phoneNumber ?? "",
             },
             {
               display_name: "Event Name",
@@ -209,12 +225,7 @@ export default function PayWithPaystack({
             {
               display_name: "User ID",
               variable_name: "user_id",
-              value: metadata.userId,
-            },
-            {
-              display_name: "Phone Number",
-              variable_name: "phone_number",
-              value: phoneNumber,
+              value: metadata.userId ?? "",
             },
             ...(metadata.discountCode
               ? [
@@ -236,57 +247,47 @@ export default function PayWithPaystack({
               : []),
           ],
         },
+
         callback: (response: any) => {
-          console.log("Payment successful:", response)
           onSuccess(response.reference)
         },
         onClose: () => {
-          console.log("Payment modal closed by user")
           onClose()
         },
       })
 
-      console.log("Handler object:", handler)
       if (!handler) {
-        console.error("Handler is invalid")
         setError("Failed to initialize Paystack. Please refresh and try again.")
         return
       }
 
-      console.log("Opening Paystack modal...")
-      // Paystack handler uses openIframe() to show the payment modal
       if (typeof handler.openIframe === "function") {
         handler.openIframe()
       } else if (typeof handler.pay === "function") {
         handler.pay()
       } else {
-        console.error("Neither openIframe nor pay method found on handler")
         setError("Failed to open payment modal. Please try again.")
         return
       }
-      console.log("Modal opened successfully")
+
       setPaymentInitialized(true)
-    } catch (error) {
-      console.error("Error initializing payment:", error)
+    } catch (err) {
+      console.error("[PayWithPaystack] Error initializing payment:", err)
       setError("Failed to initialize payment. Please try again.")
     }
-  }, [email, amount, reference, metadata, phoneNumber, onSuccess, onClose])
+  }, [email, amount, reference, resolvedFullName, phoneNumber, metadata, onSuccess, onClose])
 
-  // Auto-initialize payment when ready
+  // Auto-initialize when everything is ready
   useEffect(() => {
-    if (scriptLoaded && !checkingPhone && phoneNumber && !error && !paymentInitialized) {
-      // Initialize payment directly - the iframe will open in the next render
+    if (scriptLoaded && !checkingProfile && phoneNumber && !error && !paymentInitialized) {
       initializePayment()
     }
-  }, [scriptLoaded, checkingPhone, phoneNumber, error, paymentInitialized, initializePayment])
+  }, [scriptLoaded, checkingProfile, phoneNumber, error, paymentInitialized, initializePayment])
+
+  // ── Render states ──────────────────────────────────────────────────────────
 
   if (showPhoneNumberModal) {
-    return (
-      <AddPhoneNumber
-        onPhoneNumberAdded={handlePhoneNumberAdded}
-        onClose={onClose}
-      />
-    )
+    return <AddPhoneNumber onPhoneNumberAdded={handlePhoneNumberAdded} onClose={onClose} />
   }
 
   if (error) {
@@ -302,11 +303,9 @@ export default function PayWithPaystack({
               <p className="text-sm text-gray-600">Something went wrong</p>
             </div>
           </div>
-
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
             <p className="text-red-700 text-sm">{error}</p>
           </div>
-
           <div className="flex gap-3">
             <button
               onClick={onClose}
@@ -331,7 +330,7 @@ export default function PayWithPaystack({
     )
   }
 
-  if (loading || checkingPhone) {
+  if (loading || checkingProfile) {
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-2xl p-8 max-w-md w-full shadow-2xl">
@@ -340,17 +339,17 @@ export default function PayWithPaystack({
               <CreditCard className="w-8 h-8 text-purple-600" />
             </div>
             <h3 className="text-xl font-bold text-gray-900 mb-2">
-              {checkingPhone ? "Verifying Information..." : "Initializing Payment..."}
+              {checkingProfile ? "Verifying Information..." : "Initializing Payment..."}
             </h3>
             <p className="text-gray-600 mb-6">
-              {checkingPhone
+              {checkingProfile
                 ? "Please wait while we verify your details"
                 : "Please wait while we connect to Paystack"}
             </p>
             <div className="flex items-center gap-2">
               <Loader2 className="w-5 h-5 animate-spin text-purple-600" />
               <span className="text-purple-600 font-medium">
-                {checkingPhone ? "Checking..." : "Loading..."}
+                {checkingProfile ? "Checking..." : "Loading..."}
               </span>
             </div>
           </div>
@@ -359,7 +358,6 @@ export default function PayWithPaystack({
     )
   }
 
-  // Show a minimal loading state while Paystack iframe opens
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl p-8 max-w-md w-full shadow-2xl">
@@ -369,10 +367,7 @@ export default function PayWithPaystack({
           </div>
           <h3 className="text-xl font-bold text-gray-900 mb-2">Opening Payment Gateway...</h3>
           <p className="text-gray-600 mb-6">The Paystack payment window should open shortly</p>
-          <button
-            onClick={onClose}
-            className="text-sm text-gray-500 hover:text-gray-700 underline"
-          >
+          <button onClick={onClose} className="text-sm text-gray-500 hover:text-gray-700 underline">
             Cancel Payment
           </button>
         </div>

@@ -24,6 +24,16 @@ import { randomUUID } from "crypto";
 export const ACCESS_TOKEN_TTL_SECONDS = 900;       // 15 min
 export const REFRESH_TOKEN_TTL_DAYS   = 30;
 
+// ── Cookie names (user portal) ──────────────────────────────────────────────
+// Defined here (a plain lib module) rather than in route.ts, since Next.js
+// route.ts files may only export HTTP method handlers and a small set of
+// config options — any other export is a build-time error. Anything that
+// needs these names (e.g. server components reading the session cookie)
+// should import from here instead of from the route file.
+export const COOKIE_ACCESS_TOKEN     = "spotix_u_at";
+export const COOKIE_REFRESH_TOKEN    = "spotix_u_rt";
+export const COOKIE_REFRESH_TOKEN_ID = "spotix_u_rtid";
+
 export type PortalAudience = "spotix-booker" | "spotix-user";
 
 export interface SpotixTokenPayload extends JWTPayload {

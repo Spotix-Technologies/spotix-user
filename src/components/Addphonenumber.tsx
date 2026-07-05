@@ -2,8 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { X, Phone, Loader2 } from "lucide-react"
-import { auth, db } from "@/app/lib/firebase"
-import { doc, updateDoc } from "firebase/firestore"
+import { authFetch } from "@/app/lib/auth-client-user"
 
 interface AddPhoneNumberProps {
   onPhoneNumberAdded: (phoneNumber: string) => void
@@ -61,24 +60,22 @@ export default function AddPhoneNumber({ onPhoneNumberAdded, onClose }: AddPhone
     setLoading(true)
 
     try {
-      const user = auth.currentUser
-      if (!user) {
-        setError("You must be logged in")
+      const formattedPhone = formatPhoneNumber(phoneNumber)
+
+      const res = await authFetch("/api/v1/user/me", {
+        method: "PATCH",
+        body:   JSON.stringify({ phoneNumber: formattedPhone }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setError(data.message || "Failed to save phone number. Please try again.")
         setLoading(false)
         return
       }
 
-      const formattedPhone = formatPhoneNumber(phoneNumber)
-
-      // Update user document in Firestore
-      const userDocRef = doc(db, "users", user.uid)
-      await updateDoc(userDocRef, {
-        phoneNumber: formattedPhone,
-        updatedAt: new Date().toISOString(),
-      })
-
       console.log("Phone number saved successfully:", formattedPhone)
-      
+
       // Call parent callback with formatted phone number
       onPhoneNumberAdded(formattedPhone)
     } catch (error) {

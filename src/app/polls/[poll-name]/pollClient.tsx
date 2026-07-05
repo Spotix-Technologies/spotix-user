@@ -2,85 +2,193 @@
 
 import { useState, useMemo, useEffect } from "react"
 import Link from "next/link"
-import { getPollStatus, type VoteData, type ContestantData } from "@/app/lib/voting-utils"
-import { Crown, Maximize2, X } from "lucide-react"
-import AddonModal from "./addon"
-import PayWithMonnify from "./PayWithMonnify"
+import { Flag, ChevronDown, ChevronUp, Users, Tag, FolderOpen } from "lucide-react"
+import { getPollStatus, type VoteData, type ContestantData, type CategoryData } from "@/app/lib/voting-utils"
+import { FullscreenModal }  from "./components/FullscreenModal"
+import { VoteModal }        from "./components/VoteModal"
+import { ReportPollModal }  from "./components/ReportPollModal"
+import { ContestantCard }   from "./components/ContestantCard"
 
 interface PollClientProps {
   pollData: VoteData
-  voteId: string
-  userId?: string | null
+  voteId:   string
+  userId?:  string | null
 }
 
 interface TimeRemaining {
-  days: number
-  hours: number
-  minutes: number
-  seconds: number
-  total: number
-}
-
-interface FullscreenModalProps {
-  contestant: ContestantData | null
-  onClose: () => void
+  days: number; hours: number; minutes: number; seconds: number; total: number
 }
 
 function calculateTimeRemaining(targetDate: Date): TimeRemaining {
-  const now = new Date().getTime()
-  const target = targetDate.getTime()
-  const total = target - now
-
-  if (total <= 0) {
-    return { days: 0, hours: 0, minutes: 0, seconds: 0, total: 0 }
+  const total = targetDate.getTime() - Date.now()
+  if (total <= 0) return { days: 0, hours: 0, minutes: 0, seconds: 0, total: 0 }
+  return {
+    total,
+    days:    Math.floor(total / (1000 * 60 * 60 * 24)),
+    hours:   Math.floor((total / (1000 * 60 * 60)) % 24),
+    minutes: Math.floor((total / (1000 * 60)) % 60),
+    seconds: Math.floor((total / 1000) % 60),
   }
-
-  const seconds = Math.floor((total / 1000) % 60)
-  const minutes = Math.floor((total / 1000 / 60) % 60)
-  const hours = Math.floor((total / (1000 * 60 * 60)) % 24)
-  const days = Math.floor(total / (1000 * 60 * 60 * 24))
-
-  return { days, hours, minutes, seconds, total }
 }
 
-function FullscreenModal({ contestant, onClose }: FullscreenModalProps) {
-  if (!contestant) return null
+function fmt(n: number) { return String(n).padStart(2, "0") }
 
+// ─── Suspended Banner ─────────────────────────────────────────────────────────
+
+function SuspendedBanner() {
   return (
-    <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <button
-        onClick={onClose}
-        className="absolute top-4 right-4 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
-      >
-        <X className="w-6 h-6" />
-      </button>
-      
-      <div className="max-w-4xl w-full">
-        <img
-          src={contestant.image}
-          alt={contestant.name}
-          className="w-full h-auto rounded-2xl shadow-2xl"
-        />
-        <div className="mt-6 text-center">
-          <h2 className="text-3xl sm:text-4xl font-bold text-white mb-2">{contestant.name}</h2>
-          <p className="text-white/70 font-mono text-sm">{contestant.contestantId}</p>
+    <div className="mb-8 p-6 rounded-2xl bg-red-50 border-l-4 border-red-600 shadow">
+      <div className="flex items-start gap-3">
+        <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center flex-shrink-0">
+          <Flag className="w-5 h-5 text-red-600" />
+        </div>
+        <div>
+          <p className="font-bold text-red-900 text-lg">This poll has been suspended by Spotix</p>
+          <p className="text-red-700 text-sm mt-1">
+            This poll is currently unavailable due to a policy violation or investigation.
+            Voting and payouts are disabled. If you believe this is an error, please contact Spotix support.
+          </p>
         </div>
       </div>
     </div>
   )
 }
 
+// ─── Category / Sub-category Panel (recursive) ────────────────────────────────
+
+interface CategoryPanelProps {
+  category:     CategoryData
+  depth:        number           // 0 = top-level
+  isActive:     boolean
+  pollStatus:   "active" | "ended" | "notStarted"
+  statsVisible: boolean
+  onVote:       (contestant: ContestantData, cat: CategoryData) => void
+  onFullscreen: (contestant: ContestantData) => void
+}
+
+function CategoryPanel({
+  category, depth, isActive, pollStatus, statsVisible, onVote, onFullscreen,
+}: CategoryPanelProps) {
+  const [open, setOpen] = useState(false)
+
+  const hasSubcategories = (category.subcategories ?? []).length > 0
+  const isLeaf           = !hasSubcategories
+
+  // For leaf nodes compute vote totals
+  const totalVotes = isLeaf
+    ? category.contestants.reduce((s, c) => s + (c.votes ?? 0), 0)
+    : 0
+
+  const winner = isLeaf && pollStatus === "ended" && category.contestants.length > 0
+    ? category.contestants.reduce((h, c) => ((c.votes ?? 0) > (h.votes ?? 0) ? c : h), category.contestants[0])
+    : null
+
+  const indentStyle = depth > 0
+    ? { marginLeft: `${Math.min(depth * 16, 48)}px` }
+    : {}
+
+  const bgClass = depth === 0
+    ? "bg-white/80 border-slate-200"
+    : depth === 1
+    ? "bg-purple-50/60 border-purple-200/60"
+    : "bg-blue-50/50 border-blue-200/50"
+
+  return (
+    <div style={indentStyle} className={`rounded-2xl border shadow-sm overflow-hidden ${bgClass}`}>
+      {/* Header */}
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between p-4 sm:p-5 hover:bg-black/5 transition-colors text-left"
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0
+            ${depth === 0 ? "bg-[#6b2fa5]/10" : "bg-white/70"}`}>
+            {hasSubcategories
+              ? <FolderOpen className="w-4 h-4 text-[#6b2fa5]" />
+              : <Tag className="w-4 h-4 text-[#6b2fa5]" />}
+          </div>
+          <div className="min-w-0">
+            <p className="font-bold text-slate-900 truncate">{category.name}</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {hasSubcategories
+                ? `${(category.subcategories ?? []).length} sub-categor${(category.subcategories ?? []).length === 1 ? "y" : "ies"}`
+                : `${category.contestants.length} contestant${category.contestants.length !== 1 ? "s" : ""}
+                  ${category.pollPrice > 0 ? ` · ₦${category.pollPrice.toLocaleString()}/vote` : " · Free"}
+                  ${statsVisible && totalVotes > 0 ? ` · ${totalVotes.toLocaleString()} votes` : ""}`
+              }
+            </p>
+          </div>
+        </div>
+        {open ? <ChevronUp className="w-4 h-4 text-slate-400 flex-shrink-0" /> : <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0" />}
+      </button>
+
+      {/* Body */}
+      {open && (
+        <div className="border-t border-inherit">
+          {/* Nested sub-categories */}
+          {hasSubcategories && (
+            <div className="p-3 sm:p-4 space-y-3">
+              {(category.subcategories ?? []).map((sub) => (
+                <CategoryPanel
+                  key={sub.categoryId}
+                  category={sub}
+                  depth={depth + 1}
+                  isActive={isActive}
+                  pollStatus={pollStatus}
+                  statsVisible={statsVisible}
+                  onVote={onVote}
+                  onFullscreen={onFullscreen}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Leaf: contestant grid */}
+          {isLeaf && (
+            <div className="px-4 pb-5 sm:px-5">
+              {category.contestants.length === 0 ? (
+                <p className="text-center py-8 text-slate-400 text-sm">No contestants in this category yet.</p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
+                  {category.contestants.map((c) => (
+                    <ContestantCard
+                      key={c.contestantId}
+                      contestant={c}
+                      isWinner={winner?.contestantId === c.contestantId}
+                      isActive={isActive}
+                      pollStatus={pollStatus}
+                      statsVisible={statsVisible}
+                      totalVotes={totalVotes}
+                      onVoteClick={(cont) => onVote(cont, category)}
+                      onFullscreen={onFullscreen}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Main Client ──────────────────────────────────────────────────────────────
+
 export default function PollClient({ pollData, voteId, userId }: PollClientProps) {
-  const [selectedContestant, setSelectedContestant] = useState<ContestantData | null>(null)
+  const [selectedContestant,   setSelectedContestant]   = useState<ContestantData | null>(null)
+  const [selectedCategory,     setSelectedCategory]     = useState<CategoryData | null>(null)
   const [fullscreenContestant, setFullscreenContestant] = useState<ContestantData | null>(null)
-  const [showAddonModal, setShowAddonModal] = useState(false)
-  const [showPayment, setShowPayment] = useState(false)
-  const [paymentReference, setPaymentReference] = useState<string | null>(null)
-  const [voteCount, setVoteCount] = useState(1)
-  const [userDetails, setUserDetails] = useState<{ name: string; email: string } | null>(null)
-  const [timeRemaining, setTimeRemaining] = useState<TimeRemaining>({ 
-    days: 0, hours: 0, minutes: 0, seconds: 0, total: 0 
+  const [showVoteModal,        setShowVoteModal]         = useState(false)
+  const [showReportModal,      setShowReportModal]       = useState(false)
+  const [timeRemaining,        setTimeRemaining]         = useState<TimeRemaining>({
+    days: 0, hours: 0, minutes: 0, seconds: 0, total: 0,
   })
+
+  const pollType    = pollData.pollType    ?? "single"
+  const isGroup     = pollType === "group"
+  const statsVisible = pollData.statsVisible ?? true
+  const suspended   = pollData.suspended   ?? false
 
   const pollStatus = useMemo(
     () => getPollStatus(pollData.pollStartDate, pollData.pollStartTime, pollData.pollEndDate, pollData.pollEndTime),
@@ -88,363 +196,223 @@ export default function PollClient({ pollData, voteId, userId }: PollClientProps
   )
 
   const targetDate = useMemo(() => {
-    if (pollStatus === "notStarted") {
-      return new Date(`${pollData.pollStartDate}T${pollData.pollStartTime}`)
-    } else if (pollStatus === "active") {
-      return new Date(`${pollData.pollEndDate}T${pollData.pollEndTime}`)
-    }
+    if (pollStatus === "notStarted") return new Date(`${pollData.pollStartDate}T${pollData.pollStartTime}`)
+    if (pollStatus === "active")     return new Date(`${pollData.pollEndDate}T${pollData.pollEndTime}`)
     return null
-  }, [pollStatus, pollData.pollStartDate, pollData.pollStartTime, pollData.pollEndDate, pollData.pollEndTime])
+  }, [pollStatus, pollData])
 
   useEffect(() => {
     if (!targetDate) return
-
-    const updateTimer = () => {
-      setTimeRemaining(calculateTimeRemaining(targetDate))
-    }
-
-    updateTimer()
-    const interval = setInterval(updateTimer, 1000)
-
-    return () => clearInterval(interval)
+    const update = () => setTimeRemaining(calculateTimeRemaining(targetDate))
+    update()
+    const id = setInterval(update, 1000)
+    return () => clearInterval(id)
   }, [targetDate])
 
-  const contestants = pollData.contestants || []
-  const isActive = pollStatus === "active"
+  const contestants  = pollData.contestants ?? []
+  const categories   = pollData.categories  ?? []
+  const isActive     = pollStatus === "active" && !suspended
 
-  // Find contestant with highest votes (only when poll has ended)
-  const highestVoteContestant = useMemo(() => {
+  // Single poll winner
+  const winner = useMemo(() => {
     if (pollStatus !== "ended" || contestants.length === 0) return null
-    
-    return contestants.reduce((highest, current) => {
-      const currentVotes = (current as any).votes || 0
-      const highestVotes = (highest as any).votes || 0
-      return currentVotes > highestVotes ? current : highest
-    }, contestants[0])
+    return contestants.reduce((h, c) => ((c.votes ?? 0) > (h.votes ?? 0) ? c : h), contestants[0])
   }, [contestants, pollStatus])
 
-  const handleVoteClick = (contestant: ContestantData) => {
+  const totalVotesSingle = contestants.reduce((s, c) => s + (c.votes ?? 0), 0)
+
+  /** Recursively count all top-level + sub-categories for the group summary */
+  function countAllCategories(cats: CategoryData[]): number {
+    let n = cats.length
+    for (const cat of cats) n += countAllCategories(cat.subcategories ?? [])
+    return n
+  }
+
+  const handleVoteClick = (c: ContestantData, cat?: CategoryData) => {
     if (!isActive) return
-    setSelectedContestant(contestant)
-    setShowAddonModal(true)
+    setSelectedContestant(c)
+    setSelectedCategory(cat ?? null)
+    setShowVoteModal(true)
   }
-
-  const handleAddonComplete = async (details: { name?: string; email?: string; voteCount: number }) => {
-    setVoteCount(details.voteCount)
-    if (details.name && details.email) {
-      setUserDetails({ name: details.name, email: details.email })
-    }
-    
-    // Create payment reference
-    try {
-      const response = await fetch("/api/v1/vote/payref", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(userId ? { Authorization: `Bearer ${await getUserToken()}` } : {}),
-        },
-        body: JSON.stringify({
-          voteId,
-          creatorId: pollData.creatorId,
-          contestantId: selectedContestant?.contestantId,
-          contestantName: selectedContestant?.name,
-          pollPrice: pollData.pollPrice,
-          voteCount: details.voteCount,
-          totalAmount: pollData.pollPrice * details.voteCount,
-          pollName: pollData.pollName,
-          userId: userId || null,
-          guestName: details.name || null,
-          guestEmail: details.email || null,
-        }),
-      })
-
-      const data = await response.json()
-      
-      if (data.success) {
-        setPaymentReference(data.reference)
-        setShowAddonModal(false)
-        setShowPayment(true)
-      } else {
-        alert("Failed to create payment reference. Please try again.")
-      }
-    } catch (error) {
-      console.error("Error creating payment reference:", error)
-      alert("An error occurred. Please try again.")
-    }
-  }
-
-  const getUserToken = async () => {
-    const { auth } = await import("@/app/lib/firebase")
-    const user = auth.currentUser
-    return user ? await user.getIdToken() : null
-  }
-
-  const formatNumber = (num: number) => String(num).padStart(2, '0')
 
   return (
     <>
-      {/* Header Section */}
-      <div className="mb-8 space-y-4">
-        <Link
-          href="/vote"
-          className="inline-flex items-center text-[#6b2fa5] hover:text-[#5a1f8a] font-medium transition-colors group"
-        >
-          <svg
-            className="w-5 h-5 mr-2 transform group-hover:-translate-x-1 transition-transform"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
+      {/* Back */}
+      <div className="mb-6">
+        <Link href="/vote" className="inline-flex items-center text-[#6b2fa5] hover:text-[#5a1f8a] font-medium transition-colors group">
+          <svg className="w-5 h-5 mr-2 transform group-hover:-translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
           Back to Polls
         </Link>
-        
-        <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 sm:p-8 border border-slate-200 shadow-xl overflow-hidden">
-          {/* Poll Image */}
-          <div className="mb-6 h-48 sm:h-64 rounded-xl overflow-hidden bg-gradient-to-br from-slate-100 to-slate-200 shadow-inner">
-            <img
-              src={pollData.pollImage || "/placeholder.svg"}
-              alt={pollData.pollName}
-              className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"
-            />
+      </div>
+
+      {/* Suspended banner */}
+      {suspended && <SuspendedBanner />}
+
+      {/* Poll header */}
+      <div className="mb-8">
+        <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 sm:p-8 border border-slate-200 shadow-xl">
+          <div className="mb-6 h-48 sm:h-64 rounded-xl overflow-hidden bg-slate-100">
+            <img src={pollData.pollImage || "/placeholder.svg"} alt={pollData.pollName}
+              className="w-full h-full object-cover hover:scale-105 transition-transform duration-500" />
           </div>
+          <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-3">{pollData.pollName}</h1>
+          <p className="text-slate-600 mb-6 leading-relaxed">{pollData.pollDescription}</p>
 
-          {/* Poll Info */}
-          <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-3 bg-gradient-to-r from-[#6b2fa5] to-[#9333ea] bg-clip-text text-transparent">
-            {pollData.pollName}
-          </h1>
-          <p className="text-slate-600 mt-2 mb-6 leading-relaxed">{pollData.pollDescription}</p>
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Status badge */}
+            <span className={`px-4 py-2 rounded-full text-sm font-semibold flex items-center gap-2
+              ${suspended              ? "bg-red-600 text-white"
+              : isActive               ? "bg-green-500 text-white animate-pulse"
+              : pollStatus === "ended" ? "bg-red-500 text-white"
+              : "bg-yellow-500 text-white"}`}>
+              <div className="w-2 h-2 rounded-full bg-white opacity-80" />
+              {suspended ? "Suspended" : pollStatus === "active" ? "Live" : pollStatus === "ended" ? "Ended" : "Upcoming"}
+            </span>
 
-          {/* Status and Stats */}
-          <div className="flex flex-wrap items-center gap-3 mb-4">
-            <span
-              className={`px-4 py-2 rounded-full text-sm font-semibold shadow-md transition-all duration-300 flex items-center gap-2 ${
-                isActive
-                  ? "bg-gradient-to-r from-green-400 to-green-600 text-white animate-pulse"
-                  : pollStatus === "ended"
-                    ? "bg-gradient-to-r from-red-400 to-red-600 text-white"
-                    : "bg-gradient-to-r from-yellow-400 to-yellow-600 text-white"
-              }`}
-            >
-              <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-white animate-pulse' : 'bg-white/70'}`} />
-              {pollStatus === "active" ? "Live" : pollStatus === "ended" ? "Ended" : "Upcoming"}
-            </span>
-            <span className="px-4 py-2 bg-slate-100 text-slate-700 rounded-full text-sm font-semibold shadow-md">
-              ₦{pollData.pollPrice.toLocaleString()} per vote
-            </span>
+            {isGroup ? (
+              <span className="px-4 py-2 bg-purple-100 text-purple-700 rounded-full text-sm font-semibold flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5" /> Group Poll
+              </span>
+            ) : (
+              !suspended && (
+                <span className="px-4 py-2 bg-slate-100 text-slate-700 rounded-full text-sm font-semibold">
+                  {pollData.pollPrice > 0 ? `₦${pollData.pollPrice.toLocaleString()} per vote` : "Free Vote"}
+                </span>
+              )
+            )}
+
+            {/* Report button */}
+            <button onClick={() => setShowReportModal(true)}
+              className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-full border border-slate-200 hover:border-red-200 transition-all">
+              <Flag className="w-3 h-3" /> Report Poll
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Countdown Timer */}
-      {pollStatus !== "ended" && targetDate && (
+      {/* Countdown */}
+      {pollStatus !== "ended" && targetDate && !suspended && (
         <div className="mb-8">
           <div className="bg-gradient-to-r from-[#6b2fa5] to-[#9333ea] rounded-2xl p-6 sm:p-8 shadow-2xl">
-            <h2 className="text-white text-xl sm:text-2xl font-bold text-center mb-6 flex items-center justify-center gap-2">
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
+            <h2 className="text-white text-xl font-bold text-center mb-6">
               {pollStatus === "notStarted" ? "Voting Starts In" : "Voting Ends In"}
             </h2>
-            
             <div className="grid grid-cols-4 gap-3 sm:gap-6 max-w-2xl mx-auto">
-              {/* Days */}
-              <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 sm:p-6 text-center transform hover:scale-105 transition-transform duration-300">
-                <div className="text-3xl sm:text-5xl font-bold text-white mb-2">
-                  {formatNumber(timeRemaining.days)}
+              {([["Days", timeRemaining.days], ["Hours", timeRemaining.hours], ["Minutes", timeRemaining.minutes], ["Seconds", timeRemaining.seconds]] as [string, number][]).map(([label, val]) => (
+                <div key={label} className="bg-white/10 backdrop-blur-md rounded-xl p-4 sm:p-6 text-center">
+                  <div className="text-3xl sm:text-5xl font-bold text-white mb-2">{fmt(val)}</div>
+                  <div className="text-xs sm:text-sm text-white/80 font-semibold uppercase tracking-wider">{label}</div>
                 </div>
-                <div className="text-xs sm:text-sm text-white/80 font-semibold uppercase tracking-wider">
-                  Days
-                </div>
-              </div>
-
-              {/* Hours */}
-              <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 sm:p-6 text-center transform hover:scale-105 transition-transform duration-300">
-                <div className="text-3xl sm:text-5xl font-bold text-white mb-2">
-                  {formatNumber(timeRemaining.hours)}
-                </div>
-                <div className="text-xs sm:text-sm text-white/80 font-semibold uppercase tracking-wider">
-                  Hours
-                </div>
-              </div>
-
-              {/* Minutes */}
-              <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 sm:p-6 text-center transform hover:scale-105 transition-transform duration-300">
-                <div className="text-3xl sm:text-5xl font-bold text-white mb-2">
-                  {formatNumber(timeRemaining.minutes)}
-                </div>
-                <div className="text-xs sm:text-sm text-white/80 font-semibold uppercase tracking-wider">
-                  Minutes
-                </div>
-              </div>
-
-              {/* Seconds */}
-              <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 sm:p-6 text-center transform hover:scale-105 transition-transform duration-300">
-                <div className="text-3xl sm:text-5xl font-bold text-white mb-2">
-                  {formatNumber(timeRemaining.seconds)}
-                </div>
-                <div className="text-xs sm:text-sm text-white/80 font-semibold uppercase tracking-wider">
-                  Seconds
-                </div>
-              </div>
+              ))}
             </div>
           </div>
         </div>
       )}
 
-      {/* Status Message for Ended Polls */}
       {pollStatus === "ended" && (
-        <div className="mb-8 p-6 rounded-2xl border-l-4 bg-gradient-to-r from-red-50 to-red-100 border-red-500 shadow-lg">
-          <div className="flex items-center gap-3">
-            <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <div>
-              <p className="font-bold text-red-900 text-lg">This poll has ended</p>
-              <p className="text-red-700 text-sm mt-1">Voting is no longer available for this poll</p>
-            </div>
-          </div>
+        <div className="mb-8 p-6 rounded-2xl bg-red-50 border-l-4 border-red-500">
+          <p className="font-bold text-red-900">This poll has ended</p>
+          <p className="text-red-700 text-sm mt-1">Voting is no longer available</p>
         </div>
       )}
 
-      {/* Contestants Section Header */}
-      <div className="mb-6">
-        <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-2">
-          Cast Your Vote
-        </h2>
-        <p className="text-slate-600">
-          {isActive 
-            ? "Select your favorite contestant below" 
-            : pollStatus === "notStarted"
-              ? "Contestants will be available when voting starts"
-              : "View the final standings"
-          }
-        </p>
-      </div>
+      {/* ── GROUP POLL ───────────────────────────────────────────────────── */}
+      {isGroup && (
+        <div className="space-y-3">
+          <div className="mb-4">
+            <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-1">
+              {pollStatus === "ended" ? "Final Results" : "Award Categories"}
+            </h2>
+            <p className="text-slate-600">
+              {isActive
+                ? "Open a category and vote for your favourite contestant"
+                : pollStatus === "notStarted"
+                ? "Categories will be available once voting starts"
+                : "Voting has ended — see the final results below"}
+            </p>
+          </div>
 
-      {/* Contestants Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {contestants.map((contestant: ContestantData) => {
-          const isHighest = pollStatus === "ended" && highestVoteContestant?.contestantId === contestant.contestantId
-          const contestantVotes = (contestant as any).votes || 0
-          
-          return (
-            <div
-              key={contestant.contestantId}
-              className="rounded-2xl overflow-hidden border-2 transition-all duration-300 transform hover:scale-[1.02] border-slate-200 hover:border-slate-300 bg-white/80 hover:bg-white hover:shadow-xl"
-            >
-              {/* Contestant Image */}
-              <div className="relative h-56 overflow-hidden bg-gradient-to-br from-slate-100 to-slate-200">
-                <img
-                  src={contestant.image || "/placeholder.svg?height=224&width=400&query=contestant"}
-                  alt={contestant.name}
-                  className="w-full h-full object-cover transition-transform duration-500 hover:scale-110"
-                />
-                
-                {/* Highest Vote Badge - Only shown when poll has ended */}
-                {isHighest && (
-                  <div className="absolute top-3 left-3 bg-gradient-to-r from-yellow-400 to-yellow-600 text-white px-3 py-2 rounded-full shadow-lg flex items-center gap-2 animate-bounce">
-                    <Crown className="w-4 h-4" />
-                    <span className="text-xs font-bold">Highest Vote</span>
-                  </div>
-                )}
-
-                {/* Fullscreen Button */}
-                <button
-                  onClick={() => setFullscreenContestant(contestant)}
-                  className="absolute top-3 right-3 bg-black/50 hover:bg-black/70 text-white p-2 rounded-full transition-colors backdrop-blur-sm"
-                >
-                  <Maximize2 className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Contestant Info */}
-              <div className="p-5 sm:p-6">
-                <h3 className="text-lg sm:text-xl font-bold text-slate-900 mb-2 line-clamp-1">
-                  {contestant.name}
-                </h3>
-                <p className="text-xs text-slate-500 mb-4 font-mono break-all bg-slate-50 px-2 py-1 rounded">
-                  {contestant.contestantId}
-                </p>
-
-                {/* Show votes only when poll has ended */}
-                {pollStatus === "ended" && (
-                  <div className="mb-4 p-3 bg-gradient-to-r from-[#6b2fa5]/10 to-[#9333ea]/10 rounded-lg">
-                    <p className="text-sm text-slate-600 font-medium">Total Votes</p>
-                    <p className="text-2xl font-bold text-[#6b2fa5]">{contestantVotes.toLocaleString()}</p>
-                  </div>
-                )}
-
-                {/* Vote Button */}
-                <button
-                  onClick={() => handleVoteClick(contestant)}
-                  disabled={!isActive}
-                  className={`w-full py-3 px-4 rounded-xl font-semibold transition-all duration-300 transform flex items-center justify-center gap-2 ${
-                    isActive
-                      ? "bg-gradient-to-r from-[#6b2fa5] to-[#9333ea] text-white hover:shadow-lg hover:shadow-[#6b2fa5]/50 active:scale-95"
-                      : "bg-slate-100 text-slate-400 cursor-not-allowed opacity-60"
-                  }`}
-                >
-                  {isActive ? (
-                    <>
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                      Vote Now
-                    </>
-                  ) : pollStatus === "notStarted" ? (
-                    "Coming Soon"
-                  ) : (
-                    "Voting Ended"
-                  )}
-                </button>
-              </div>
+          {categories.length === 0 ? (
+            <div className="text-center py-16 bg-white/50 rounded-2xl border-2 border-dashed border-slate-300">
+              <p className="text-slate-500 font-medium">No categories added yet</p>
             </div>
-          )
-        })}
-      </div>
-
-      {contestants.length === 0 && (
-        <div className="text-center py-16 bg-white/50 rounded-2xl backdrop-blur-sm border-2 border-dashed border-slate-300">
-          <svg className="w-20 h-20 mx-auto text-slate-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-            />
-          </svg>
-          <p className="text-slate-600 font-semibold text-lg mb-2">No contestants yet</p>
-          <p className="text-slate-500 text-sm">Contestants will appear here once they're added to the poll</p>
+          ) : (
+            categories.map((cat) => (
+              <CategoryPanel
+                key={cat.categoryId}
+                category={cat}
+                depth={0}
+                isActive={isActive}
+                pollStatus={pollStatus}
+                statsVisible={statsVisible}
+                onVote={handleVoteClick}
+                onFullscreen={setFullscreenContestant}
+              />
+            ))
+          )}
         </div>
+      )}
+
+      {/* ── SINGLE POLL ──────────────────────────────────────────────────── */}
+      {!isGroup && (
+        <>
+          <div className="mb-6">
+            <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-2">
+              {pollStatus === "ended" ? "Final Results" : "Cast Your Vote"}
+            </h2>
+            <p className="text-slate-600">
+              {isActive ? "Pick a contestant and choose how many votes to cast"
+              : pollStatus === "notStarted" ? "Voting hasn't started yet"
+              : "Final standings"}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {contestants.map((c) => (
+              <ContestantCard
+                key={c.contestantId}
+                contestant={c}
+                isWinner={pollStatus === "ended" && winner?.contestantId === c.contestantId}
+                isActive={isActive}
+                pollStatus={pollStatus}
+                statsVisible={statsVisible}
+                totalVotes={totalVotesSingle}
+                onVoteClick={handleVoteClick}
+                onFullscreen={setFullscreenContestant}
+              />
+            ))}
+          </div>
+
+          {contestants.length === 0 && (
+            <div className="text-center py-16 bg-white/50 rounded-2xl border-2 border-dashed border-slate-300">
+              <p className="text-slate-500 font-medium">No contestants added yet</p>
+            </div>
+          )}
+        </>
       )}
 
       {/* Modals */}
-      <FullscreenModal 
-        contestant={fullscreenContestant} 
-        onClose={() => setFullscreenContestant(null)} 
-      />
+      <FullscreenModal contestant={fullscreenContestant} onClose={() => setFullscreenContestant(null)} />
 
-      <AddonModal
-        isOpen={showAddonModal}
-        onClose={() => setShowAddonModal(false)}
-        onComplete={handleAddonComplete}
-        contestant={selectedContestant}
-        pollPrice={pollData.pollPrice}
-        isLoggedIn={!!userId}
-      />
+      {showVoteModal && selectedContestant && (
+        <VoteModal
+          contestant={selectedContestant}
+          pollData={pollData}
+          voteId={voteId}
+          userId={userId}
+          categoryId={selectedCategory?.categoryId}
+          categoryPrice={selectedCategory?.pollPrice}
+          onClose={() => { setShowVoteModal(false); setSelectedContestant(null); setSelectedCategory(null) }}
+        />
+      )}
 
-      {showPayment && paymentReference && (
-        <PayWithMonnify
-          reference={paymentReference}
-          amount={pollData.pollPrice * voteCount}
-          email={userDetails?.email || ""}
-          onClose={() => setShowPayment(false)}
-          onSuccess={() => {
-            alert("Payment successful!")
-            setShowPayment(false)
-          }}
+      {showReportModal && (
+        <ReportPollModal
+          pollId={voteId}
+          pollName={pollData.pollName}
+          onClose={() => setShowReportModal(false)}
         />
       )}
     </>

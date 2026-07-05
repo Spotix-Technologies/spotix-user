@@ -30,6 +30,7 @@ import BookerDetailsSection from "./booker-details-section"
 import BuyTicketDialog from "./buy-ticket-dialog"
 import MerchSection from "./merch-section"
 import { ReportModal } from "./report-modal"
+import VotingSection from "./voting"
 
 import type { EventType } from "./page"
 
@@ -592,6 +593,12 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
                   createdBy={eventData.createdBy}
                 />
               </div>
+              {eventData.votingId && (
+                <VotingSection
+                  votingId={eventData.votingId}
+                  votingPollName={eventData.votingPollName ?? null}
+                />
+              )}
             </div>
           </div>
         </div>

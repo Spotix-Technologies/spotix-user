@@ -9,10 +9,16 @@ import {
 import UserHeader from "@/components/UserHeader"
 import Footer from "@/components/footer"
 
+interface TicketTier {
+  label: string
+  price: string
+}
+
 interface DiscoverEvent {
   id: string; state: string; eventName: string; description: string
   host: string; location: string; genre: string; eventStart: string
-  eventEnd: string | null; ticketPolicy: string; isSpotixEvent: boolean
+  eventEnd: string | null; ticketPolicy: string; ticketTiers: TicketTier[] | null
+  isSpotixEvent: boolean
   spotixEventId: string | null; ticketLink: string | null
   imageUrl: string; postedBy: string; createdAt: string
 }
@@ -321,11 +327,34 @@ export default function DiscoverDetailClient({ state, id }: { state: string; id:
             </div>
 
             {/* Ticket policy */}
-            <div className="flex items-center gap-2 pt-1">
-              <Tag className="w-4 h-4 text-gray-400" />
-              <span className={`text-xs font-bold px-3 py-1 rounded-full ${event.ticketPolicy === "free" ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-600"}`}>
-                {event.ticketPolicy === "free" ? "Free Event" : "Tickets: Pricing TBD"}
-              </span>
+            <div className="pt-1 space-y-2">
+              <div className="flex items-center gap-2">
+                <Tag className="w-4 h-4 text-gray-400" />
+                {event.ticketPolicy === "free" ? (
+                  <span className="text-xs font-bold px-3 py-1 rounded-full bg-emerald-100 text-emerald-700">Free Event</span>
+                ) : event.ticketPolicy === "listed" && event.ticketTiers && event.ticketTiers.length > 0 ? (
+                  <span className="text-xs font-bold px-3 py-1 rounded-full bg-[#6b2fa5]/10 text-[#6b2fa5]">
+                    {event.ticketTiers.length === 1 ? "Paid Event" : `${event.ticketTiers.length} Ticket Tiers`}
+                  </span>
+                ) : (
+                  <span className="text-xs font-bold px-3 py-1 rounded-full bg-gray-100 text-gray-600">
+                    {event.ticketPolicy === "tbd" ? "Tickets: Pricing TBD" : "Paid Event"}
+                  </span>
+                )}
+              </div>
+
+              {event.ticketPolicy === "listed" && event.ticketTiers && event.ticketTiers.length > 0 && (
+                <div className="rounded-xl border border-gray-100 divide-y divide-gray-100 overflow-hidden">
+                  {event.ticketTiers.map((tier, i) => (
+                    <div key={i} className="flex items-center justify-between px-4 py-2.5 bg-gray-50/50">
+                      <span className="text-sm text-gray-700">{tier.label || `Tier ${i + 1}`}</span>
+                      <span className="text-sm font-bold text-gray-900">
+                        {tier.price ? `₦${Number(tier.price).toLocaleString("en-NG")}` : "—"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Description */}

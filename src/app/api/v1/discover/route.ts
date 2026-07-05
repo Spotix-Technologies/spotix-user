@@ -78,6 +78,7 @@ export async function GET(request: NextRequest) {
         eventStart: d.eventStart,
         eventEnd: d.eventEnd || null,
         ticketPolicy: d.ticketPolicy,
+        ticketTiers: d.ticketPolicy === "listed" ? (d.ticketTiers || []) : null,
         isSpotixEvent: d.isSpotixEvent,
         spotixEventId: d.isSpotixEvent ? d.spotixEventId : null,
         ticketLink: !d.isSpotixEvent ? d.ticketLink : null,

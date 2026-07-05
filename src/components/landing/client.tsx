@@ -11,7 +11,8 @@ import Creators from "./Creators";
 import BookerCTA from "./BookerCTA";
 import Newsletter from "./News";
 import CTA from "./CTA";
-import Footer from "@/components/footer";
+import Dialog from "./dialog";
+import { Footer } from "./footer";
 import { useLenisInit } from "./useLenis"
 
 export default function LandingClient() {
@@ -28,6 +29,7 @@ export default function LandingClient() {
   return (
     <>
       <Preloader />
+      <Dialog />
       <div
         className={`min-h-screen transition-opacity duration-500 ${
           isLoaded ? "opacity-100" : "opacity-0"

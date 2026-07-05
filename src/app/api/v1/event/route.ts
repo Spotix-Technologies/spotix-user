@@ -78,7 +78,9 @@ export async function GET(request: NextRequest) {
       organizerId: organizerId,
       likes: eventData?.likes || 0,
       likedBy: eventData?.likedBy || [],
-      allowAgents: eventData?.allowAgents || false,
+      allowAgents:      eventData?.allowAgents      || false,
+      votingId:         eventData?.votingId         ?? null,
+      votingPollName:   eventData?.votingPollName   ?? null,
     }
 
 

@@ -1,122 +1,195 @@
+/**
+ * src/app/api/v1/vote/payref/route.ts
+ *
+ * POST /api/v1/vote/payref
+ *
+ * Creates a Paystack payment reference for a voting purchase and stores a
+ * pending document in the `Reference` collection (same collection used by
+ * ticket purchases — see backend v1/ticket.js).
+ *
+ * Reference format : sptx-vt-{timestamp}
+ * transactionType  : voting_purchase
+ *
+ * Supports both single and group polls (categoryId is optional but
+ * required for group polls so the webhook knows which category to update).
+ * Also stores buyerBearsBurden + serviceFee for payout calculations.
+ */
+
 import { NextRequest, NextResponse } from "next/server"
 import { adminDb, adminAuth } from "@/app/lib/firebase-admin"
 
 export async function POST(request: NextRequest) {
-  try {
-    // Parse request body
-    const body = await request.json()
-    const {
-      voteId,
-      creatorId,
-      contestantId,
-      contestantName,
-      pollPrice,
-      voteCount,
-      totalAmount,
-      pollName,
-      userId,
-      guestName,
-      guestEmail,
-    } = body
+  let body: Record<string, any>
+  try { body = await request.json() }
+  catch { return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 }) }
 
-    // Validate required fields
-    if (
-      !voteId ||
-      !creatorId ||
-      !contestantId ||
-      !contestantName ||
-      pollPrice === undefined ||
-      voteCount === undefined ||
-      totalAmount === undefined
-    ) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
-    }
+  const {
+    pollId,
+    voteId,          // legacy alias
+    creatorId,
+    contestantId,
+    contestantName,
+    pollPrice,
+    voteCount,
+    totalAmount,
+    pollName,
+    categoryId,      // group polls
+    buyerBearsBurden,
+    serviceFee,
+    // Identity
+    userId,
+    guestName,
+    guestEmail,
+    guestPhone,
+  } = body
 
-    // If userId is provided, verify authentication
-    let verifiedUserId = null
-    if (userId) {
-      const authHeader = request.headers.get("Authorization")
-      if (authHeader && authHeader.startsWith("Bearer ")) {
-        const idToken = authHeader.split("Bearer ")[1]
-        try {
-          const decodedToken = await adminAuth.verifyIdToken(idToken)
-          verifiedUserId = decodedToken.uid
-        } catch (error) {
-          console.log("Token verification failed:", error)
-          // Continue as guest if token verification fails
-        }
-      }
-    }
+  const resolvedPollId = pollId ?? voteId
 
-    // Validate guest details if not logged in
-    if (!verifiedUserId && (!guestName || !guestEmail)) {
-      return NextResponse.json({ error: "Guest name and email are required for non-authenticated users" }, { status: 400 })
-    }
-
-    // Generate unique reference
-    const timestamp = Date.now()
-    const reference = `SPTX-REF-${timestamp}`
-
-    // Prepare metadata for Firestore
-    const paymentReference = {
-      reference,
-      voteId,
-      creatorId,
-      contestantId,
-      contestantName,
-      pollName: pollName || "",
-      pollPrice: Number(pollPrice),
-      voteCount: Number(voteCount),
-      totalAmount: Number(totalAmount),
-      vendor: "monnify",
-      status: "pending",
-      paymentCreationDate: new Date().toISOString(),
-      paymentCreationTimestamp: timestamp,
-
-      // User or guest info
-      userId: verifiedUserId || null,
-      isGuest: !verifiedUserId,
-      guestName: verifiedUserId ? null : guestName,
-      guestEmail: verifiedUserId ? null : guestEmail,
-
-      // Metadata for Monnify
-      metadata: {
-        voteId,
-        contestantId,
-        contestantName,
-        pollName,
-        voteCount,
-        userType: verifiedUserId ? "registered" : "guest",
-      },
-
-      // Timestamps
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }
-
-    // Store in Firestore Reference collection
-    const referenceDocRef = adminDb.collection("Reference").doc(reference)
-    await referenceDocRef.set(paymentReference)
-
-    console.log(`Vote payment reference created: ${reference}`)
-
-    return NextResponse.json(
-      {
-        success: true,
-        reference,
-        message: "Payment reference created successfully",
-        metadata: paymentReference.metadata,
-      },
-      { status: 201 }
-    )
-  } catch (error) {
-    console.error("Error creating vote payment reference:", error)
-    return NextResponse.json(
-      {
-        error: "Internal server error",
-        details: error instanceof Error ? error.message : "Unknown error",
-      },
-      { status: 500 }
-    )
+  // ── Validate required fields ───────────────────────────────────────────────
+  if (!resolvedPollId || !creatorId || !contestantId || !contestantName) {
+    return NextResponse.json({ error: "Missing required poll/contestant fields" }, { status: 400 })
   }
+  if (pollPrice === undefined || voteCount === undefined || totalAmount === undefined) {
+    return NextResponse.json({ error: "Missing pricing fields" }, { status: 400 })
+  }
+  if (Number(voteCount) < 1) {
+    return NextResponse.json({ error: "voteCount must be at least 1" }, { status: 400 })
+  }
+
+  // ── Poll existence & suspension check ─────────────────────────────────────
+  try {
+    const pollSnap = await adminDb.collection("voting").doc(resolvedPollId).get()
+    if (!pollSnap.exists) {
+      return NextResponse.json({ error: "Poll not found" }, { status: 404 })
+    }
+    const pd = pollSnap.data()!
+    if (pd.suspended === true) {
+      return NextResponse.json({ error: "This poll has been suspended and is not accepting votes" }, { status: 403 })
+    }
+  } catch (err) {
+    console.error("[vote/payref] Poll fetch error:", err)
+    return NextResponse.json({ error: "Failed to verify poll" }, { status: 500 })
+  }
+
+  // ── Resolve payer identity ─────────────────────────────────────────────────
+  let verifiedUserId: string | null = null
+  let payerEmail: string | null = null
+  let payerName:  string | null = null
+  let payerPhone: string | null = null
+
+  if (userId) {
+    const authHeader = request.headers.get("Authorization")
+    if (authHeader?.startsWith("Bearer ")) {
+      try {
+        const decoded      = await adminAuth.verifyIdToken(authHeader.split("Bearer ")[1])
+        verifiedUserId     = decoded.uid
+        const userDoc      = await adminDb.collection("users").doc(verifiedUserId).get()
+        if (userDoc.exists) {
+          const ud = userDoc.data()!
+          payerEmail = ud.email       ?? decoded.email ?? null
+          payerName  = ud.fullName    ?? ud.displayName ?? null
+          payerPhone = ud.phoneNumber ?? ud.phone ?? null
+        } else {
+          payerEmail = decoded.email ?? null
+        }
+      } catch { /* Invalid token — guest path */ }
+    }
+  }
+
+  if (!verifiedUserId) {
+    if (!guestEmail?.trim() || !guestName?.trim()) {
+      return NextResponse.json(
+        { error: "Guest name and email are required for non-authenticated users" },
+        { status: 400 },
+      )
+    }
+    payerEmail = guestEmail.trim()
+    payerName  = guestName.trim()
+    payerPhone = guestPhone?.trim() ?? null
+  }
+
+  // ── Amount sanity check ────────────────────────────────────────────────────
+  // totalAmount already includes service fee if buyerBearsBurden=true
+  // We verify the base amount is correct; service fee is passed separately
+  const baseExpected = Number(pollPrice) * Number(voteCount)
+  const feeAmount    = Number(serviceFee ?? 0)
+  const fullExpected = baseExpected + feeAmount
+  if (Math.round(fullExpected) !== Math.round(Number(totalAmount))) {
+    return NextResponse.json({ error: "Amount mismatch — recalculate and retry" }, { status: 400 })
+  }
+
+  // ── Reference generation ───────────────────────────────────────────────────
+  const timestamp = Date.now()
+  const reference = `sptx-vt-${timestamp}`
+
+  // ── Store in Reference collection ──────────────────────────────────────────
+  const refDoc: Record<string, any> = {
+    reference,
+    transactionType: "voting_purchase",
+
+    // Poll details — both field name aliases for backward compat
+    pollId:         resolvedPollId,
+    voteId:         resolvedPollId,
+    organizerId:    creatorId,
+    creatorId,
+    contestantId,
+    contestantName: contestantName ?? "",
+    pollName:       pollName ?? "",
+    pollPrice:      Number(pollPrice),
+    voteCount:      Number(voteCount),
+    totalAmount:    fullExpected,
+
+    // Royalty / fee tracking
+    buyerBearsBurden: buyerBearsBurden ?? true,
+    serviceFee:       feeAmount,
+
+    // Payer
+    userId:     verifiedUserId ?? null,
+    isGuest:    !verifiedUserId,
+    payerName:  payerName  ?? null,
+    payerEmail: payerEmail ?? null,
+    payerPhone: payerPhone ?? null,
+    guestName:  !verifiedUserId ? payerName  : null,
+    guestEmail: !verifiedUserId ? payerEmail : null,
+
+    status:  "pending",
+    vendor:  "paystack",
+
+    createdAt:                new Date().toISOString(),
+    updatedAt:                new Date().toISOString(),
+    paymentCreationTimestamp: timestamp,
+
+    metadata: {
+      pollId:        resolvedPollId,
+      contestantId,
+      contestantName,
+      pollName,
+      voteCount:     Number(voteCount),
+      userType:      verifiedUserId ? "registered" : "guest",
+    },
+  }
+
+  // Only add categoryId to the ref if this is a group poll vote
+  if (categoryId) {
+    refDoc.categoryId              = categoryId
+    refDoc.metadata.categoryId     = categoryId
+  }
+
+  try {
+    await adminDb.collection("Reference").doc(reference).set(refDoc)
+  } catch (err) {
+    console.error("[vote/payref] Firestore write error:", err)
+    return NextResponse.json({ error: "Failed to store payment reference" }, { status: 500 })
+  }
+
+  return NextResponse.json(
+    {
+      success:    true,
+      reference,
+      payerName:  payerName  ?? null,
+      payerEmail: payerEmail ?? null,
+      payerPhone: payerPhone ?? null,
+    },
+    { status: 201 },
+  )
 }

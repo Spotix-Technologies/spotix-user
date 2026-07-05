@@ -3,11 +3,23 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { ArrowLeft, ShieldCheck, X } from "lucide-react"
-import { auth, db } from "../lib/firebase"
-import { onAuthStateChanged } from "firebase/auth"
+import {
+  getSessionUser,
+  getAccessToken,
+  authFetch,
+  type SessionUser,
+} from "@/app/lib/auth-client-user"
+// NOTE: /api/v1/iwss and /api/v1/create-pay-ref are legacy routes that still
+// verify a genuine Firebase ID token server-side (adminAuth.verifyIdToken) —
+// they haven't been migrated to the spotix_u_at JWT yet. The login flow
+// intentionally keeps a real Firebase client session alive alongside the
+// JWT session specifically so these two calls keep working. Everything else
+// in this file (who's logged in, profile prefill) now uses the JWT session
+// via auth-client-user.ts, matching the booker portal's auth model.
+import { auth } from "../lib/firebase"
+import { onAuthStateChanged, type User as FirebaseUser } from "firebase/auth"
 import UserHeader from "@/components/UserHeader"
 import Footer from "@/components/footer"
-import { doc, getDoc } from "firebase/firestore"
 import PayWithPaystack from "@/components/PayWithPaystack"
 import { calculateVATFee } from "@/utils/priceUtility"
 
@@ -18,6 +30,16 @@ import Referral from "./helpers/referral"
 import PaymentMethods from "./helpers/payment-methods"
 import EventSurveyForm from "./helpers/event-survey-form"
 import GuestCheckoutForm from "./helpers/guest-checkout-form"
+
+/** Resolves once Firebase Auth has restored its persisted session (or confirmed there is none). */
+function waitForFirebaseUser(): Promise<FirebaseUser | null> {
+  return new Promise((resolve) => {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      unsubscribe()
+      resolve(firebaseUser)
+    })
+  })
+}
 
 interface PaymentData {
   eventId: string
@@ -62,7 +84,7 @@ interface UserData {
 
 export default function PaymentClient() {
   const router = useRouter()
-  const [user, setUser] = useState<any | null>(null)
+  const [user, setUser] = useState<SessionUser | null>(null)
   const [userData, setUserData] = useState<UserData | null>(null)
   const [paymentData, setPaymentData] = useState<PaymentData | null>(null)
   const [walletBalance, setWalletBalance] = useState(0)
@@ -175,21 +197,28 @@ export default function PaymentClient() {
   }, [paymentData, cart, userData])
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser) {
-        setUser(currentUser)
-        await fetchUserData(currentUser.uid)
-        await fetchWalletData(currentUser.uid)
-        // Only set loading to false after user data is fetched
+    let cancelled = false
+
+    const init = async () => {
+      // Use the JWT session (same system the booker portal uses) instead of
+      // Firebase onAuthStateChanged — our JWT is the source of truth for
+      // "is this person logged in", not Firebase client auth state.
+      const sessionUser = await getSessionUser()
+      if (cancelled) return
+
+      if (sessionUser) {
+        setUser(sessionUser)
+        await fetchUserData()
+        await fetchWalletData()
         setDataLoading(false)
       } else {
-        // Allow guest checkout - don't force redirect
+        // Allow guest checkout — don't force redirect
         setUser(null)
-        // Don't set dataLoading to false here - let payment data loading handle it
       }
-    })
+    }
 
-    return () => unsubscribe()
+    init()
+    return () => { cancelled = true }
   }, [router])
 
   useEffect(() => {
@@ -240,19 +269,19 @@ export default function PaymentClient() {
     loadPaymentData()
   }, [])
 
-  const fetchUserData = async (userId: string) => {
+  const fetchUserData = async () => {
     try {
-      const userDocRef = doc(db, "users", userId)
-      const userDoc = await getDoc(userDocRef)
-
-      if (userDoc.exists()) {
-        const data = userDoc.data()
-        setUserData({
-          fullName: data.fullName || data.username || "Valued Customer",
-          username: data.username,
-          email: data.email || "",
-        })
-      }
+      // Never read Firestore directly from the client — go through the
+      // Admin-SDK-backed /api/v1/user/me route, same as the rest of the app.
+      const res = await authFetch("/api/v1/user/me")
+      if (!res.ok) return
+      const data = await res.json()
+      if (!data.authenticated) return
+      setUserData({
+        fullName: data.fullName || data.username || "Valued Customer",
+        username: data.username,
+        email:    data.email || "",
+      })
     } catch (error) {
       console.error("Error fetching user data:", error)
     }
@@ -299,11 +328,12 @@ export default function PaymentClient() {
     }
   }
 
-  const fetchWalletData = async (userId: string) => {
+  const fetchWalletData = async () => {
     try {
+      const firebaseUser = await waitForFirebaseUser()
       const response = await fetch("/api/v1/iwss", {
         headers: {
-          Authorization: `Bearer ${await auth.currentUser?.getIdToken()}`,
+          Authorization: `Bearer ${(await firebaseUser?.getIdToken()) ?? ""}`,
         },
       })
 
@@ -344,9 +374,13 @@ const fetchReferralCodes = async (eventId: string) => {
     try {
       const response = await fetch("/api/v1/discount", {
         method: "POST",
+        credentials: "same-origin",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${await auth.currentUser?.getIdToken()}`,
+          // Discount validation must keep working for guests — only attach
+          // the Authorization header when we actually have a session token.
+          // (Cookies are also sent automatically via same-origin credentials.)
+          ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}),
         },
         body: JSON.stringify({
           code: discountCode.trim(),
@@ -507,14 +541,18 @@ const fetchReferralCodes = async (eventId: string) => {
         "Content-Type": "application/json",
       }
 
-      // Only add auth header if user is authenticated
-      if (user && auth.currentUser) {
-        const idToken = await auth.currentUser.getIdToken()
-        headers.Authorization = `Bearer ${idToken}`
+      // /api/v1/create-pay-ref (and /api/v1/ref/free) still verify a real
+      // Firebase ID token server-side — only add this for logged-in users;
+      // guests must still be able to create a reference.
+      if (user) {
+        const firebaseUser = await waitForFirebaseUser()
+        const idToken = await firebaseUser?.getIdToken()
+        if (idToken) headers.Authorization = `Bearer ${idToken}`
       }
 
       const response = await fetch(endpoint, {
         method: "POST",
+        credentials: "same-origin",
         headers,
         body: JSON.stringify(requestBody),
       })
@@ -877,6 +915,11 @@ const totalAmount = cartSubtotal + cartTotalVat
           reference={paystackReference}
           isGuest={!user}
           userId={user?.uid || null}
+          // Pass name + phone so Paystack prefills the checkout form.
+          // For logged-in users PayWithPaystack re-fetches from Firestore
+          // internally; for guests we must supply the values from state.
+          fullName={user ? (userData.fullName ?? null) : (guestFullName || null)}
+          phone={user ? null : (guestPhone || null)}
           metadata={{
             eventId: paymentData.eventId,
             eventName: paymentData.eventName,

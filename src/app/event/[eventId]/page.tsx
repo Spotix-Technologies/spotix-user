@@ -33,6 +33,8 @@ export interface EventType {
   organizerId?: string
   allowAgents?: boolean
   suspended?: boolean
+  votingId?: string | null
+  votingPollName?: string | null
 }
 
 async function fetchEventData(eventId: string): Promise<EventType | null> {
@@ -69,8 +71,10 @@ async function fetchEventData(eventId: string): Promise<EventType | null> {
       likeCount: d?.likeCount || 0,
       createdBy: organizerId,
       organizerId: organizerId,
-      allowAgents: d?.allowAgents || false,
-      suspended: d?.suspended || false,
+      allowAgents:    d?.allowAgents    || false,
+      suspended:      d?.suspended      || false,
+      votingId:       d?.votingId       ?? null,
+      votingPollName: d?.votingPollName ?? null,
     }
   } catch (error) {
     console.error("Error fetching event data:", error)

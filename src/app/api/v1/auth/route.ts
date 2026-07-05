@@ -37,6 +37,9 @@ import {
   newDeviceId,
   ACCESS_TOKEN_TTL_SECONDS,
   REFRESH_TOKEN_TTL_DAYS,
+  COOKIE_ACCESS_TOKEN,
+  COOKIE_REFRESH_TOKEN,
+  COOKIE_REFRESH_TOKEN_ID,
   type DeviceMeta,
 } from "@/app/lib/auth-tokens";
 import {
@@ -48,10 +51,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-
-export const COOKIE_ACCESS_TOKEN    = "spotix_u_at";
-export const COOKIE_REFRESH_TOKEN   = "spotix_u_rt";
-export const COOKIE_REFRESH_TOKEN_ID = "spotix_u_rtid";
+// Cookie names now live in @/app/lib/auth-tokens (see comment there) so other
+// server-side code — like the polls server component — can import them
+// without violating route.ts's export restrictions. Re-exported here too,
+// since logout/route.ts and refresh/route.ts already import them from
+// "../route" — keeping both import paths valid.
+export { COOKIE_ACCESS_TOKEN, COOKIE_REFRESH_TOKEN, COOKIE_REFRESH_TOKEN_ID };
 
 const IS_PROD  = process.env.NODE_ENV === "production";
 const AUDIENCE = "spotix-user" as const;
