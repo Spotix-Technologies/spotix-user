@@ -1,7 +1,7 @@
 /**
  * app/lib/refresh-token-repo.ts
  *
- * Firestore helpers for the refreshTokens/{tokenId} collection.
+ * Database helpers for the refreshTokens/{tokenId} collection.
  *
  * Schema (one document per active session):
  * ┌──────────────────┬───────────────────────────────────────────────────────┐
@@ -12,7 +12,7 @@
  * │ tokenHash        │ bcrypt hash of the raw token (cost factor 10)         │
  * │ deviceMeta       │ { platform, model, appVersion }                       │
  * │ createdAt        │ ISO string                                            │
- * │ expiresAt        │ Firestore Timestamp (30 days from creation)           │
+ * │ expiresAt        │ Database Timestamp (30 days from creation)           │
  * │ revoked          │ boolean — false until logout / rotation               │
  * │ revokedAt        │ ISO string | null                                     │
  * └──────────────────┴───────────────────────────────────────────────────────┘
@@ -34,19 +34,19 @@ import { REFRESH_TOKEN_TTL_DAYS, type DeviceMeta } from "./auth-tokens";
 const COLLECTION = "refreshTokens";
 const BCRYPT_ROUNDS = 10;
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// Types
 
 export interface IssuedRefreshToken {
-  tokenId:   string;    // Firestore document ID — stored in spotix_u_rtid cookie
+  tokenId:   string;    // Database document ID that's stored in spotix_u_rtid cookie
   rawToken:  string;    // Sent in spotix_u_rt cookie (never persisted)
   expiresAt: Date;
 }
 
-// ── Issue ─────────────────────────────────────────────────────────────────────
+// Issue 
 
 /**
  * Create a new refresh token document.
- * Returns the raw token (to be set as httpOnly cookie) and its Firestore ID.
+ * Returns the raw token (to be set as httpOnly cookie) and its Databse ID.
  */
 export async function issueRefreshToken(
   userId:     string,
@@ -71,7 +71,7 @@ export async function issueRefreshToken(
   return { tokenId: docRef.id, rawToken, expiresAt };
 }
 
-// ── Verify ────────────────────────────────────────────────────────────────────
+// Verify 
 
 /**
  * Verify a refresh token by:
@@ -119,7 +119,7 @@ export async function verifyRefreshToken(
   };
 }
 
-// ── Revoke ────────────────────────────────────────────────────────────────────
+// Revoke 
 
 /** Mark a single token as revoked (used during rolling refresh). */
 export async function revokeRefreshToken(tokenId: string): Promise<void> {

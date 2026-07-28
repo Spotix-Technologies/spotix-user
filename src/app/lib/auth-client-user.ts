@@ -5,7 +5,7 @@
  * It is intentionally framework-agnostic: no React imports, no hooks.
  * The useAuth hook (app/hooks/useAuth.ts) wraps this module for React components.
  *
- * ── What this module owns ─────────────────────────────────────────────────────
+ * What this module owns
  *
  *   _accessToken          In-memory access token (never touches localStorage)
  *   spotix_u_at_expiry    localStorage: access token expiry timestamp (ms)
@@ -14,7 +14,7 @@
  *   The actual tokens (spotix_u_at, spotix_u_rt, spotix_u_rtid) are httpOnly
  *   cookies — this module CANNOT read them. The server sets/clears them.
  *
- * ── Key design decisions ──────────────────────────────────────────────────────
+ *  Key design decisions 
  *
  *   1. Singleton refresh lock (_refreshPromise)
  *      When multiple components mount at the same time and all see an expired
@@ -33,19 +33,19 @@
  *      Prevents a re-login as a different user from seeing stale event data.
  */
 
-// ── In-memory state ───────────────────────────────────────────────────────────
+//  In-memory state 
 
 let _accessToken:    string | null          = null;
 let _refreshPromise: Promise<boolean> | null = null;
 
-// ── localStorage keys ─────────────────────────────────────────────────────────
+// localStorage keys 
 
 const KEYS = {
   deviceId: "spotix_u_device_id",
   atExpiry: "spotix_u_at_expiry",
 } as const;
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// Types 
 
 export interface DeviceMeta {
   platform:   string;

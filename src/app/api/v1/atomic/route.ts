@@ -9,7 +9,7 @@ import { FieldValue } from "firebase-admin/firestore";
  *
  * Strictly deducts `quantity` from the matching ticketPrices[].availableTickets
  * (when set) and adds `quantity` to ticketPrices[].ticketsSold, plus the
- * top-level event ticketsSold — all in one Firestore transaction.
+ * top-level event ticketsSold — all in one atomic transaction, hence the name "atomic".
  */
 
 interface AtomicOperationsRequest {
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
     const body: AtomicOperationsRequest = await req.json();
     const { creatorId, eventId, ticketType, ticketPrice, quantity, discountCode, ticketId } = body;
 
-    // ── Validate required fields ───────────────────────────────────────────────
+    // Validate required fields 
     if (!creatorId || !eventId || !ticketType || ticketPrice === undefined || !ticketId) {
       return NextResponse.json(
         {
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // qty is exactly what the user purchased — minimum 1
+    // qty is exactly what the user purchased of minimum 1
     const qty = Math.max(1, Number(quantity) || 1);
 
     console.log(`[Atomic] ticketId=${ticketId} | event=${eventId} | type="${ticketType}" | qty=${qty}`);
@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
     const eventDocRef     = adminDb.collection("events").doc(eventId);
     const organizerDocRef = adminDb.collection("users").doc(creatorId);
 
-    // ── Idempotency guard (outside transaction — cheap read) ──────────────────
+    // Idempotency guard (outside transaction — cheap read) 
     const processedRef = eventDocRef.collection("_processedTickets").doc(ticketId);
     const processedDoc = await processedRef.get();
 
@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
       organizerStatsUpdated: false,
     };
 
-    // ── Single Firestore transaction ───────────────────────────────────────────
+    // Single Firestore transaction 
     await adminDb.runTransaction(async (tx) => {
       const eventDoc     = await tx.get(eventDocRef);
       const organizerDoc = await tx.get(organizerDocRef);
@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
         ? eventData.ticketPrices
         : [];
 
-      // ── Find the matching tier ─────────────────────────────────────────────
+      // Find the matching tier 
       const tierIndex = ticketPrices.findIndex((t) => t.policy === ticketType);
 
       if (tierIndex === -1) {
@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
         console.warn(`[Atomic] Ticket type "${ticketType}" not found in ticketPrices — skipping tier update`);
       }
 
-      // ── Build the updated ticketPrices array ──────────────────────────────
+      // Build the updated ticketPrices array 
       let availableTicketsDecremented = false;
       const updatedTicketPrices = ticketPrices.map((tier, i) => {
         if (i !== tierIndex) return tier; // leave every other tier untouched
@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
         if (hasLimit) {
           const currentAvailable = Number(tier.availableTickets);
 
-          // Hard guard — reject the whole transaction if overselling
+          // Hard guard — reject the whole transaction if for any reason we are overselling
           if (currentAvailable < qty) {
             throw Object.assign(
               new Error(
@@ -150,7 +150,7 @@ export async function POST(req: NextRequest) {
 
       operationsPerformed.availableTicketsDecremented = availableTicketsDecremented;
 
-      // ── Write event document 
+      // Write event document 
       // ticketsSold (top-level) uses FieldValue.increment so concurrent
       // transactions don't race on that scalar field.
       // ticketPrices array is written back in full (Firestore has no
@@ -164,7 +164,7 @@ export async function POST(req: NextRequest) {
       operationsPerformed.ticketsSoldIncremented = true;
       operationsPerformed.revenueUpdated         = true;
 
-      // ── Write organizer document ───────────────────────────────────────────
+      // Write organizer document 
       if (organizerDoc.exists) {
         tx.update(organizerDocRef, {
           totalTicketsSold: FieldValue.increment(qty),
@@ -175,7 +175,7 @@ export async function POST(req: NextRequest) {
         console.warn(`[Atomic] Organizer doc not found for ${creatorId} — skipping user stats`);
       }
 
-      // ── Mark processed (idempotency record) ───────────────────────────────
+      // Mark processed (idempotency record) 
       tx.set(processedRef, {
         ticketId,
         ticketType,
@@ -188,7 +188,7 @@ export async function POST(req: NextRequest) {
       console.log(`[Atomic] Transaction committed — type="${ticketType}", qty=${qty}, availDecremented=${availableTicketsDecremented}`);
     });
 
-    // ── Discount usage (non-blocking, outside transaction) ────────────────────
+    // Discount usage (non-blocking, outside transaction) 
     if (discountCode) {
       try {
         const discountDocRef = adminDb
@@ -232,9 +232,9 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function GET() {
-  return NextResponse.json(
-    { status: "healthy", service: "Atomic Operations API", timestamp: new Date().toISOString() },
-    { status: 200 }
-  );
-}
+// export async function GET() {
+//   return NextResponse.json(
+//     { status: "healthy", service: "Atomic Operations API", timestamp: new Date().toISOString() },
+//     { status: 200 }
+//   );
+// }

@@ -16,7 +16,7 @@ import {
   Timestamp,
 } from "firebase/firestore"
 
-// ─── Poll Types ───────────────────────────────────────────────────────────────
+// Poll Types
 
 export type PollType = "single" | "group"
 
@@ -114,7 +114,7 @@ export function pollNameToKey(pollName: string): string {
     .replace(/[^a-z0-9-]/g, "")
 }
 
-// ─── Serialisation helpers ────────────────────────────────────────────────────
+// Serialisation helpers
 
 function tsToIso(v: unknown): string {
   if (!v) return new Date().toISOString()
@@ -161,7 +161,7 @@ function serializePollData(data: any): VoteData {
   }
 }
 
-// ─── Firestore helpers ────────────────────────────────────────────────────────
+// Database helpers 
 
 export async function checkUserVotingProfile(userId: string): Promise<boolean> {
   try {
