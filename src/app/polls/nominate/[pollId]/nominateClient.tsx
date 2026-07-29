@@ -173,10 +173,6 @@ export default function NominateClient({ pollId }: { pollId: string }) {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
-      <Link href="/vote" className="inline-flex items-center text-[#6b2fa5] hover:text-[#5a1f8a] text-sm font-medium mb-6">
-        ← Back to Polls
-      </Link>
-
       <div className="bg-white/80 rounded-2xl border border-slate-200 shadow-xl p-6 sm:p-8 mb-6">
         <div className="mb-5 h-40 sm:h-56 rounded-xl overflow-hidden bg-slate-100">
           <img src={poll.pollImage || "/placeholder.svg"} alt={poll.pollName} className="w-full h-full object-cover" />
