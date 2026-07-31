@@ -3,7 +3,7 @@ import { Suspense } from "react"
 import NominateClient from "./nominateClient"
 import UserHeader from "@/components/UserHeader"
 import Footer from "@/components/footer"
-import { adminDb } from "@/app/lib/firebase-admin"
+import { fetchNominationPoll } from "@/app/lib/nomination-db"
 import { cacheGet, cacheSet } from "@/app/lib/redis"
 
 interface Props {
@@ -22,9 +22,14 @@ const DEFAULT_DESCRIPTION = "Nominate a candidate for this open-nomination poll 
 /**
  * Resolves OG data (pollName, pollImage, pollDescription) for a nomination
  * poll's share link. Reads the SAME cache key/shape as
- * /api/v1/polls/nominations/[pollId], so this only hits Firestore on a
+ * /api/v1/polls/nominations/[pollId], so this only hits Supabase on a
  * genuine cache miss — a shared link being unfurled by a bot doesn't cost
- * an extra read if a real visit (or another unfurl) already warmed it.
+ * an extra query if a real visit (or another unfurl) already warmed it.
+ *
+ * Data source: Supabase (see lib/nomination-db.ts). fetchNominationPoll()
+ * already returns exactly the shape this route caches, so there's no
+ * reshaping needed here — whichever of this route or the API route
+ * resolves first primes the cache for the other, same as before.
  */
 async function getNominationPollOgData(pollId: string): Promise<NominationPollOgData | null> {
   const cacheKey = `nomination-poll:${pollId}`
@@ -39,20 +44,8 @@ async function getNominationPollOgData(pollId: string): Promise<NominationPollOg
   }
 
   try {
-    const snap = await adminDb.collection("nominationPolls").doc(pollId).get()
-    if (!snap.exists) return null
-
-    const d = snap.data()!
-    // Mirror the exact shape /api/v1/polls/nominations/[pollId] caches, so
-    // whichever of the two resolves first primes the cache for the other.
-    const poll = {
-      pollId: snap.id,
-      pollName: d.pollName ?? "",
-      pollImage: d.pollImage ?? "",
-      pollDescription: d.pollDescription ?? "",
-      categories: d.categories ?? [],
-      status: d.status ?? "active",
-    }
+    const poll = await fetchNominationPoll(pollId)
+    if (!poll) return null
 
     await cacheSet(cacheKey, poll, CACHE_TTL_SECONDS)
 

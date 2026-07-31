@@ -4,10 +4,16 @@
  * GET /api/v1/polls/nominations/:pollId
  * Public — fetches nomination poll metadata (name, image, categories) for
  * the /polls/nominate/[pollId] page.
+ *
+ * Data source: Supabase (nomination_polls table) — migrated off
+ * Firestore because this is a public, open, potentially-viral read path
+ * and Firestore bills per document read. See
+ * /README-SUPABASE-NOMINATIONS.md for the full story. Caching behaviour
+ * is unchanged from before.
  */
 
 import { NextRequest, NextResponse } from "next/server"
-import { adminDb } from "@/app/lib/firebase-admin"
+import { fetchNominationPoll } from "@/app/lib/nomination-db"
 import { cacheGet, cacheSet } from "@/app/lib/redis"
 
 const CACHE_TTL_SECONDS = 60
@@ -28,20 +34,9 @@ export async function GET(
   }
 
   try {
-    const snap = await adminDb.collection("nominationPolls").doc(pollId).get()
-    if (!snap.exists) {
+    const poll = await fetchNominationPoll(pollId)
+    if (!poll) {
       return NextResponse.json({ error: "Nomination poll not found" }, { status: 404 })
-    }
-
-    const d = snap.data()!
-
-    const poll = {
-      pollId: snap.id,
-      pollName: d.pollName ?? "",
-      pollImage: d.pollImage ?? "",
-      pollDescription: d.pollDescription ?? "",
-      categories: d.categories ?? [],
-      status: d.status ?? "active",
     }
 
     await cacheSet(cacheKey, poll, CACHE_TTL_SECONDS)

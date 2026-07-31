@@ -13,6 +13,28 @@
 /** Max categories an organiser can open for a single nomination poll. */
 export const MAX_NOMINATION_CATEGORIES = 20
 
+/**
+ * Max nominees returned per category on the public list. Nomination is
+ * open (anyone can nominate anyone), so a viral category has no natural
+ * cap on doc count — without this, an uncached/expired read bills one
+ * Firestore read PER nominee doc, every time. Top-N by count is also
+ * just... the useful part of the leaderboard for a UI anyway.
+ */
+export const NOMINEE_LIST_LIMIT = 100
+
+/**
+ * TTL for the cached nominee list (`nominees:{pollId}:{categoryId}`).
+ * Kept in one place so the GET route and the write path (which patches
+ * this cache in place after a successful nomination) can't drift apart.
+ */
+export const NOMINEE_CACHE_TTL_SECONDS = 45
+
+/** Shared cache-key builder so the GET route and the nominate route can
+ *  never disagree on the key shape. */
+export function nomineesCacheKey(pollId: string, categoryId: string): string {
+  return `nominees:${pollId}:${categoryId}`
+}
+
 /** Max length (chars) of a nominated name, post-trim. */
 export const MAX_NOMINEE_NAME_LENGTH = 60
 

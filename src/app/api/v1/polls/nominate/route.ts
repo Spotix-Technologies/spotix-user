@@ -14,21 +14,58 @@
  * whitespace) for de-duplication: nominating "John Doe" and "john  doe"
  * both increment the same nominee's count. displayName keeps the casing
  * of whoever nominated that name first.
+ *
+ * Data source: Supabase. Guard checks (2) and (3) plus the count
+ * increment used to be a Firestore transaction — that's now the
+ * submit_nomination() Postgres function (see submitNomination() in
+ * lib/nomination-db.ts and the function itself in
+ * /supabase/schema.sql), which is atomic for the same reason a
+ * Firestore transaction was: it either fully applies or fully rolls
+ * back.
  */
 
 import { NextRequest, NextResponse } from "next/server"
-import { adminDb } from "@/app/lib/firebase-admin"
-import { FieldValue } from "firebase-admin/firestore"
-import { checkRateLimit, cacheDel } from "@/app/lib/redis"
+import { fetchNominationPoll, submitNomination } from "@/app/lib/nomination-db"
+import { checkRateLimit, cacheGet, cacheSet } from "@/app/lib/redis"
 import { getRequestIp, hashIp } from "@/app/lib/request-ip"
 import {
   normalizeNomineeName,
-  nomineeDocId,
+  nomineesCacheKey,
+  NOMINEE_CACHE_TTL_SECONDS,
+  NOMINEE_LIST_LIMIT,
   MIN_NOMINEE_NAME_LENGTH,
   MAX_NOMINEE_NAME_LENGTH,
 } from "@/app/lib/nomination-config"
 
 const RATE_LIMIT_PER_MINUTE = 8
+
+type CachedNominee = { nomineeId: string; name: string; count: number }
+
+/**
+ * Updates (or inserts) one nominee's entry in the cached list and
+ * re-sorts, instead of deleting the whole cache entry on every write.
+ *
+ * If nothing is cached yet (cold key, or it already expired), this is a
+ * no-op — the next real reader will do a normal cache-miss fetch and
+ * repopulate it. We deliberately don't fetch-and-cache from here, since
+ * that would just move the stampede risk rather than remove it.
+ */
+async function patchNomineesCache(pollId: string, categoryId: string, updated: CachedNominee) {
+  const cacheKey = nomineesCacheKey(pollId, categoryId)
+  const cached = await cacheGet<CachedNominee[]>(cacheKey)
+  if (!cached) return
+
+  const next = [...cached]
+  const idx = next.findIndex((n) => n.nomineeId === updated.nomineeId)
+  if (idx === -1) {
+    next.push(updated)
+  } else {
+    next[idx] = updated
+  }
+  next.sort((a, b) => b.count - a.count)
+
+  await cacheSet(cacheKey, next.slice(0, NOMINEE_LIST_LIMIT), NOMINEE_CACHE_TTL_SECONDS)
+}
 
 export async function POST(req: NextRequest) {
   const ip = getRequestIp(req)
@@ -64,55 +101,26 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const pollRef = adminDb.collection("nominationPolls").doc(pollId)
-    const pollSnap = await pollRef.get()
-    if (!pollSnap.exists) return NextResponse.json({ error: "Nomination poll not found" }, { status: 404 })
+    const poll = await fetchNominationPoll(pollId)
+    if (!poll) return NextResponse.json({ error: "Nomination poll not found" }, { status: 404 })
 
-    const pollData = pollSnap.data()!
-    if (pollData.status !== "active") {
+    if (poll.status !== "active") {
       return NextResponse.json({ error: "Nominations are closed for this poll" }, { status: 409 })
     }
-    const categories: { categoryId: string }[] = pollData.categories ?? []
-    if (!categories.some((c) => c.categoryId === categoryId)) {
+    if (!poll.categories.some((c) => c.categoryId === categoryId)) {
       return NextResponse.json({ error: "Category not found on this poll" }, { status: 404 })
     }
 
     const ipHash = hashIp(ip)
-    const deviceLogRef = pollRef.collection("deviceLog").doc(`${categoryId}__device__${deviceId}`)
-    const ipLogRef = pollRef.collection("deviceLog").doc(`${categoryId}__ip__${ipHash}`)
     const normalizedName = normalizeNomineeName(trimmedName)
-    const nomineeRef = pollRef.collection("nominees").doc(nomineeDocId(categoryId, normalizedName))
 
-    const result = await adminDb.runTransaction(async (tx) => {
-      const [deviceLogSnap, ipLogSnap, nomineeSnap] = await Promise.all([
-        tx.get(deviceLogRef),
-        tx.get(ipLogRef),
-        tx.get(nomineeRef),
-      ])
-
-      if (deviceLogSnap.exists || ipLogSnap.exists) {
-        return { alreadyNominated: true }
-      }
-
-      const now = FieldValue.serverTimestamp()
-
-      if (nomineeSnap.exists) {
-        tx.update(nomineeRef, { count: FieldValue.increment(1), updatedAt: now })
-      } else {
-        tx.set(nomineeRef, {
-          categoryId,
-          name: normalizedName,
-          displayName: trimmedName,
-          count: 1,
-          createdAt: now,
-          updatedAt: now,
-        })
-      }
-
-      tx.set(deviceLogRef, { categoryId, deviceId, nominee: normalizedName, createdAt: now })
-      tx.set(ipLogRef, { categoryId, ipHash, nominee: normalizedName, createdAt: now })
-
-      return { alreadyNominated: false }
+    const result = await submitNomination({
+      pollId,
+      categoryId,
+      deviceId,
+      ipHash,
+      normalizedName,
+      displayName: trimmedName,
     })
 
     if (result.alreadyNominated) {
@@ -122,8 +130,21 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Invalidate the cached nominee list so this submission shows up immediately.
-    await cacheDel(`nominees:${pollId}:${categoryId}`)
+    // Patch the cached nominee list in place instead of deleting it.
+    //
+    // This used to be `cacheDel(...)`, which forced the *next* reader back
+    // to the database for a full nominee-list query. Fine at low volume —
+    // but during a burst of nominations (exactly when read traffic from
+    // onlookers also spikes), every single submission was blowing away
+    // the cache for everyone, so concurrent viewers all missed
+    // simultaneously and each re-ran the full nominees query. Updating
+    // the one changed entry locally keeps the cache warm through a burst
+    // instead of resetting it every write.
+    await patchNomineesCache(pollId, categoryId, {
+      nomineeId: result.nomineeId,
+      name: result.name,
+      count: result.count,
+    })
 
     return NextResponse.json({ success: true, message: "Nomination recorded" }, { status: 201 })
   } catch (err) {
