@@ -1,24 +1,62 @@
 // Utility functions for voting operations
-import { db } from "./firebase"
+//
+// SERVER-ONLY — this file imports firebase-admin, which requires Node
+// builtins (fs, child_process) that don't exist in the browser. NEVER
+// import a VALUE from this file into a "use client" component — it will
+// break the build ("Module not found: Can't resolve 'child_process'")
+// because bundlers pull in this file's entire import graph the moment
+// any value (not just a type) is imported from it, even from a client
+// component that only wanted one small function.
+//
+// The pure, dependency-free helpers (getPollStatus, generateContestantId,
+// generateCategoryId, pollNameToKey, plus the PollType/PollStatus types)
+// live in ./voting-helpers instead — that file has zero server
+// dependencies and is safe to import as values from client components.
+// This file re-exports them so existing server-side and TYPE-only
+// imports (`import type {...} from "./voting-utils"` — always erased at
+// compile time, never a bundling risk regardless of what this file
+// imports) don't need to change.
+//
+// Was previously built on the CLIENT Firebase SDK (`firebase/firestore`)
+// even though every function here runs server-side (either in a Server
+// Component or another server-side helper) — the rest of Spotix uses the
+// Admin SDK server-side and the client SDK only for Auth. Migrated to
+// `adminDb` to match that, and to unlock Redis caching on the read path
+// `getPollByName()` — which is the ACTUAL function the public voting-poll
+// page (`spotix-user/src/app/polls/[poll-name]/page.tsx`) calls on every
+// single page view, with up to 3 sequential Firestore reads in the worst
+// case (direct doc get, a `where("pollName","==",...)` query, then a
+// pollKey lookup + nested doc get) and zero caching. That's the page
+// every voter lands on before paying — the actual highest-traffic,
+// highest-stakes read in the app.
+//
+// Caching note: pollAmount/pollCount/pollEntries change on real
+// successful payments. spotix-backend's voting.js calls
+// invalidatePollCache() (see v1/redis.js there) right after crediting a
+// vote, so this is normally fresh within moments — the 15s TTL below is
+// just the worst-case fallback if that call ever fails or is skipped.
+import { adminDb } from "./firebase-admin"
+import { FieldValue, Timestamp } from "firebase-admin/firestore"
+import { cacheGet, cacheSet } from "./redis"
 import {
-  doc,
-  setDoc,
-  getDoc,
-  collection,
-  getDocs,
-  updateDoc,
-  increment,
-  serverTimestamp,
-  query,
-  where,
-  limit,
-  type FieldValue,
-  Timestamp,
-} from "firebase/firestore"
+  type PollType,
+  type PollStatus,
+  getPollStatus,
+  generateContestantId,
+  generateCategoryId,
+  pollNameToKey,
+} from "./voting-helpers"
+
+// Re-exported so anything already importing these from voting-utils.ts
+// (server code, or TYPE-only imports from client components — those are
+// erased at compile time and never pull in this file's runtime code
+// either way) keeps working unchanged. Anything importing these as
+// VALUES from a client component must import from ./voting-helpers
+// directly instead — see that file's header comment for why.
+export type { PollType, PollStatus }
+export { getPollStatus, generateContestantId, generateCategoryId, pollNameToKey }
 
 // Poll Types
-
-export type PollType = "single" | "group"
 
 export interface ContestantData {
   contestantId: string
@@ -49,7 +87,7 @@ export interface VoteEntry {
   contestantId:   string
   contestantName: string
   categoryId?:    string              // leaf category that received the vote
-  date:           FieldValue | string
+  date:           string
   reference:      string
   isGuest:        boolean
 }
@@ -75,43 +113,15 @@ export interface VoteData {
   statsVisible?:   boolean            // organiser controls vote-count visibility
   suspended?:      boolean            // admin can suspend a poll
   flagged?:        boolean            // admin flag disables payouts
-}
-
-export type PollStatus = "active" | "ended" | "notStarted"
-
-export function getPollStatus(
-  startDate: string,
-  startTime: string,
-  endDate:   string,
-  endTime:   string,
-): PollStatus {
-  const now   = new Date()
-  const start = new Date(`${startDate}T${startTime}`)
-  const end   = new Date(`${endDate}T${endTime}`)
-  if (now < start) return "notStarted"
-  if (now > end)   return "ended"
-  return "active"
-}
-
-export function generateContestantId(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-  let id = "sp-cont-"
-  for (let i = 0; i < 10; i++) id += chars.charAt(Math.floor(Math.random() * chars.length))
-  return id
-}
-
-export function generateCategoryId(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-  let id = "sp-cat-"
-  for (let i = 0; i < 10; i++) id += chars.charAt(Math.floor(Math.random() * chars.length))
-  return id
-}
-
-export function pollNameToKey(pollName: string): string {
-  return pollName
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9-]/g, "")
+  /**
+   * When true, this poll's contestants/categories aren't finalised yet —
+   * the organiser created it (name + image already set) but is waiting
+   * on an open-nomination poll to close before adding real contestants.
+   * The public page shows "Voting Poll coming soon" instead of an empty
+   * contestant list. Set at creation, cleared once real contestants are
+   * added. See spotix-booker/app/api/polls/create/route.ts.
+   */
+  contestantsTBD?: boolean
 }
 
 // Serialisation helpers
@@ -158,21 +168,22 @@ function serializePollData(data: any): VoteData {
     statsVisible:     data.statsVisible      ?? true,
     suspended:        data.suspended         ?? false,
     flagged:          data.flagged           ?? false,
+    contestantsTBD:   data.contestantsTBD    ?? false,
   }
 }
 
-// Database helpers 
+// Database helpers
 
 export async function checkUserVotingProfile(userId: string): Promise<boolean> {
   try {
-    const snap = await getDoc(doc(db, "voting", userId))
-    return snap.exists()
+    const snap = await adminDb.collection("voting").doc(userId).get()
+    return snap.exists
   } catch { return false }
 }
 
 export async function createUserVotingProfile(userId: string): Promise<void> {
-  await setDoc(doc(db, "voting", userId), {
-    createdAt:     serverTimestamp(),
+  await adminDb.collection("voting").doc(userId).set({
+    createdAt:     FieldValue.serverTimestamp(),
     totalEarnings: 0,
     totalPolls:    0,
   })
@@ -182,7 +193,7 @@ export async function getAllUserPolls(
   userId: string,
 ): Promise<Array<{ id: string; data: VoteData }>> {
   try {
-    const snap = await getDocs(collection(db, "voting", userId, "votes"))
+    const snap = await adminDb.collection("voting").doc(userId).collection("votes").get()
     return snap.docs.map((d) => ({ id: d.id, data: serializePollData(d.data()) }))
   } catch { return [] }
 }
@@ -191,30 +202,30 @@ export async function createVote(
   userId: string,
   voteData: Omit<VoteData, "pollCreation" | "pollCount" | "pollEntries">,
 ): Promise<string> {
-  const userVotesRef = collection(db, "voting", userId, "votes")
-  const voteRef      = doc(userVotesRef)
+  const userVotesRef = adminDb.collection("voting").doc(userId).collection("votes")
+  const voteRef      = userVotesRef.doc()
   const voteId       = voteRef.id
 
-  await setDoc(voteRef, {
+  await voteRef.set({
     ...voteData,
     contestants:  (voteData.contestants || []).map((c) => ({ ...c, votes: 0 })),
-    pollCreation: serverTimestamp(),
+    pollCreation: FieldValue.serverTimestamp(),
     pollCount:    0,
     pollAmount:   0,
     pollEntries:  [],
   })
 
   const pollKey = pollNameToKey(voteData.pollName)
-  await setDoc(doc(db, "pollKey", pollKey), {
+  await adminDb.collection("pollKey").doc(pollKey).set({
     creatorId:       userId,
     voteId,
     pollImage:       voteData.pollImage,
     pollDescription: voteData.pollDescription,
     pollName:        voteData.pollName,
-    createdAt:       serverTimestamp(),
+    createdAt:       FieldValue.serverTimestamp(),
   })
 
-  await updateDoc(doc(db, "voting", userId), { totalPolls: increment(1) })
+  await adminDb.collection("voting").doc(userId).update({ totalPolls: FieldValue.increment(1) })
   return voteId
 }
 
@@ -223,60 +234,98 @@ export async function getPollDetails(
   voteId: string,
 ): Promise<VoteData | null> {
   try {
-    const snap = await getDoc(doc(db, "voting", userId, "votes", voteId))
-    return snap.exists() ? serializePollData(snap.data()) : null
+    const snap = await adminDb.collection("voting").doc(userId).collection("votes").doc(voteId).get()
+    return snap.exists ? serializePollData(snap.data()) : null
   } catch { return null }
+}
+
+type ResolvedPoll = { voteId: string; creatorId: string; pollData: VoteData }
+
+/**
+ * Shared cache namespace for the two public lookup functions below.
+ * Keyed by whatever string the caller passed in (pollId OR pollName) —
+ * that's the actual repeat-traffic pattern (the same shared link/URL
+ * gets hit over and over), so caching at this level means a repeat view
+ * of the same URL costs zero Firestore reads within the TTL window,
+ * regardless of which of the 3 lookup strategies resolved it originally.
+ *
+ * Short TTL (see file header) because there's no write-side invalidation
+ * hook into this from the vote-crediting webhook.
+ */
+const POLL_LOOKUP_CACHE_TTL_SECONDS = 15
+function pollLookupCacheKey(input: string): string {
+  return `voting-poll-lookup:${input}`
 }
 
 export async function getPollByFlatId(
   pollId: string,
-): Promise<{ voteId: string; creatorId: string; pollData: VoteData } | null> {
+): Promise<ResolvedPoll | null> {
+  const cacheKey = pollLookupCacheKey(pollId)
+  const cached = await cacheGet<ResolvedPoll>(cacheKey)
+  if (cached) return cached
+
   try {
-    const snap = await getDoc(doc(db, "voting", pollId))
-    if (!snap.exists()) return null
-    const d = snap.data()
+    const snap = await adminDb.collection("voting").doc(pollId).get()
+    if (!snap.exists) return null
+    const d = snap.data()!
     if (!d.pollName) return null
     const creatorId = d.creatorId ?? d.organizerId ?? ""
-    return { voteId: pollId, creatorId, pollData: serializePollData({ ...d, creatorId }) }
+    const result: ResolvedPoll = { voteId: pollId, creatorId, pollData: serializePollData({ ...d, creatorId }) }
+
+    await cacheSet(cacheKey, result, POLL_LOOKUP_CACHE_TTL_SECONDS)
+    return result
   } catch { return null }
 }
 
 export async function getPollByName(
   pollNameOrId: string,
-): Promise<{ voteId: string; creatorId: string; pollData: VoteData } | null> {
+): Promise<ResolvedPoll | null> {
+  const cacheKey = pollLookupCacheKey(pollNameOrId)
+  const cached = await cacheGet<ResolvedPoll>(cacheKey)
+  if (cached) return cached
+
   try {
     // 1. Try as direct flat pollId
     try {
-      const directSnap = await getDoc(doc(db, "voting", pollNameOrId))
-      if (directSnap.exists()) {
-        const d = directSnap.data()
+      const directSnap = await adminDb.collection("voting").doc(pollNameOrId).get()
+      if (directSnap.exists) {
+        const d = directSnap.data()!
         if (d.pollName) {
           const creatorId = d.creatorId ?? d.organizerId ?? ""
-          return { voteId: directSnap.id, creatorId, pollData: serializePollData({ ...d, creatorId }) }
+          const result: ResolvedPoll = { voteId: directSnap.id, creatorId, pollData: serializePollData({ ...d, creatorId }) }
+          await cacheSet(cacheKey, result, POLL_LOOKUP_CACHE_TTL_SECONDS)
+          return result
         }
       }
     } catch { /* continue */ }
 
     // 2. Try flat query by pollName
     try {
-      const flatSnap = await getDocs(
-        query(collection(db, "voting"), where("pollName", "==", pollNameOrId), limit(1)),
-      )
+      const flatSnap = await adminDb
+        .collection("voting")
+        .where("pollName", "==", pollNameOrId)
+        .limit(1)
+        .get()
       if (!flatSnap.empty) {
         const flatDoc   = flatSnap.docs[0]
         const d         = flatDoc.data()
         const creatorId = d.creatorId ?? d.organizerId ?? ""
-        return { voteId: flatDoc.id, creatorId, pollData: serializePollData({ ...d, creatorId }) }
+        const result: ResolvedPoll = { voteId: flatDoc.id, creatorId, pollData: serializePollData({ ...d, creatorId }) }
+        await cacheSet(cacheKey, result, POLL_LOOKUP_CACHE_TTL_SECONDS)
+        return result
       }
     } catch { /* continue */ }
 
-    // 3. pollKey lookup
+    // 3. pollKey lookup (legacy nested voting/{userId}/votes/{voteId} polls)
     const pollKey    = pollNameToKey(pollNameOrId)
-    const pollKeyDoc = await getDoc(doc(db, "pollKey", pollKey))
-    if (!pollKeyDoc.exists()) return null
-    const { creatorId, voteId } = pollKeyDoc.data()
+    const pollKeyDoc = await adminDb.collection("pollKey").doc(pollKey).get()
+    if (!pollKeyDoc.exists) return null
+    const { creatorId, voteId } = pollKeyDoc.data()!
     const pollData = await getPollDetails(creatorId, voteId)
     if (!pollData) return null
-    return { voteId, creatorId, pollData }
+
+    const result: ResolvedPoll = { voteId, creatorId, pollData }
+    await cacheSet(cacheKey, result, POLL_LOOKUP_CACHE_TTL_SECONDS)
+    return result
   } catch { return null }
 }

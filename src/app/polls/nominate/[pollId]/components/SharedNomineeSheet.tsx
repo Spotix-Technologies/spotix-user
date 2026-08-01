@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { X, Loader2, UserPlus, Check } from "lucide-react"
+import { X, Loader2, UserPlus, Check, Trophy } from "lucide-react"
 import { dicebearAvatarUrl } from "@/app/lib/dicebear"
 
 interface SharedNominee {
@@ -15,12 +15,17 @@ interface SharedNomineeSheetProps {
   categoryName: string
   submitting: boolean
   alreadyNominated: boolean
+  /** True once this nominee has reached the poll's Nomination Threshold —
+   *  they've already qualified for the real vote. Shown even when the
+   *  visitor arrived straight from a shared per-candidate link and has
+   *  never nominated anyone in this category themselves. */
+  maxed: boolean
   onNominate: () => void
   onClose: () => void
 }
 
 export function SharedNomineeSheet({
-  nominee, categoryName, submitting, alreadyNominated, onNominate, onClose,
+  nominee, categoryName, submitting, alreadyNominated, maxed, onNominate, onClose,
 }: SharedNomineeSheetProps) {
   // Mounts translated fully off-screen, then animates up on the next frame —
   // gives the slide-from-bottom effect instead of popping in.
@@ -63,7 +68,15 @@ export function SharedNomineeSheet({
           </div>
         </div>
 
-        {alreadyNominated ? (
+        {maxed ? (
+          <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+            <Trophy className="w-4 h-4 text-amber-600 flex-shrink-0" />
+            <p className="text-sm text-amber-700">
+              <span className="font-semibold capitalize">{nominee.name}</span> has already reached the maximum
+              number of nominations and has qualified for the real vote — no more nominations needed here.
+            </p>
+          </div>
+        ) : alreadyNominated ? (
           <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-3">
             <Check className="w-4 h-4 text-green-600 flex-shrink-0" />
             <p className="text-sm text-green-700">You've already nominated someone in this category.</p>

@@ -2,7 +2,10 @@ import type { TimeRemaining } from "../hooks/useCountdown"
 import { fmt } from "../hooks/useCountdown"
 
 interface CountdownBlockProps {
-  label: "Voting Starts In" | "Voting Ends In"
+  /** Any short label works — was previously locked to the two voting-poll
+   *  strings, widened so the nomination-page "Real Voting Starts In"
+   *  banner (see polls/nominate/[pollId]) can reuse this same component. */
+  label: string
   timeRemaining: TimeRemaining
 }
 

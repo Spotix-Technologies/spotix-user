@@ -2,11 +2,13 @@
 
 import { useState, useMemo } from "react"
 import Link from "next/link"
-import { getPollStatus, type VoteData, type ContestantData, type CategoryData } from "@/app/lib/voting-utils"
+import { getPollStatus } from "@/app/lib/voting-helpers"
+import type { VoteData, ContestantData, CategoryData } from "@/app/lib/voting-utils"
 import { FullscreenModal } from "./components/FullscreenModal"
 import { VoteModal } from "./components/VoteModal"
 import { ReportPollModal } from "./components/ReportPollModal"
 import { SuspendedBanner } from "./components/SuspendedBanner"
+import ComingSoonState from "./components/ComingSoonState"
 import { PollHeaderCard } from "./components/PollHeaderCard"
 import { CountdownBlock } from "./components/CountdownBlock"
 import { GroupPollSection } from "./components/GroupPollSection"
@@ -30,6 +32,7 @@ export default function PollClient({ pollData, voteId, userId }: PollClientProps
   const isGroup = pollType === "group"
   const statsVisible = pollData.statsVisible ?? true
   const suspended = pollData.suspended ?? false
+  const contestantsTBD = pollData.contestantsTBD ?? false
 
   const pollStatus = useMemo(
     () => getPollStatus(pollData.pollStartDate, pollData.pollStartTime, pollData.pollEndDate, pollData.pollEndTime),
@@ -85,21 +88,23 @@ export default function PollClient({ pollData, voteId, userId }: PollClientProps
         onReport={() => setShowReportModal(true)}
       />
 
-      {pollStatus !== "ended" && targetDate && !suspended && (
+      {pollStatus !== "ended" && targetDate && !suspended && !contestantsTBD && (
         <CountdownBlock
           label={pollStatus === "notStarted" ? "Voting Starts In" : "Voting Ends In"}
           timeRemaining={timeRemaining}
         />
       )}
 
-      {pollStatus === "ended" && (
+      {pollStatus === "ended" && !contestantsTBD && (
         <div className="mb-8 p-6 rounded-2xl bg-red-50 border-l-4 border-red-500">
           <p className="font-bold text-red-900">This poll has ended</p>
           <p className="text-red-700 text-sm mt-1">Voting is no longer available</p>
         </div>
       )}
 
-      {isGroup ? (
+      {contestantsTBD ? (
+        <ComingSoonState pollName={pollData.pollName} />
+      ) : isGroup ? (
         <GroupPollSection
           categories={categories}
           isActive={isActive}

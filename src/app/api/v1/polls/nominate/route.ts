@@ -9,6 +9,9 @@
  *   2. One nomination per category per device (deviceId, persisted client-side)
  *   3. One nomination per category per IP (hashed, server-side — harder to
  *      bypass than deviceId alone since localStorage can be cleared)
+ *   4. Nomination Threshold: if the poll has one set, a nominee who's
+ *      already at/over it is rejected with a distinct "maxed" error —
+ *      they've qualified for the real vote, no more nominations needed.
  *
  * The nominated name is normalised (trim + lowercase + collapsed
  * whitespace) for de-duplication: nominating "John Doe" and "john  doe"
@@ -121,11 +124,24 @@ export async function POST(req: NextRequest) {
       ipHash,
       normalizedName,
       displayName: trimmedName,
+      threshold: poll.nominationThreshold,
     })
 
     if (result.alreadyNominated) {
       return NextResponse.json(
         { error: "You've already nominated someone in this category" },
+        { status: 409 }
+      )
+    }
+
+    if (result.maxed) {
+      // Nomination Threshold reached — this candidate has already
+      // qualified for the real vote, nothing was written.
+      return NextResponse.json(
+        {
+          error: "This candidate has already reached the maximum number of nominations and has qualified for the real vote.",
+          maxed: true,
+        },
         { status: 409 }
       )
     }

@@ -7,6 +7,7 @@ import { CategoryTabs, type NominationCategory } from "./components/CategoryTabs
 import { NominationForm } from "./components/NominationForm"
 import { NomineeList } from "./components/NomineeList"
 import { SharedNomineeSheet } from "./components/SharedNomineeSheet"
+import { VotingCountdownBanner } from "./components/VotingCountdownBanner"
 import { useDeviceId, hasNominatedLocally, markNominatedLocally } from "./hooks/useDeviceId"
 
 interface NominationPoll {
@@ -16,6 +17,10 @@ interface NominationPoll {
   pollDescription: string
   categories: NominationCategory[]
   status: "active" | "closed"
+  nominationThreshold: number | null
+  linkedVotingPollId: string | null
+  linkedVotingPollName: string | null
+  votingStartsAt: string | null
 }
 
 interface Nominee {
@@ -186,6 +191,16 @@ export default function NominateClient({ pollId }: { pollId: string }) {
         )}
       </div>
 
+      {poll.votingStartsAt && (
+        <div className="mb-6">
+          <VotingCountdownBanner
+            votingStartsAt={poll.votingStartsAt}
+            linkedVotingPollId={poll.linkedVotingPollId}
+            linkedVotingPollName={poll.linkedVotingPollName}
+          />
+        </div>
+      )}
+
       <div className="mb-4">
         <CategoryTabs
           categories={poll.categories}
@@ -219,6 +234,7 @@ export default function NominateClient({ pollId }: { pollId: string }) {
           onNominate={(name) => submitNomination(name, name)}
           nominatingName={submittingKey !== "form" && submittingKey !== "sheet" ? submittingKey : null}
           alreadyNominated={categoryNominated || poll.status !== "active"}
+          nominationThreshold={poll.nominationThreshold}
         />
       )}
 
@@ -228,6 +244,7 @@ export default function NominateClient({ pollId }: { pollId: string }) {
           categoryName={activeCategory.name}
           submitting={submittingKey === "sheet"}
           alreadyNominated={categoryNominated || poll.status !== "active"}
+          maxed={poll.nominationThreshold != null && sharedNominee.count >= poll.nominationThreshold}
           onNominate={async () => {
             await submitNomination(sharedNominee.name, "sheet", activeCategory.categoryId)
             clearContestantParam()

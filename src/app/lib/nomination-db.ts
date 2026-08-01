@@ -20,6 +20,13 @@ export interface NominationPollRow {
   pollDescription: string
   categories: { categoryId: string; name: string }[]
   status: "active" | "closed"
+  /** Nomination Threshold — null means unlimited. See lib/nomination-config.ts. */
+  nominationThreshold: number | null
+  /** Set once the organiser links a voting poll from the settings page. */
+  linkedVotingPollId: string | null
+  linkedVotingPollName: string | null
+  /** ISO string — snapshot of the linked voting poll's start date/time. */
+  votingStartsAt: string | null
 }
 
 export interface NomineeRow {
@@ -32,7 +39,9 @@ export interface NomineeRow {
 export async function fetchNominationPoll(pollId: string): Promise<NominationPollRow | null> {
   const { data, error } = await supabaseAdmin
     .from("nomination_polls")
-    .select("id, poll_name, poll_image, poll_description, categories, status")
+    .select(
+      "id, poll_name, poll_image, poll_description, categories, status, nomination_threshold, linked_voting_poll_id, linked_voting_poll_name, voting_starts_at"
+    )
     .eq("id", pollId)
     .maybeSingle()
 
@@ -46,6 +55,10 @@ export async function fetchNominationPoll(pollId: string): Promise<NominationPol
     pollDescription: data.poll_description ?? "",
     categories: data.categories ?? [],
     status: (data.status as "active" | "closed") ?? "active",
+    nominationThreshold: data.nomination_threshold ?? null,
+    linkedVotingPollId: data.linked_voting_poll_id ?? null,
+    linkedVotingPollName: data.linked_voting_poll_name ?? null,
+    votingStartsAt: data.voting_starts_at ?? null,
   }
 }
 
@@ -79,20 +92,27 @@ export async function fetchTopNominees(
 }
 
 export type SubmitNominationResult =
-  | { alreadyNominated: true }
-  | { alreadyNominated: false; nomineeId: string; name: string; count: number }
+  | { alreadyNominated: true; maxed: false }
+  | { alreadyNominated: false; maxed: true; nomineeId: string }
+  | { alreadyNominated: false; maxed: false; nomineeId: string; name: string; count: number; qualified: boolean }
 
 /**
  * Calls the submit_nomination() Postgres function, which atomically:
  *   1. Checks the device+IP guards (one nomination per category per
  *      device AND per IP — same rule as before).
- *   2. Upserts the nominee row and increments its count.
+ *   2. If a Nomination Threshold is set, checks the target nominee isn't
+ *      already at/over it — see the "maxed" result below.
+ *   3. Upserts the nominee row and increments its count.
  *
  * This one RPC call replaces the old Firestore transaction. Postgres
  * runs the whole function body in one implicit transaction, and the
- * guard table's unique constraint is the actual race-condition
- * backstop — see the comment on submit_nomination() in schema.sql for
- * why that matters under concurrent submissions.
+ * guard table's unique constraint (plus the conditional upsert for the
+ * threshold check) is the actual race-condition backstop — see the
+ * comment on submit_nomination() in schema.sql for why that matters
+ * under concurrent submissions.
+ *
+ * `threshold` should come from the poll's (cached) nominationThreshold —
+ * pass null for unlimited.
  */
 export async function submitNomination(params: {
   pollId: string
@@ -101,6 +121,7 @@ export async function submitNomination(params: {
   ipHash: string
   normalizedName: string
   displayName: string
+  threshold: number | null
 }): Promise<SubmitNominationResult> {
   const { data, error } = await supabaseAdmin.rpc("submit_nomination", {
     p_poll_id: params.pollId,
@@ -109,18 +130,25 @@ export async function submitNomination(params: {
     p_ip_hash: params.ipHash,
     p_normalized_name: params.normalizedName,
     p_display_name: params.displayName,
+    p_threshold: params.threshold,
   })
 
   if (error) throw error
 
   if (data.already_nominated) {
-    return { alreadyNominated: true }
+    return { alreadyNominated: true, maxed: false }
+  }
+
+  if (data.maxed) {
+    return { alreadyNominated: false, maxed: true, nomineeId: data.nominee_id }
   }
 
   return {
     alreadyNominated: false,
+    maxed: false,
     nomineeId: data.nominee_id,
     name: data.name,
     count: data.count,
+    qualified: Boolean(data.qualified),
   }
 }

@@ -19,10 +19,14 @@ interface NomineeListProps {
   onNominate: (name: string) => void
   nominatingName: string | null
   alreadyNominated: boolean
+  /** Poll-wide Nomination Threshold, or null for unlimited. A nominee is
+   *  "maxed" once their count reaches this. */
+  nominationThreshold: number | null
 }
 
 export function NomineeList({
   nominees, loading, pollId, categoryId, categoryName, onNominate, nominatingName, alreadyNominated,
+  nominationThreshold,
 }: NomineeListProps) {
   const [search, setSearch] = useState("")
 
@@ -80,6 +84,7 @@ export function NomineeList({
               onNominate={() => onNominate(n.name)}
               submitting={nominatingName === n.name}
               disabled={alreadyNominated}
+              maxed={nominationThreshold != null && n.count >= nominationThreshold}
             />
           ))}
         </div>
