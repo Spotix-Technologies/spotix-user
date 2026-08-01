@@ -6,12 +6,13 @@ interface GroupPollSectionProps {
   isActive: boolean
   pollStatus: PollStatus
   statsVisible: boolean
+  pollName: string
   onVote: (contestant: ContestantData, cat: CategoryData) => void
   onFullscreen: (contestant: ContestantData) => void
 }
 
 export function GroupPollSection({
-  categories, isActive, pollStatus, statsVisible, onVote, onFullscreen,
+  categories, isActive, pollStatus, statsVisible, pollName, onVote, onFullscreen,
 }: GroupPollSectionProps) {
   return (
     <div className="space-y-3">
@@ -41,6 +42,7 @@ export function GroupPollSection({
             isActive={isActive}
             pollStatus={pollStatus}
             statsVisible={statsVisible}
+            pollName={pollName}
             onVote={onVote}
             onFullscreen={onFullscreen}
           />

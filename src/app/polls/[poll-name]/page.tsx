@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { Suspense } from "react"
 import { getPollByName } from "@/app/lib/voting-utils"
 import { cookies } from "next/headers"
 import { verifyAccessToken, COOKIE_ACCESS_TOKEN } from "@/app/lib/auth-tokens"
@@ -95,7 +96,9 @@ export default async function PollPage({ params }: Props) {
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       <UserHeader />
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
-        <PollClient pollData={result.pollData} voteId={result.voteId} userId={userId} />
+        <Suspense fallback={<div className="flex justify-center py-24"><div className="w-8 h-8 border-2 border-[#6b2fa5] border-t-transparent rounded-full animate-spin" /></div>}>
+          <PollClient pollData={result.pollData} voteId={result.voteId} userId={userId} />
+        </Suspense>
       </main>
       <Footer />
     </div>

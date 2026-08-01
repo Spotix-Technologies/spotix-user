@@ -2,6 +2,8 @@
 
 import { Crown, Maximize2 } from "lucide-react"
 import type { ContestantData } from "@/app/lib/voting-utils"
+import { ShareButton } from "./ShareButton"
+import { buildVotingShareUrl, buildVotingShareMessage } from "@/app/lib/share"
 
 interface ContestantCardProps {
   contestant: ContestantData
@@ -10,6 +12,8 @@ interface ContestantCardProps {
   pollStatus: "active" | "ended" | "notStarted"
   statsVisible: boolean
   totalVotes: number
+  /** Poll's URL slug (pollData.pollName) — used to build the shared voting link. */
+  pollName: string
   onVoteClick: (c: ContestantData) => void
   onFullscreen: (c: ContestantData) => void
 }
@@ -21,6 +25,7 @@ export function ContestantCard({
   pollStatus,
   statsVisible,
   totalVotes,
+  pollName,
   onVoteClick,
   onFullscreen,
 }: ContestantCardProps) {
@@ -44,12 +49,20 @@ export function ContestantCard({
             <span className="text-xs font-bold">Winner</span>
           </div>
         )}
-        <button
-          onClick={() => onFullscreen(contestant)}
-          className="absolute top-3 right-3 bg-black/50 hover:bg-black/70 text-white p-2 rounded-full transition-colors"
-        >
-          <Maximize2 className="w-4 h-4" />
-        </button>
+        <div className="absolute top-3 right-3 flex items-center gap-2">
+          <ShareButton
+            compact
+            title="Vote for a contestant"
+            text={buildVotingShareMessage(contestant.name, pollName)}
+            url={buildVotingShareUrl(pollName, contestant.contestantId)}
+          />
+          <button
+            onClick={() => onFullscreen(contestant)}
+            className="flex items-center justify-center w-9 h-9 bg-black/50 hover:bg-black/70 text-white rounded-full transition-colors"
+          >
+            <Maximize2 className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       <div className="p-5">

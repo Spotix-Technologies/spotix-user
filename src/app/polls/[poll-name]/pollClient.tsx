@@ -2,11 +2,13 @@
 
 import { useState, useMemo } from "react"
 import Link from "next/link"
-import { getPollStatus } from "@/app/lib/voting-helpers"
+import { useSearchParams, useRouter } from "next/navigation"
+import { getPollStatus, findContestantInPoll } from "@/app/lib/voting-helpers"
 import type { VoteData, ContestantData, CategoryData } from "@/app/lib/voting-utils"
 import { FullscreenModal } from "./components/FullscreenModal"
 import { VoteModal } from "./components/VoteModal"
 import { ReportPollModal } from "./components/ReportPollModal"
+import { SharedContestantSheet } from "./components/SharedContestantSheet"
 import { SuspendedBanner } from "./components/SuspendedBanner"
 import ComingSoonState from "./components/ComingSoonState"
 import { PollHeaderCard } from "./components/PollHeaderCard"
@@ -22,11 +24,19 @@ interface PollClientProps {
 }
 
 export default function PollClient({ pollData, voteId, userId }: PollClientProps) {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+
   const [selectedContestant, setSelectedContestant] = useState<ContestantData | null>(null)
   const [selectedCategory, setSelectedCategory] = useState<CategoryData | null>(null)
   const [fullscreenContestant, setFullscreenContestant] = useState<ContestantData | null>(null)
   const [showVoteModal, setShowVoteModal] = useState(false)
   const [showReportModal, setShowReportModal] = useState(false)
+
+  // Shared-link deep dive: ?contestant=<contestantId> — resolved straight
+  // against the already-loaded pollData, no extra fetch needed.
+  const sharedContestantId = searchParams.get("contestant")
+  const [sheetDismissed, setSheetDismissed] = useState(false)
 
   const pollType = pollData.pollType ?? "single"
   const isGroup = pollType === "group"
@@ -63,6 +73,31 @@ export default function PollClient({ pollData, voteId, userId }: PollClientProps
     setSelectedContestant(c)
     setSelectedCategory(cat ?? null)
     setShowVoteModal(true)
+  }
+
+  // Resolve a shared contestant link against the poll data we already have —
+  // no extra fetch needed, unlike the nomination flow's per-category lookup.
+  const sharedMatch = useMemo(
+    () => (sharedContestantId ? findContestantInPoll(pollData, sharedContestantId) : null),
+    [pollData, sharedContestantId],
+  )
+
+  const inactiveReason = contestantsTBD
+    ? "Contestants haven't been finalised for this poll yet."
+    : suspended
+    ? "This poll has been suspended and voting is currently unavailable."
+    : pollStatus === "notStarted"
+    ? "Voting hasn't started yet — check back soon."
+    : pollStatus === "ended"
+    ? "This poll has ended — voting is no longer available."
+    : null
+
+  // Strips ?contestant= off the URL once the shared-link flow is done.
+  const clearContestantParam = () => {
+    setSheetDismissed(true)
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete("contestant")
+    router.replace(params.toString() ? `?${params.toString()}` : `/polls/${encodeURIComponent(pollData.pollName)}`, { scroll: false })
   }
 
   return (
@@ -110,6 +145,7 @@ export default function PollClient({ pollData, voteId, userId }: PollClientProps
           isActive={isActive}
           pollStatus={pollStatus}
           statsVisible={statsVisible}
+          pollName={pollData.pollName}
           onVote={handleVoteClick}
           onFullscreen={setFullscreenContestant}
         />
@@ -121,6 +157,7 @@ export default function PollClient({ pollData, voteId, userId }: PollClientProps
           statsVisible={statsVisible}
           totalVotes={totalVotesSingle}
           winnerId={winner?.contestantId ?? null}
+          pollName={pollData.pollName}
           onVoteClick={handleVoteClick}
           onFullscreen={setFullscreenContestant}
         />
@@ -146,6 +183,23 @@ export default function PollClient({ pollData, voteId, userId }: PollClientProps
           pollId={voteId}
           pollName={pollData.pollName}
           onClose={() => setShowReportModal(false)}
+        />
+      )}
+
+      {sharedMatch && !sheetDismissed && !showVoteModal && (
+        <SharedContestantSheet
+          contestant={sharedMatch.contestant}
+          categoryName={sharedMatch.category?.name ?? null}
+          statsVisible={statsVisible}
+          isActive={isActive}
+          inactiveReason={inactiveReason}
+          onVote={() => {
+            setSelectedContestant(sharedMatch.contestant)
+            setSelectedCategory(sharedMatch.category)
+            setShowVoteModal(true)
+            clearContestantParam()
+          }}
+          onClose={clearContestantParam}
         />
       )}
     </>

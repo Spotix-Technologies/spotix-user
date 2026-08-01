@@ -8,12 +8,13 @@ interface SinglePollSectionProps {
   statsVisible: boolean
   totalVotes: number
   winnerId: string | null
+  pollName: string
   onVoteClick: (c: ContestantData) => void
   onFullscreen: (c: ContestantData) => void
 }
 
 export function SinglePollSection({
-  contestants, isActive, pollStatus, statsVisible, totalVotes, winnerId, onVoteClick, onFullscreen,
+  contestants, isActive, pollStatus, statsVisible, totalVotes, winnerId, pollName, onVoteClick, onFullscreen,
 }: SinglePollSectionProps) {
   return (
     <>
@@ -38,6 +39,7 @@ export function SinglePollSection({
             pollStatus={pollStatus}
             statsVisible={statsVisible}
             totalVotes={totalVotes}
+            pollName={pollName}
             onVoteClick={onVoteClick}
             onFullscreen={onFullscreen}
           />

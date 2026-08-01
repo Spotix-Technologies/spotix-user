@@ -17,6 +17,17 @@ export function buildNominationShareMessage(contestantName: string, categoryName
   return `Hi there, could you please nominate ${contestantName} for ${categoryName}? It'll help a lot`
 }
 
+/** Builds a deep link straight to one contestant on a real voting poll. */
+export function buildVotingShareUrl(pollName: string, contestantId: string): string {
+  const origin = typeof window !== "undefined" ? window.location.origin : ""
+  const params = new URLSearchParams({ contestant: contestantId })
+  return `${origin}/polls/${encodeURIComponent(pollName)}?${params.toString()}`
+}
+
+export function buildVotingShareMessage(contestantName: string, pollName: string): string {
+  return `Hi there, could you please vote for ${contestantName} in ${pollName}? It'll help a lot`
+}
+
 export type ShareMethod = "native" | "clipboard" | "failed"
 
 /**

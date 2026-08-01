@@ -11,12 +11,13 @@ export interface CategoryPanelProps {
   isActive: boolean
   pollStatus: "active" | "ended" | "notStarted"
   statsVisible: boolean
+  pollName: string
   onVote: (contestant: ContestantData, cat: CategoryData) => void
   onFullscreen: (contestant: ContestantData) => void
 }
 
 export function CategoryPanel({
-  category, depth, isActive, pollStatus, statsVisible, onVote, onFullscreen,
+  category, depth, isActive, pollStatus, statsVisible, pollName, onVote, onFullscreen,
 }: CategoryPanelProps) {
   const [open, setOpen] = useState(false)
 
@@ -81,6 +82,7 @@ export function CategoryPanel({
                   isActive={isActive}
                   pollStatus={pollStatus}
                   statsVisible={statsVisible}
+                  pollName={pollName}
                   onVote={onVote}
                   onFullscreen={onFullscreen}
                 />
@@ -103,6 +105,7 @@ export function CategoryPanel({
                       pollStatus={pollStatus}
                       statsVisible={statsVisible}
                       totalVotes={totalVotes}
+                      pollName={pollName}
                       onVoteClick={(cont) => onVote(cont, category)}
                       onFullscreen={onFullscreen}
                     />

@@ -16,6 +16,11 @@
 // This file is safe to import as VALUES from client components.
 // voting-utils.ts re-exports everything here too, so server-side/type-
 // only imports of these names don't need to change.
+// Type-only import: erased at compile time, so pulling these type names
+// from voting-utils.ts does NOT drag firebase-admin into the client
+// bundle — only VALUE imports do that.
+import type { VoteData, ContestantData, CategoryData } from "./voting-utils"
+
 export type PollType = "single" | "group"
 export type PollStatus = "active" | "ended" | "notStarted"
 
@@ -52,4 +57,35 @@ export function pollNameToKey(pollName: string): string {
     .toLowerCase()
     .replace(/\s+/g, "-")
     .replace(/[^a-z0-9-]/g, "")
+}
+
+/**
+ * Resolves a shared contestant deep link (?contestant=<contestantId>) against
+ * already-loaded poll data. Works for single polls (flat `contestants[]`)
+ * and group polls, searching `categories` recursively through any depth of
+ * `subcategories` since a shared link doesn't carry the category path.
+ * Returns null if the id doesn't match anyone currently on the poll.
+ */
+export function findContestantInPoll(
+  pollData: VoteData,
+  contestantId: string,
+): { contestant: ContestantData; category: CategoryData | null } | null {
+  const direct = (pollData.contestants ?? []).find((c) => c.contestantId === contestantId)
+  if (direct) return { contestant: direct, category: null }
+
+  const searchCategories = (
+    cats: CategoryData[],
+  ): { contestant: ContestantData; category: CategoryData } | null => {
+    for (const cat of cats) {
+      const hit = (cat.contestants ?? []).find((c) => c.contestantId === contestantId)
+      if (hit) return { contestant: hit, category: cat }
+      if (cat.subcategories?.length) {
+        const nested = searchCategories(cat.subcategories)
+        if (nested) return nested
+      }
+    }
+    return null
+  }
+
+  return searchCategories(pollData.categories ?? [])
 }

@@ -45,6 +45,7 @@ import {
   generateContestantId,
   generateCategoryId,
   pollNameToKey,
+  findContestantInPoll,
 } from "./voting-helpers"
 
 // Re-exported so anything already importing these from voting-utils.ts
@@ -123,6 +124,12 @@ export interface VoteData {
    */
   contestantsTBD?: boolean
 }
+
+// findContestantInPoll lives in ./voting-helpers (it's pure — no
+// firebase-admin dependency) and is re-exported below so pollClient.tsx
+// (a "use client" component) can import it as a VALUE without pulling
+// this file's server-only import graph into the browser bundle.
+export { findContestantInPoll }
 
 // Serialisation helpers
 
