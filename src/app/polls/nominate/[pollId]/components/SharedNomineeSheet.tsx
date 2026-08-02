@@ -73,7 +73,7 @@ export function SharedNomineeSheet({
             <Trophy className="w-4 h-4 text-amber-600 flex-shrink-0" />
             <p className="text-sm text-amber-700">
               <span className="font-semibold capitalize">{nominee.name}</span> has already reached the maximum
-              number of nominations and has qualified for the real vote — no more nominations needed here.
+              number of nominations and has qualified for the real vote so no more nominations needed for them.
             </p>
           </div>
         ) : alreadyNominated ? (

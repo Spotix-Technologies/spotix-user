@@ -23,12 +23,12 @@ export default function ComingSoonState({ pollName }: ComingSoonStateProps) {
       <h2 className="text-2xl font-bold text-slate-900 mb-3">Voting Poll Coming Soon</h2>
 
       <p className="text-slate-600 leading-relaxed mb-2">
-        <span className="font-semibold">{pollName}</span> is being set up — contestants haven't
+        <span className="font-semibold">{pollName}</span> is being set up so contestants haven't
         been added yet.
       </p>
       <p className="text-slate-500 text-sm leading-relaxed">
         Check back once the organiser finalises the lineup, or keep an eye on their nomination
-        poll if one is open.
+        poll if they have any set up.
       </p>
 
       <div className="mt-6 inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-purple-50 text-[#6b2fa5] text-xs font-semibold">
