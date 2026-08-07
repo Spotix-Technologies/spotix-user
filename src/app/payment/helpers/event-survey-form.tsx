@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { FileText, Loader2, CheckCircle, AlertCircle, User, Mail } from "lucide-react"
+import { FileText, Loader2, CheckCircle, AlertCircle, User, Mail, X } from "lucide-react"
 import {
   ShortTextField,
   LongTextField,
@@ -32,6 +32,8 @@ interface EventSurveyFormProps {
   isGuest?: boolean
   onFormComplete: (responses: Record<string, any>, guestInfo?: { fullName: string; email: string }) => void
   onFormIncomplete: () => void
+  /** Optional — when supplied, shows a close (X) button in the header. Used when this form is hosted inside a dialog. */
+  onClose?: () => void
 }
 
 export default function EventSurveyForm({
@@ -42,13 +44,19 @@ export default function EventSurveyForm({
   isGuest = false,
   onFormComplete,
   onFormIncomplete,
+  onClose,
 }: EventSurveyFormProps) {
   const [loading, setLoading] = useState(true)
   const [questions, setQuestions] = useState<Question[]>([])
   const [requiresForm, setRequiresForm] = useState(false)
   const [responses, setResponses] = useState<Record<string, any>>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
-  const [hasSubmitted, setHasSubmitted] = useState(false)
+
+  // Tracks the click on "Pay Now" — this, not a reactive effect, is now the
+  // sole trigger for handing off to payment. Keeping this state disables the
+  // button after the first press so a double-click can't fire the handoff
+  // twice while the parent dialog is transitioning.
+  const [submitting, setSubmitting] = useState(false)
 
   // Guest identity fields
   const [guestName, setGuestName] = useState("")
@@ -58,19 +66,6 @@ export default function EventSurveyForm({
   useEffect(() => {
     fetchSurvey()
   }, [eventId, ticketType])
-
-  useEffect(() => {
-    if (requiresForm && questions.length > 0) {
-      const isValid = validateAll(false)
-      if (isValid && !hasSubmitted) {
-        fireComplete()
-        setHasSubmitted(true)
-      } else if (!isValid && hasSubmitted) {
-        onFormIncomplete()
-        setHasSubmitted(false)
-      }
-    }
-  }, [responses, requiresForm, questions, guestName, guestEmail])
 
   const fetchSurvey = async () => {
     try {
@@ -160,6 +155,22 @@ export default function EventSurveyForm({
     }
   }
 
+  // Wired directly to the "Pay Now" button's onClick. This is the actual
+  // user gesture now — everything downstream (SurveyFormDialog -> 
+  // PaymentClient -> PayWithPaystack) is called synchronously from this
+  // handler rather than from a reactive effect or timer, so the browser's
+  // user-activation window stays intact all the way to PaystackPop.openIframe().
+  const handlePayNowClick = () => {
+    if (submitting) return
+    const isValid = validateAll(true)
+    if (!isValid) {
+      onFormIncomplete()
+      return
+    }
+    setSubmitting(true)
+    fireComplete()
+  }
+
   const handleResponseChange = (questionId: string, value: any) => {
     setResponses((prev) => ({ ...prev, [questionId]: value }))
     if (errors[questionId]) {
@@ -194,7 +205,16 @@ export default function EventSurveyForm({
 
   if (loading) {
     return (
-      <div className="bg-white rounded-xl border-2 border-slate-200 shadow-sm p-8">
+      <div className="bg-white rounded-2xl p-8 relative">
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-100 text-slate-500 hover:text-slate-800 transition-colors"
+            aria-label="Close form"
+          >
+            <X size={18} />
+          </button>
+        )}
         <div className="flex flex-col items-center justify-center py-8">
           <Loader2 className="w-8 h-8 text-[#6b2fa5] animate-spin mb-4" />
           <p className="text-slate-600 text-sm">Loading event information...</p>
@@ -212,17 +232,28 @@ export default function EventSurveyForm({
   const isFormValid = validateAll(false)
 
   return (
-    <div className="bg-white rounded-xl border-2 border-slate-200 shadow-sm overflow-hidden">
+    <div className="bg-white rounded-2xl overflow-hidden">
       {/* Header */}
-      <div className="bg-gradient-to-r from-[#6b2fa5] to-purple-600 px-6 py-4">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-10 h-10 bg-white/20 rounded-lg backdrop-blur-sm">
-            <FileText className="w-5 h-5 text-white" />
+      <div className="bg-gradient-to-r from-[#6b2fa5] to-purple-600 px-6 py-4 sticky top-0 z-[1]">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex items-center justify-center w-10 h-10 bg-white/20 rounded-lg backdrop-blur-sm flex-shrink-0">
+              <FileText className="w-5 h-5 text-white" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-lg font-bold text-white">Event Registration Form</h3>
+              <p className="text-sm text-purple-100">Please complete this form to proceed with your ticket</p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-lg font-bold text-white">Event Registration Form</h3>
-            <p className="text-sm text-purple-100">Please complete this form to proceed with your ticket</p>
-          </div>
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="p-2 rounded-full bg-white/15 hover:bg-white/25 text-white transition-colors flex-shrink-0"
+              aria-label="Close form"
+            >
+              <X size={18} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -316,6 +347,34 @@ export default function EventSurveyForm({
             <span className="text-red-500">*</span> Required fields
           </p>
         </div>
+
+        {/* ── Pay Now ───────────────────────────────────────────────────
+            This is the real click that kicks off payment. Previously the
+            form auto-submitted from a useEffect the moment validation
+            passed, and the parent dialog then handed off to Paystack via
+            a bare setTimeout — neither of those is a genuine user gesture,
+            so browsers silently blocked PaystackPop.openIframe(). Routing
+            everything through this button's onClick keeps the whole chain
+            inside the click's activation window. */}
+        <button
+          type="button"
+          onClick={handlePayNowClick}
+          disabled={!isFormValid || submitting}
+          className={`w-full py-3.5 rounded-xl font-bold text-white text-sm transition-all flex items-center justify-center gap-2 ${
+            isFormValid && !submitting
+              ? "bg-gradient-to-r from-[#6b2fa5] to-purple-600 hover:from-[#5a2590] hover:to-purple-700 shadow-lg shadow-purple-200 cursor-pointer"
+              : "bg-gray-300 cursor-not-allowed"
+          }`}
+        >
+          {submitting ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Processing...
+            </>
+          ) : (
+            "Pay Now"
+          )}
+        </button>
       </div>
     </div>
   )

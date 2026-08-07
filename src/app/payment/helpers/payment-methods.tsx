@@ -153,7 +153,10 @@ export default function PaymentMethods({
         </div>
       )}
 
-      {/* Survey Warning */}
+      {/* Survey notice — informational only. The button below stays
+          clickable; clicking it opens the registration form in a dialog
+          when one is required and hasn't been completed yet, rather than
+          disabling the button and forcing the buyer to scroll to find it. */}
       {isSurveyRequired && !isSurveyComplete && (
         <div className="mt-4 p-3 sm:p-4 bg-amber-50 border-2 border-amber-200 rounded-xl">
           <div className="flex items-start gap-3">
@@ -173,7 +176,7 @@ export default function PaymentMethods({
             <div className="flex-1">
               <p className="text-sm font-semibold text-amber-900">Form Required</p>
               <p className="text-xs text-amber-700 mt-1">
-                Please complete the event registration form above before proceeding.
+                You'll be asked to complete a short registration form when you continue.
               </p>
             </div>
           </div>
@@ -183,14 +186,18 @@ export default function PaymentMethods({
       {/* Proceed Button */}
       <button
         onClick={onProceed}
-        disabled={(!selectedMethod && !isFreeEvent) || creatingReference || (isSurveyRequired && !isSurveyComplete)}
+        disabled={(!selectedMethod && !isFreeEvent) || creatingReference}
         className="w-full mt-4 sm:mt-6 py-3 sm:py-4 text-sm sm:text-base text-white font-bold rounded-xl transition-all duration-200 transform hover:scale-105 shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
         style={{ background: "#6b2fa5" }}
       >
         {creatingReference ? (
           "Processing..."
         ) : isFreeEvent ? (
-          <span className="break-words px-2">Proceed to Register</span>
+          <span className="break-words px-2">
+            {isSurveyRequired && !isSurveyComplete ? "Continue to Register" : "Proceed to Register"}
+          </span>
+        ) : isSurveyRequired && !isSurveyComplete ? (
+          <span className="break-words px-2">Continue to Payment</span>
         ) : (
           <span className="break-words px-2">
             Proceed with{" "}

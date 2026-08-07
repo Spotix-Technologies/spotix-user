@@ -39,6 +39,12 @@ export async function POST(request: NextRequest) {
       userFullName,
       userEmail: bodyUserEmail,
       userPhone,
+      // See create-pay-ref/route.ts — same inert pass-through, delivered
+      // post-"payment" by v1/lib/ticket/survey-delivery.js. Free events are
+      // marked status: "successful" immediately below, so delivery happens
+      // on the very next generateTickets() call — but still only from the
+      // backend, never from here.
+      surveyResponses,
     } = body
 
     // ── Auth — optional for guests ─────────────────────────────────────────────
@@ -150,6 +156,11 @@ export async function POST(request: NextRequest) {
       discountData: discountData || null,
       referralCode: referralCode || null,
       referralName: referralData?.code || referralCode || null,
+
+      surveyResponses:
+        surveyResponses && typeof surveyResponses === "object" && Object.keys(surveyResponses).length > 0
+          ? surveyResponses
+          : null,
 
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),

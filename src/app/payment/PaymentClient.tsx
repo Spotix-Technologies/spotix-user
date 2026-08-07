@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, ShieldCheck, X } from "lucide-react"
+import { ArrowLeft, ShieldCheck, X, FileText } from "lucide-react"
 import {
   getSessionUser,
   getAccessToken,
@@ -20,7 +20,7 @@ import { auth } from "../lib/firebase"
 import { onAuthStateChanged, type User as FirebaseUser } from "firebase/auth"
 import UserHeader from "@/components/UserHeader"
 import Footer from "@/components/footer"
-import PayWithPaystack from "@/components/PayWithPaystack"
+import PayWithPaystack, { type PayWithPaystackHandle } from "@/components/PayWithPaystack"
 import { calculateVATFee } from "@/utils/priceUtility"
 
 // Import helper components
@@ -28,7 +28,7 @@ import OrderSummary from "./helpers/order-summary"
 import Discount from "./helpers/discount"
 import Referral from "./helpers/referral"
 import PaymentMethods from "./helpers/payment-methods"
-import EventSurveyForm from "./helpers/event-survey-form"
+import SurveyFormDialog from "./helpers/survey-form-dialog"
 import GuestCheckoutForm from "./helpers/guest-checkout-form"
 
 /** Resolves once Firebase Auth has restored its persisted session (or confirmed there is none). */
@@ -80,6 +80,7 @@ interface UserData {
   fullName?: string
   username?: string
   email: string
+  phoneNumber?: string
 }
 
 export default function PaymentClient() {
@@ -102,14 +103,19 @@ export default function PaymentClient() {
   const [referralError, setReferralError] = useState("")
   const [showReferralDropdown, setShowReferralDropdown] = useState(false)
 
-  // Paystack payment state
-  const [showPaystackModal, setShowPaystackModal] = useState(false)
-  const [paystackReference, setPaystackReference] = useState<string | null>(null)
+  // Paystack payment — the component is mounted as soon as we know this is
+  // a paid event (see render below), so its script/profile preloading has
+  // plenty of time to finish before the buyer ever clicks Pay Now. Opening
+  // the checkout itself happens via this ref's open() method, called
+  // directly from proceedWithPayment's own click-triggered chain — never
+  // from a useEffect — so the browser keeps treating it as user-initiated.
+  const paystackRef = useRef<PayWithPaystackHandle>(null)
   const [creatingReference, setCreatingReference] = useState(false)
 
   // Survey form state
   const [surveyResponses, setSurveyResponses] = useState<Record<string, any> | null>(null)
   const [isSurveyComplete, setIsSurveyComplete] = useState(false)
+  const [showSurveyDialog, setShowSurveyDialog] = useState(false)
 
   // Guest checkout state
   const [guestFullName, setGuestFullName] = useState("")
@@ -196,6 +202,26 @@ export default function PaymentClient() {
     checkAllTicketsSurveyRequirements()
   }, [paymentData, cart, userData])
 
+  // Preload the Paystack inline script as early as possible — as soon as we
+  // know this is a paid event, not when the Paystack modal mounts. Without
+  // this, the script only starts downloading *after* the buyer clicks Pay
+  // Now, which was one more network hop sitting between the click and
+  // PaystackPop.openIframe(). window.PaystackPop being ready ahead of time
+  // means the only network work left in the click's chain is creating the
+  // payment reference.
+  useEffect(() => {
+    if (!paymentData || paymentData.ticketPrice === 0) return
+    if (typeof window === "undefined" || window.PaystackPop) return
+    if (document.querySelector('script[src="https://js.paystack.co/v1/inline.js"]')) return
+
+    const script = document.createElement("script")
+    script.src = "https://js.paystack.co/v1/inline.js"
+    script.async = true
+    document.body.appendChild(script)
+    // Deliberately not removed on unmount — once loaded, window.PaystackPop
+    // should stay available for the rest of the checkout session.
+  }, [paymentData])
+
   useEffect(() => {
     let cancelled = false
 
@@ -278,9 +304,10 @@ export default function PaymentClient() {
       const data = await res.json()
       if (!data.authenticated) return
       setUserData({
-        fullName: data.fullName || data.username || "Valued Customer",
-        username: data.username,
-        email:    data.email || "",
+        fullName:    data.fullName || data.username || "Valued Customer",
+        username:    data.username,
+        email:       data.email || "",
+        phoneNumber: data.phoneNumber || "",
       })
     } catch (error) {
       console.error("Error fetching user data:", error)
@@ -432,12 +459,19 @@ const fetchReferralCodes = async (eventId: string) => {
     setSelectedMethod(method)
   }
 
-  const createPaymentReference = async () => {
+  const createPaymentReference = async (surveyResponsesOverride?: Record<string, any> | null) => {
     if (!paymentData || cart.length === 0) return null
 
     // For guests, userData won't be set from Firestore, but we need guestEmail/guestFullName
     // For authenticated users, userData must be set
     if (user && !userData) return null
+
+    // The override lets callers (e.g. the survey dialog's onComplete handler)
+    // pass freshly-collected responses straight through without waiting on
+    // a setState to flush — relying on the `surveyResponses` state here
+    // alone would race and send `null` on the very first proceed attempt.
+    const effectiveSurveyResponses =
+      surveyResponsesOverride !== undefined ? surveyResponsesOverride : surveyResponses
 
     setCreatingReference(true)
 
@@ -489,6 +523,10 @@ const fetchReferralCodes = async (eventId: string) => {
         stopDate: paymentData.stopDate || null,
         bookerName: organizerName || paymentData.bookerName || null,
         bookerEmail: organizerEmail || paymentData.bookerEmail || null,
+        // Carried on the reference doc, inert, until the backend delivers it
+        // post-payment (v1/lib/ticket/survey-delivery.js). We no longer POST
+        // this to /api/v1/survey/response ourselves — see proceedWithPayment.
+        surveyResponses: effectiveSurveyResponses || null,
       }
 
       // For authenticated users, include user data
@@ -574,47 +612,30 @@ const fetchReferralCodes = async (eventId: string) => {
     }
   }
 
-  const handleProceedPayment = async () => {
+  /**
+   * Does the actual work of creating a reference and moving on to payment.
+   * Accepts an optional survey-responses override so the dialog's
+   * onComplete handler can hand off freshly-collected answers without
+   * waiting on setSurveyResponses to flush through a render.
+   */
+  const proceedWithPayment = async (surveyResponsesOverride?: Record<string, any> | null) => {
     if (!paymentData || !userData) return
 
     const isFreeEvent = paymentData.ticketPrice === 0
-
-    // Check if survey is complete (only if a survey is actually required for the tickets)
-    const hasSurveyRequired = surveyRequiredTickets.size > 0
-    if (hasSurveyRequired && !isSurveyComplete && surveyResponses === null) {
-      alert("Please complete the event registration form before proceeding.")
-      return
-    }
+    const effectiveSurveyResponses =
+      surveyResponsesOverride !== undefined ? surveyResponsesOverride : surveyResponses
 
     // For free events, create reference and redirect directly to success page.
     // The success page will call the unified /v1/ticket endpoint to generate the ticket.
     if (isFreeEvent) {
-      const reference = await createPaymentReference()
+      const reference = await createPaymentReference(effectiveSurveyResponses)
       if (!reference) return
 
-      // Submit survey responses if they exist
-      if (surveyResponses && Object.keys(surveyResponses).length > 0) {
-        try {
-          const primaryTicketType = cart.length > 0 ? cart[0].ticketType : paymentData.ticketType
-          await fetch("/api/v1/survey/response", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              userId: paymentData.eventCreatorId,
-              eventId: paymentData.eventId,
-              responses: surveyResponses,
-              attendeeInfo: {
-                fullName: userData.fullName,
-                email: userData.email,
-                ticketType: primaryTicketType,
-              },
-            }),
-          })
-        } catch (error) {
-          console.error("Error submitting survey responses:", error)
-          // Don't block registration if survey submission fails
-        }
-      }
+      // Survey responses (if any) were already attached to the reference doc
+      // inside createPaymentReference() above. They're delivered by the
+      // backend's ticket-generation pipeline once the ticket actually
+      // exists — never submitted from here, so an abandoned/failed
+      // registration can no longer leave orphaned survey data behind.
 
       // Redirect to success — PaystackSuccessClient will call /v1/ticket to generate the ticket
       router.push(`/payment/success?reference=${reference}`)
@@ -630,41 +651,28 @@ const fetchReferralCodes = async (eventId: string) => {
       referralData: referralData || null,
       userFullName: userData.fullName || "Valued Customer",
       userEmail: userData.email,
-      surveyResponses: surveyResponses || null,
+      surveyResponses: effectiveSurveyResponses || null,
     }
 
-    // Submit survey responses if they exist
-    if (surveyResponses && Object.keys(surveyResponses).length > 0) {
-      try {
-        await fetch("/api/v1/survey/response", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            userId: paymentData.eventCreatorId,
-            eventId: paymentData.eventId,
-            responses: surveyResponses,
-            attendeeInfo: {
-              fullName: userData.fullName,
-              email: userData.email,
-              ticketType: cart.length > 0 ? cart[0].ticketType : paymentData.ticketType,
-            },
-          }),
-        })
-      } catch (error) {
-        console.error("Error submitting survey responses:", error)
-        // Don't block payment if survey submission fails
-      }
-    }
+    // Survey responses travel inside paymentDataWithExtras (sessionStorage,
+    // used by the wallet/agent/bitcoin flows below) and were already
+    // attached to the reference doc by createPaymentReference() for the
+    // Paystack flow. Either way, delivery happens backend-side, post-payment
+    // — see v1/lib/ticket/survey-delivery.js. We deliberately don't POST to
+    // /api/v1/survey/response here anymore: doing so before payment
+    // succeeded is exactly what let survey data through for buyers who
+    // never actually paid.
 
     if (selectedMethod === "paystack") {
-      const reference = await createPaymentReference()
+      const reference = await createPaymentReference(effectiveSurveyResponses)
       if (!reference) return
 
-      setPaystackReference(reference)
       sessionStorage.setItem("paystack_payment_data", JSON.stringify(paymentDataWithExtras))
-      setShowPaystackModal(true)
+      // Direct call, still inside this same click-triggered async chain —
+      // this is what keeps PaystackPop.openIframe() inside the browser's
+      // user-activation window. See PayWithPaystackHandle for why this
+      // can't go through a useEffect instead.
+      paystackRef.current?.open(reference)
     } else {
       sessionStorage.setItem("spotix_payment_data", JSON.stringify(paymentDataWithExtras))
 
@@ -692,14 +700,47 @@ const fetchReferralCodes = async (eventId: string) => {
     }
   }
 
+  /**
+   * Entry point wired to the "Proceed" button. If the selected ticket type
+   * requires a form and it hasn't been filled yet, opens the form in a
+   * dialog instead of proceeding straight to payment. Otherwise proceeds
+   * immediately.
+   */
+  const handleProceedClick = () => {
+    if (!paymentData || !userData) return
+
+    const hasSurveyRequired = surveyRequiredTickets.size > 0
+    if (hasSurveyRequired && !isSurveyComplete) {
+      setShowSurveyDialog(true)
+      return
+    }
+
+    proceedWithPayment()
+  }
+
+  const handleSurveyDialogComplete = (
+    responses: Record<string, any>,
+    guestInfo?: { fullName: string; email: string }
+  ) => {
+    setSurveyResponses(responses)
+    setIsSurveyComplete(true)
+    setShowSurveyDialog(false)
+    proceedWithPayment(responses)
+  }
+
+  const handleSurveyDialogCancel = () => {
+    setShowSurveyDialog(false)
+  }
+
   const handlePaystackSuccess = (reference: string) => {
     console.log("Payment successful, reference:", reference)
     router.push(`/payment/success?reference=${reference}`)
   }
 
   const handlePaystackClose = () => {
-    setShowPaystackModal(false)
-    setPaystackReference(null)
+    // PayWithPaystack hides its own overlay internally when this fires;
+    // nothing left for PaymentClient to reset now that it isn't the one
+    // conditionally mounting the modal.
   }
 
   const handleGuestSubmit = (fullName: string, email: string, phone: string) => {
@@ -781,6 +822,16 @@ const fetchReferralCodes = async (eventId: string) => {
 
 // AFTER
 const isFreeEvent = paymentData.ticketPrice === 0
+
+// Which ticket type's form to show. Previously this always used cart[0],
+// which meant that if a *different* item in the cart was the one flagged
+// as requiring a form, the form would silently never appear. Pick the
+// first cart item that's actually in the required set, falling back to
+// cart[0] only if nothing matched (shouldn't happen once required).
+const surveyTicketType =
+  cart.find((item) => surveyRequiredTickets.has(item.ticketType))?.ticketType ??
+  cart[0]?.ticketType ??
+  ""
 
 const cartSubtotalBeforeDiscount = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0)
 const cartTotalVat = cart.reduce((sum, item) => sum + ((item.vat || 0) * item.quantity), 0)
@@ -864,26 +915,22 @@ const totalAmount = cartSubtotal + cartTotalVat
                 onRemoveReferral={removeReferral}
               />
 
-              {/* Event Survey Form */}
+              {/* Event Survey notice — the form itself opens in a dialog when
+                  the buyer clicks Proceed, so we don't block or clutter this
+                  column with the full form. */}
               {paymentData && userData && cart.length > 0 && surveyRequiredTickets.size > 0 && (
-                <div className="space-y-4">
-                  <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
+                <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 flex items-start gap-3">
+                  <FileText className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                  <div>
                     <p className="text-sm font-semibold text-blue-900">
-                      One or more of the tickets you selected requires you to fill a form
+                      {isSurveyComplete ? "Registration form completed" : "This event requires a short form"}
+                    </p>
+                    <p className="text-xs text-blue-700 mt-0.5">
+                      {isSurveyComplete
+                        ? "Your answers were saved. You're all set to continue."
+                        : "You'll be asked to fill it in when you continue below."}
                     </p>
                   </div>
-                  <EventSurveyForm
-                    eventId={paymentData.eventId}
-                    ticketType={cart[0].ticketType}
-                    userEmail={userData.email}
-                    onFormComplete={(responses) => {
-                      setSurveyResponses(responses)
-                      setIsSurveyComplete(true)
-                    }}
-                    onFormIncomplete={() => {
-                      setIsSurveyComplete(false)
-                    }}
-                  />
                 </div>
               )}
             </div>
@@ -899,7 +946,7 @@ const totalAmount = cartSubtotal + cartTotalVat
                 isSurveyRequired={surveyRequiredTickets.size > 0}
                 isGuest={!user}
                 onSelectMethod={handlePaymentMethodSelect}
-                onProceed={handleProceedPayment}
+                onProceed={handleProceedClick}
                 onSignIn={handleShowSignIn}
               />
             </div>
@@ -907,19 +954,37 @@ const totalAmount = cartSubtotal + cartTotalVat
         </div>
       </main>
 
-      {/* Paystack Payment Modal */}
-      {showPaystackModal && paystackReference && userData && !isFreeEvent && (
+      {/* Event Registration Form Dialog — opens when the buyer clicks
+          Proceed/Register and the selected ticket type requires a form. */}
+      {showSurveyDialog && paymentData && userData && (
+        <SurveyFormDialog
+          eventId={paymentData.eventId}
+          ticketType={surveyTicketType}
+          userEmail={userData.email}
+          userFullName={userData.fullName}
+          onComplete={handleSurveyDialogComplete}
+          onCancel={handleSurveyDialogCancel}
+        />
+      )}
+
+      {/* Paystack — mounted as early as possible (as soon as we know this is
+          a paid event and who's paying) so its script + profile preloading
+          finish in the background well before the buyer clicks Pay Now. It
+          renders nothing until paystackRef.current.open(reference) is
+          called from proceedWithPayment. */}
+      {paymentData && userData && !isFreeEvent && (
         <PayWithPaystack
+          ref={paystackRef}
           email={userData.email || ""}
           amount={totalAmount}
-          reference={paystackReference}
           isGuest={!user}
           userId={user?.uid || null}
-          // Pass name + phone so Paystack prefills the checkout form.
-          // For logged-in users PayWithPaystack re-fetches from Firestore
-          // internally; for guests we must supply the values from state.
+          // Pass name + phone so Paystack prefills the checkout form. We
+          // already have both from the /api/v1/user/me call above (or from
+          // the guest checkout form) — passing them in lets PayWithPaystack
+          // skip its own post-click profile fetch entirely.
           fullName={user ? (userData.fullName ?? null) : (guestFullName || null)}
-          phone={user ? null : (guestPhone || null)}
+          phone={user ? (userData.phoneNumber || null) : (guestPhone || null)}
           metadata={{
             eventId: paymentData.eventId,
             eventName: paymentData.eventName,

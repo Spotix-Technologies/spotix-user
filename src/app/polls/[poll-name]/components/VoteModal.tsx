@@ -203,7 +203,7 @@ export function VoteModal({
             {step === "paying" && (
               <div className="flex flex-col items-center justify-center py-10 gap-3">
                 <Loader2 className="w-10 h-10 animate-spin text-[#6b2fa5]" />
-                <p className="text-sm text-gray-500">Opening payment window…</p>
+                <p className="text-sm text-gray-500">Opening payment gateway...</p>
               </div>
             )}
 
@@ -212,7 +212,7 @@ export function VoteModal({
               <div className="space-y-4">
                 <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-xl">
                   <p className="text-sm font-semibold text-yellow-900">You&apos;re not logged in</p>
-                  <p className="text-xs text-yellow-700 mt-0.5">Fill in your details to vote as a guest.</p>
+                  <p className="text-xs text-yellow-700 mt-0.5">Fill in your details to vote.</p>
                 </div>
 
                 <div>

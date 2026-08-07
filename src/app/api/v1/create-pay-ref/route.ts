@@ -34,6 +34,12 @@ export async function POST(request: NextRequest) {
       userFullName,
       userEmail: bodyUserEmail,
       userPhone,
+      // Event-survey answers, if the event required a form. Stored inert on
+      // the reference doc — the backend's ticket-generation pipeline
+      // (v1/lib/ticket/survey-delivery.js) is what actually delivers these,
+      // and only once payment is confirmed successful. Never written to
+      // events/{eventId}/responses from here.
+      surveyResponses,
     } = body
 
     // console.log("[create-pay-ref] Incoming body:", JSON.stringify({
@@ -167,6 +173,13 @@ export async function POST(request: NextRequest) {
       discountData: discountData || null,
       referralCode: referralCode || null,
       referralName: referralData?.code || referralCode || null,
+
+      // Inert until the backend's ticket-generation pipeline delivers it
+      // post-payment. null when the event has no survey / buyer skipped it.
+      surveyResponses:
+        surveyResponses && typeof surveyResponses === "object" && Object.keys(surveyResponses).length > 0
+          ? surveyResponses
+          : null,
 
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
