@@ -218,7 +218,6 @@ export default function AgentPaymentClient({ refId }: { refId: string | null }) 
         <PayWithPaystack
           email={data.buyerEmail}
           amount={data.totalAmount}
-          reference={data.reference}
           isGuest={true}
           userId={null}
           fullName={data.buyerFullName}
