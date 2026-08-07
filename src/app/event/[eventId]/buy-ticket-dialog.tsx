@@ -63,11 +63,22 @@ function isSaleStoppingToday(stopDate?: string): boolean {
   )
 }
 
-/** Remaining tickets for a tier, or null if unlimited (no availableTickets field set) */
-function getRemaining(ticket: TicketPrice): number | null {
-  if (ticket.availableTickets === undefined || ticket.availableTickets === null) return null
+/**
+ * Remaining tickets for a tier, or null if unlimited sale.
+ *
+ * A tier is only ever "sold out" when availableTickets is explicitly the
+ * number 0. Anything else that isn't a genuine, finite, non-negative number —
+ * missing entirely, null, an empty string, or a malformed value — is treated
+ * as unlimited sale rather than being coerced into a false 0.
+ */
+function getRemaining(ticket: TicketPrice | null | undefined): number | null {
+  if (!ticket) return null
+  const raw = ticket.availableTickets
+  if (raw === undefined || raw === null || (raw as unknown as string) === "") return null
+  const num = Number(raw)
+  if (!Number.isFinite(num)) return null
   // availableTickets IS the remaining count — the backend decrements it on each purchase
-  return Math.max(0, ticket.availableTickets)
+  return Math.max(0, num)
 }
 
 // ── Free event sold-out check ──────────────────────────────────────────────────

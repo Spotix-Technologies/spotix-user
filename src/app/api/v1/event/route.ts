@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { adminDb } from "@/app/lib/firebase-admin"
+import { getCachedEventDoc } from "@/app/lib/eventCache"
 
 export async function GET(request: NextRequest) {
   try {
@@ -17,16 +17,14 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Fetch event data from Firebase
-    // Path: events/{eventId} (flat structure)
-    const eventDocRef = adminDb
-      .collection("events")
-      .doc(eventId)
-
-    const eventDoc = await eventDocRef.get()
+    // Cached, single-flight read — Path: events/{eventId} (flat structure).
+    // On a cache miss only one concurrent request actually hits Firestore;
+    // every other request waiting on the same eventId reads the cache the
+    // winner populates instead of also hitting Firestore.
+    const eventData = await getCachedEventDoc(eventId)
 
     // Check if event exists
-    if (!eventDoc.exists) {
+    if (!eventData) {
       return NextResponse.json(
         {
           success: false,
@@ -35,9 +33,6 @@ export async function GET(request: NextRequest) {
         { status: 404 }
       )
     }
-
-    // Get event data
-    const eventData = eventDoc.data()
 
     // Transform the ticketPrices array to include ticketSale field
     const transformedTicketPrices = (eventData?.ticketPrices || []).map((ticket: any) => ({
@@ -50,7 +45,7 @@ export async function GET(request: NextRequest) {
 
     // Transform the data to match the expected EventType interface
     const transformedData = {
-      id: eventDoc.id,
+      id: eventData.id,
       eventName: eventData?.eventName || "",
       eventImage: eventData?.eventImage || "",
       eventImages: eventData?.eventImages || [],

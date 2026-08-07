@@ -1,6 +1,6 @@
 import ClientPage from "./ClientPage"
 import type { Metadata } from "next"
-import { adminDb } from "@/app/lib/firebase-admin"
+import { getCachedEventDoc } from "@/app/lib/eventCache"
 import { PhoneCall, Mail, ShieldOff } from "lucide-react"
 
 export interface EventType {
@@ -39,12 +39,15 @@ export interface EventType {
 
 async function fetchEventData(eventId: string): Promise<EventType | null> {
   try {
-    const eventDoc = await adminDb.collection("events").doc(eventId).get()
-    if (!eventDoc.exists) return null
-    const d = eventDoc.data()
+    // Cached, single-flight read (shared with /api/v1/event) — see
+    // lib/eventCache.ts. generateMetadata() and this page component both
+    // call fetchEventData for the same request; the second call rides the
+    // cache the first one just populated instead of hitting Firestore twice.
+    const d = await getCachedEventDoc(eventId)
+    if (!d) return null
     const organizerId = d?.organizerId || d?.createdBy || ""
     return {
-      id: eventDoc.id,
+      id: d.id,
       eventName: d?.eventName || "",
       eventImage: d?.eventImage || "",
       eventImages: d?.eventImages || [],

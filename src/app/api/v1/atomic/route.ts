@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/app/lib/firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
+import { invalidateEventCache } from "@/app/lib/eventCache";
 
 /**
  * Atomic Operations API Route
@@ -187,6 +188,13 @@ export async function POST(req: NextRequest) {
 
       console.log(`[Atomic] Transaction committed — type="${ticketType}", qty=${qty}, availDecremented=${availableTicketsDecremented}`);
     });
+
+    // Bust the cached event doc so availableTickets/ticketsSold don't stay
+    // stale for the rest of the cache TTL after a real purchase. Non-blocking
+    // — a failure here just means the next read waits out the TTL as before.
+    invalidateEventCache(eventId).catch((err) =>
+      console.error(`[Atomic] Cache invalidation failed for event ${eventId}:`, err)
+    );
 
     // Discount usage (non-blocking, outside transaction) 
     if (discountCode) {
