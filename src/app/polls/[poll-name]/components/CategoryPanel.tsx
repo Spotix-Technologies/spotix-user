@@ -3,7 +3,10 @@
 import { useState } from "react"
 import { ChevronDown, ChevronUp, Tag, FolderOpen } from "lucide-react"
 import type { ContestantData, CategoryData } from "@/app/lib/voting-utils"
+import type { ScopeOutcome } from "@/app/lib/voting-helpers"
+import { isContestantVotable } from "@/app/lib/voting-helpers"
 import { ContestantCard } from "./ContestantCard"
+import { TieBreakerBanner } from "./TieBreakerBanner"
 
 export interface CategoryPanelProps {
   category: CategoryData
@@ -12,12 +15,15 @@ export interface CategoryPanelProps {
   pollStatus: "active" | "ended" | "notStarted"
   statsVisible: boolean
   pollName: string
+  /** Outcome per LEAF category, keyed by categoryId — see voting-helpers.ts's buildLeafOutcomes. */
+  categoryOutcomes: Record<string, ScopeOutcome>
+  namesById: Record<string, string>
   onVote: (contestant: ContestantData, cat: CategoryData) => void
   onFullscreen: (contestant: ContestantData) => void
 }
 
 export function CategoryPanel({
-  category, depth, isActive, pollStatus, statsVisible, pollName, onVote, onFullscreen,
+  category, depth, isActive, pollStatus, statsVisible, pollName, categoryOutcomes, namesById, onVote, onFullscreen,
 }: CategoryPanelProps) {
   const [open, setOpen] = useState(false)
 
@@ -28,9 +34,8 @@ export function CategoryPanel({
     ? category.contestants.reduce((s, c) => s + (c.votes ?? 0), 0)
     : 0
 
-  const winner = isLeaf && pollStatus === "ended" && category.contestants.length > 0
-    ? category.contestants.reduce((h, c) => ((c.votes ?? 0) > (h.votes ?? 0) ? c : h), category.contestants[0])
-    : null
+  const outcome = isLeaf ? categoryOutcomes[category.categoryId] : undefined
+  const tieBreakerLive = outcome?.phase === "tie-active" || outcome?.phase === "tie-fptp"
 
   const indentStyle = depth > 0 ? { marginLeft: `${Math.min(depth * 16, 48)}px` } : {}
 
@@ -41,7 +46,7 @@ export function CategoryPanel({
     : "bg-blue-50/50 border-blue-200/50"
 
   return (
-    <div style={indentStyle} className={`rounded-2xl border shadow-sm overflow-hidden ${bgClass}`}>
+    <div style={indentStyle} className={`rounded-2xl border shadow-sm overflow-hidden ${bgClass} ${tieBreakerLive ? "ring-2 ring-[#6b2fa5]/40" : ""}`}>
       {/* Header */}
       <button
         onClick={() => setOpen((v) => !v)}
@@ -55,7 +60,14 @@ export function CategoryPanel({
               : <Tag className="w-4 h-4 text-[#6b2fa5]" />}
           </div>
           <div className="min-w-0">
-            <p className="font-bold text-slate-900 truncate">{category.name}</p>
+            <p className="font-bold text-slate-900 truncate flex items-center gap-2">
+              {category.name}
+              {tieBreakerLive && (
+                <span className="text-[10px] font-bold uppercase tracking-wide bg-[#6b2fa5] text-white px-2 py-0.5 rounded-full flex-shrink-0">
+                  Tie-Breaker
+                </span>
+              )}
+            </p>
             <p className="text-xs text-slate-500 mt-0.5">
               {hasSubcategories
                 ? `${(category.subcategories ?? []).length} sub-categor${(category.subcategories ?? []).length === 1 ? "y" : "ies"}`
@@ -83,6 +95,8 @@ export function CategoryPanel({
                   pollStatus={pollStatus}
                   statsVisible={statsVisible}
                   pollName={pollName}
+                  categoryOutcomes={categoryOutcomes}
+                  namesById={namesById}
                   onVote={onVote}
                   onFullscreen={onFullscreen}
                 />
@@ -92,6 +106,12 @@ export function CategoryPanel({
 
           {isLeaf && (
             <div className="px-4 pb-5 sm:px-5">
+              {pollStatus === "ended" && outcome && (
+                <div className="pt-4">
+                  <TieBreakerBanner outcome={outcome} namesById={namesById} />
+                </div>
+              )}
+
               {category.contestants.length === 0 ? (
                 <p className="text-center py-8 text-slate-400 text-sm">No contestants in this category yet.</p>
               ) : (
@@ -100,8 +120,9 @@ export function CategoryPanel({
                     <ContestantCard
                       key={c.contestantId}
                       contestant={c}
-                      isWinner={winner?.contestantId === c.contestantId}
-                      isActive={isActive}
+                      isWinner={outcome?.phase === "winner" && outcome.winnerId === c.contestantId}
+                      isVotable={outcome ? isContestantVotable(outcome, c.contestantId) : false}
+                      isTieBreakerContestant={tieBreakerLive && !!outcome && "contestantIds" in outcome && outcome.contestantIds.includes(c.contestantId)}
                       pollStatus={pollStatus}
                       statsVisible={statsVisible}
                       totalVotes={totalVotes}

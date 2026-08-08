@@ -47,6 +47,7 @@ import {
   pollNameToKey,
   findContestantInPoll,
 } from "./voting-helpers"
+import { tickTieBreakers, type TieBreakerMap } from "./tie-breaker"
 
 // Re-exported so anything already importing these from voting-utils.ts
 // (server code, or TYPE-only imports from client components — those are
@@ -123,6 +124,18 @@ export interface VoteData {
    * added. See spotix-booker/app/api/polls/create/route.ts.
    */
   contestantsTBD?: boolean
+  /**
+   * Tie-breaker configuration, set by the organiser via booker's
+   * TieBreakerPanel (spotix-booker/app/polls/[pollId]/settings/components/TieBreakerPanel.tsx)
+   * and persisted through /api/polls/tiebreaker. tieBreakerRounds of
+   * null/undefined means "1 round, then first-past-the-post" — see
+   * ./tie-breaker.ts for the full state machine this config drives.
+   */
+  enabledTieBreaker?: boolean
+  tieBreakerDuration?: number | null
+  tieBreakerRounds?: number | null
+  /** Live tie-breaker round state, keyed by scope ("single" or a leaf categoryId). */
+  tieBreakers?: TieBreakerMap
 }
 
 // findContestantInPoll lives in ./voting-helpers (it's pure — no
@@ -176,6 +189,33 @@ function serializePollData(data: any): VoteData {
     suspended:        data.suspended         ?? false,
     flagged:          data.flagged           ?? false,
     contestantsTBD:   data.contestantsTBD    ?? false,
+    enabledTieBreaker:  data.enabledTieBreaker  ?? false,
+    tieBreakerDuration: data.tieBreakerDuration ?? null,
+    tieBreakerRounds:   data.tieBreakerRounds   ?? null,
+    tieBreakers:        data.tieBreakers        ?? {},
+  }
+}
+
+/**
+ * Rolls a poll's tie-breaker state forward to "now" and persists any
+ * transition (round expired → resolved/next round/FPTP) before the poll
+ * is served or cached. Cheap no-op for polls without tie-breaker enabled.
+ * This is the read-path "tick" — spotix-backend's voting.js does the same
+ * thing right before crediting a vote (see v1/lib/tie-breaker.js).
+ */
+async function tickAndPersistTieBreakers(pollId: string, rawData: any): Promise<any> {
+  if (!rawData?.enabledTieBreaker) return rawData
+  try {
+    const { tieBreakers, changed } = tickTieBreakers(rawData, new Date())
+    if (!changed) return rawData
+    await adminDb.collection("voting").doc(pollId).update({
+      tieBreakers,
+      updatedAt: FieldValue.serverTimestamp(),
+    })
+    return { ...rawData, tieBreakers }
+  } catch (err) {
+    console.error(`[tie-breaker] tick failed for poll ${pollId}:`, err)
+    return rawData
   }
 }
 
@@ -274,8 +314,9 @@ export async function getPollByFlatId(
   try {
     const snap = await adminDb.collection("voting").doc(pollId).get()
     if (!snap.exists) return null
-    const d = snap.data()!
+    let d = snap.data()!
     if (!d.pollName) return null
+    d = await tickAndPersistTieBreakers(pollId, d)
     const creatorId = d.creatorId ?? d.organizerId ?? ""
     const result: ResolvedPoll = { voteId: pollId, creatorId, pollData: serializePollData({ ...d, creatorId }) }
 
@@ -296,8 +337,9 @@ export async function getPollByName(
     try {
       const directSnap = await adminDb.collection("voting").doc(pollNameOrId).get()
       if (directSnap.exists) {
-        const d = directSnap.data()!
+        let d = directSnap.data()!
         if (d.pollName) {
+          d = await tickAndPersistTieBreakers(directSnap.id, d)
           const creatorId = d.creatorId ?? d.organizerId ?? ""
           const result: ResolvedPoll = { voteId: directSnap.id, creatorId, pollData: serializePollData({ ...d, creatorId }) }
           await cacheSet(cacheKey, result, POLL_LOOKUP_CACHE_TTL_SECONDS)
@@ -315,7 +357,8 @@ export async function getPollByName(
         .get()
       if (!flatSnap.empty) {
         const flatDoc   = flatSnap.docs[0]
-        const d         = flatDoc.data()
+        let d           = flatDoc.data()
+        d = await tickAndPersistTieBreakers(flatDoc.id, d)
         const creatorId = d.creatorId ?? d.organizerId ?? ""
         const result: ResolvedPoll = { voteId: flatDoc.id, creatorId, pollData: serializePollData({ ...d, creatorId }) }
         await cacheSet(cacheKey, result, POLL_LOOKUP_CACHE_TTL_SECONDS)

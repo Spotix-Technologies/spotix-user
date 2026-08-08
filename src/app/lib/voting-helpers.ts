@@ -20,6 +20,7 @@
 // from voting-utils.ts does NOT drag firebase-admin into the client
 // bundle — only VALUE imports do that.
 import type { VoteData, ContestantData, CategoryData } from "./voting-utils"
+import type { TieBreakerState } from "./tie-breaker"
 
 export type PollType = "single" | "group"
 export type PollStatus = "active" | "ended" | "notStarted"
@@ -88,4 +89,112 @@ export function findContestantInPoll(
   }
 
   return searchCategories(pollData.categories ?? [])
+}
+
+/**
+ * Same idea as resolveScopeOutcome, but walks a group poll's category tree
+ * and returns one outcome per LEAF category (keyed by categoryId) in a
+ * single pass — used by GroupPollSection/CategoryPanel instead of calling
+ * resolveScopeOutcome per-category on every render.
+ */
+export function buildLeafOutcomes(
+  categories: CategoryData[],
+  pollStatus: PollStatus,
+  tieBreakers: Record<string, TieBreakerState> | undefined,
+  tieBreakerEnabled: boolean,
+): Record<string, ScopeOutcome> {
+  const map: Record<string, ScopeOutcome> = {}
+  const walk = (cats: CategoryData[]) => {
+    for (const cat of cats ?? []) {
+      if (cat.subcategories && cat.subcategories.length > 0) {
+        walk(cat.subcategories)
+      } else {
+        map[cat.categoryId] = resolveScopeOutcome(
+          cat.contestants ?? [],
+          pollStatus,
+          tieBreakers?.[cat.categoryId] ?? null,
+          tieBreakerEnabled,
+        )
+      }
+    }
+  }
+  walk(categories ?? [])
+  return map
+}
+
+/** Whether a specific contestant can currently receive a vote, given their scope's outcome. */
+export function isContestantVotable(outcome: ScopeOutcome, contestantId: string): boolean {
+  if (outcome.phase === "voting") return true
+  if (outcome.phase === "tie-active" || outcome.phase === "tie-fptp") return outcome.contestantIds.includes(contestantId)
+  return false
+}
+
+/**
+ * What a single poll or a leaf category should show once voting is (or
+ * isn't) over — winner, no-votes, or one of the tie-breaker phases. This
+ * is purely a DISPLAY read of already-computed state (pollData.tieBreakers,
+ * ticked server-side — see ./tie-breaker.ts's tickTieBreakers) — it never
+ * decides tie-breaker outcomes itself, it only describes them.
+ */
+export type ScopeOutcome =
+  | { phase: "voting" }
+  | { phase: "not-started" }
+  /** Poll/category ended with zero votes cast — nobody to crown. */
+  | { phase: "no-votes" }
+  /** A single contestant clearly has the top score (or a tie-breaker resolved it). */
+  | { phase: "winner"; winnerId: string }
+  /** Ended tied, but no tie-breaker is configured to resolve it. */
+  | { phase: "tie-unresolved"; contestantIds: string[] }
+  /** A timed tie-breaker round is open — only contestantIds are votable. */
+  | { phase: "tie-active"; round: number; contestantIds: string[]; endsAt: string; isFinalRound: boolean }
+  /**
+   * Rounds are exhausted — whoever of contestantIds gets the next vote
+   * wins. endsAt is the current FPTP window's deadline (same length as a
+   * timed round); if it lapses with no vote the window silently renews,
+   * so this can tick down and reset without ever becoming "closed".
+   */
+  | { phase: "tie-fptp"; round: number; contestantIds: string[]; endsAt: string | null }
+
+export function resolveScopeOutcome(
+  contestants: ContestantData[],
+  pollStatus: PollStatus,
+  tieBreakerState: TieBreakerState | null | undefined,
+  tieBreakerEnabled: boolean,
+): ScopeOutcome {
+  if (pollStatus === "notStarted") return { phase: "not-started" }
+  if (pollStatus === "active") return { phase: "voting" }
+
+  // pollStatus === "ended" from here down.
+  if (tieBreakerState) {
+    if (tieBreakerState.status === "resolved" && tieBreakerState.winnerId) {
+      return { phase: "winner", winnerId: tieBreakerState.winnerId }
+    }
+    if (tieBreakerState.status === "active" && tieBreakerState.endsAt) {
+      return {
+        phase: "tie-active",
+        round: tieBreakerState.round,
+        contestantIds: tieBreakerState.contestantIds,
+        endsAt: tieBreakerState.endsAt,
+        isFinalRound: tieBreakerState.isFinalRound,
+      }
+    }
+    if (tieBreakerState.status === "fptp") {
+      return {
+        phase: "tie-fptp",
+        round: tieBreakerState.round,
+        contestantIds: tieBreakerState.contestantIds,
+        endsAt: tieBreakerState.endsAt ?? null,
+      }
+    }
+  }
+
+  const totalVotes = (contestants ?? []).reduce((s, c) => s + (c.votes ?? 0), 0)
+  if (totalVotes === 0) return { phase: "no-votes" }
+
+  const topScore = Math.max(...contestants.map((c) => c.votes ?? 0))
+  const top = contestants.filter((c) => (c.votes ?? 0) === topScore)
+  if (top.length > 1) {
+    return { phase: "tie-unresolved", contestantIds: top.map((c) => c.contestantId) }
+  }
+  return { phase: "winner", winnerId: top[0].contestantId }
 }

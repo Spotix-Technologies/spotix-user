@@ -3,11 +3,12 @@
 import { useState, useMemo } from "react"
 import Link from "next/link"
 import { useSearchParams, useRouter } from "next/navigation"
-import { getPollStatus, findContestantInPoll } from "@/app/lib/voting-helpers"
+import { getPollStatus, findContestantInPoll, resolveScopeOutcome, buildLeafOutcomes, isContestantVotable } from "@/app/lib/voting-helpers"
 import type { VoteData, ContestantData, CategoryData } from "@/app/lib/voting-utils"
 import { FullscreenModal } from "./components/FullscreenModal"
 import { VoteModal } from "./components/VoteModal"
 import { ReportPollModal } from "./components/ReportPollModal"
+import { CheckVotePaymentModal } from "./components/CheckVotePaymentModal"
 import { SharedContestantSheet } from "./components/SharedContestantSheet"
 import { SuspendedBanner } from "./components/SuspendedBanner"
 import ComingSoonState from "./components/ComingSoonState"
@@ -32,6 +33,7 @@ export default function PollClient({ pollData, voteId, userId }: PollClientProps
   const [fullscreenContestant, setFullscreenContestant] = useState<ContestantData | null>(null)
   const [showVoteModal, setShowVoteModal] = useState(false)
   const [showReportModal, setShowReportModal] = useState(false)
+  const [showCheckPaymentModal, setShowCheckPaymentModal] = useState(false)
 
   // Shared-link deep dive: ?contestant=<contestantId> — resolved straight
   // against the already-loaded pollData, no extra fetch needed.
@@ -61,15 +63,38 @@ export default function PollClient({ pollData, voteId, userId }: PollClientProps
   const categories = pollData.categories ?? []
   const isActive = pollStatus === "active" && !suspended
 
-  const winner = useMemo(() => {
-    if (pollStatus !== "ended" || contestants.length === 0) return null
-    return contestants.reduce((h, c) => ((c.votes ?? 0) > (h.votes ?? 0) ? c : h), contestants[0])
-  }, [contestants, pollStatus])
+  const tieBreakerEnabled = pollData.enabledTieBreaker ?? false
+
+  // Single-poll outcome (winner / no-votes / tie phases). For group polls,
+  // one outcome is computed per LEAF category instead — see below.
+  const singleOutcome = useMemo(
+    () => resolveScopeOutcome(contestants, pollStatus, pollData.tieBreakers?.["single"], tieBreakerEnabled),
+    [contestants, pollStatus, pollData.tieBreakers, tieBreakerEnabled],
+  )
+  const categoryOutcomes = useMemo(
+    () => (isGroup ? buildLeafOutcomes(categories, pollStatus, pollData.tieBreakers, tieBreakerEnabled) : {}),
+    [isGroup, categories, pollStatus, pollData.tieBreakers, tieBreakerEnabled],
+  )
+
+  // Name lookup for the tie-breaker banners ("X and Y are tied").
+  const namesById = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const c of contestants) map[c.contestantId] = c.name
+    const walk = (cats: CategoryData[]) => {
+      for (const cat of cats ?? []) {
+        for (const c of cat.contestants ?? []) map[c.contestantId] = c.name
+        if (cat.subcategories?.length) walk(cat.subcategories)
+      }
+    }
+    walk(categories)
+    return map
+  }, [contestants, categories])
 
   const totalVotesSingle = contestants.reduce((s, c) => s + (c.votes ?? 0), 0)
 
   const handleVoteClick = (c: ContestantData, cat?: CategoryData) => {
-    if (!isActive) return
+    const outcome = cat ? categoryOutcomes[cat.categoryId] : singleOutcome
+    if (!outcome || !isContestantVotable(outcome, c.contestantId)) return
     setSelectedContestant(c)
     setSelectedCategory(cat ?? null)
     setShowVoteModal(true)
@@ -82,14 +107,23 @@ export default function PollClient({ pollData, voteId, userId }: PollClientProps
     [pollData, sharedContestantId],
   )
 
+  const sharedOutcome = sharedMatch
+    ? (sharedMatch.category ? categoryOutcomes[sharedMatch.category.categoryId] : singleOutcome)
+    : null
+  const sharedVotable = sharedOutcome && sharedMatch
+    ? isContestantVotable(sharedOutcome, sharedMatch.contestant.contestantId)
+    : false
+
   const inactiveReason = contestantsTBD
     ? "Contestants haven't been finalised for this poll yet."
     : suspended
     ? "This poll has been suspended and voting is currently unavailable."
     : pollStatus === "notStarted"
     ? "Voting hasn't started yet — check back soon."
-    : pollStatus === "ended"
-    ? "This poll has ended — voting is no longer available."
+    : pollStatus === "ended" && !sharedVotable
+    ? sharedOutcome?.phase === "tie-active" || sharedOutcome?.phase === "tie-fptp"
+      ? "This poll has ended — a tie-breaker is deciding this category and this contestant isn't part of it."
+      : "This poll has ended — voting is no longer available."
     : null
 
   // Strips ?contestant= off the URL once the shared-link flow is done.
@@ -99,6 +133,13 @@ export default function PollClient({ pollData, voteId, userId }: PollClientProps
     params.delete("contestant")
     router.replace(params.toString() ? `?${params.toString()}` : `/polls/${encodeURIComponent(pollData.pollName)}`, { scroll: false })
   }
+
+  // Any scope still actively deciding a tie — suppresses the blanket "poll
+  // has ended, voting unavailable" banner in favour of the per-section
+  // tie-breaker banners, since voting on the tied contestants IS still open.
+  const anyTieBreakerLive =
+    singleOutcome.phase === "tie-active" || singleOutcome.phase === "tie-fptp" ||
+    Object.values(categoryOutcomes).some((o) => o.phase === "tie-active" || o.phase === "tie-fptp")
 
   return (
     <>
@@ -121,6 +162,7 @@ export default function PollClient({ pollData, voteId, userId }: PollClientProps
         isActive={isActive}
         isGroup={isGroup}
         onReport={() => setShowReportModal(true)}
+        onCheckPayment={() => setShowCheckPaymentModal(true)}
       />
 
       {pollStatus !== "ended" && targetDate && !suspended && !contestantsTBD && (
@@ -130,7 +172,7 @@ export default function PollClient({ pollData, voteId, userId }: PollClientProps
         />
       )}
 
-      {pollStatus === "ended" && !contestantsTBD && (
+      {pollStatus === "ended" && !contestantsTBD && !anyTieBreakerLive && (
         <div className="mb-8 p-6 rounded-2xl bg-red-50 border-l-4 border-red-500">
           <p className="font-bold text-red-900">This poll has ended</p>
           <p className="text-red-700 text-sm mt-1">Voting is no longer available</p>
@@ -146,6 +188,8 @@ export default function PollClient({ pollData, voteId, userId }: PollClientProps
           pollStatus={pollStatus}
           statsVisible={statsVisible}
           pollName={pollData.pollName}
+          categoryOutcomes={categoryOutcomes}
+          namesById={namesById}
           onVote={handleVoteClick}
           onFullscreen={setFullscreenContestant}
         />
@@ -156,7 +200,8 @@ export default function PollClient({ pollData, voteId, userId }: PollClientProps
           pollStatus={pollStatus}
           statsVisible={statsVisible}
           totalVotes={totalVotesSingle}
-          winnerId={winner?.contestantId ?? null}
+          outcome={singleOutcome}
+          namesById={namesById}
           pollName={pollData.pollName}
           onVoteClick={handleVoteClick}
           onFullscreen={setFullscreenContestant}
@@ -186,12 +231,20 @@ export default function PollClient({ pollData, voteId, userId }: PollClientProps
         />
       )}
 
+      {showCheckPaymentModal && (
+        <CheckVotePaymentModal
+          pollId={voteId}
+          pollName={pollData.pollName}
+          onClose={() => setShowCheckPaymentModal(false)}
+        />
+      )}
+
       {sharedMatch && !sheetDismissed && !showVoteModal && (
         <SharedContestantSheet
           contestant={sharedMatch.contestant}
           categoryName={sharedMatch.category?.name ?? null}
           statsVisible={statsVisible}
-          isActive={isActive}
+          isActive={sharedVotable}
           inactiveReason={inactiveReason}
           onVote={() => {
             setSelectedContestant(sharedMatch.contestant)

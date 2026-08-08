@@ -17,6 +17,7 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { adminDb, adminAuth } from "@/app/lib/firebase-admin"
+import { getScopeEligibility } from "@/app/lib/tie-breaker"
 
 export async function POST(request: NextRequest) {
   let body: Record<string, any>
@@ -56,7 +57,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "voteCount must be at least 1" }, { status: 400 })
   }
 
-  // ── Poll existence & suspension check ─────────────────────────────────────
+  // ── Poll existence, suspension & voting-eligibility check ─────────────────
+  // This is the real gate for tie-breaker eligibility — reject BEFORE money
+  // changes hands rather than after (the webhook only re-checks defensively).
   try {
     const pollSnap = await adminDb.collection("voting").doc(resolvedPollId).get()
     if (!pollSnap.exists) {
@@ -65,6 +68,26 @@ export async function POST(request: NextRequest) {
     const pd = pollSnap.data()!
     if (pd.suspended === true) {
       return NextResponse.json({ error: "This poll has been suspended and is not accepting votes" }, { status: 403 })
+    }
+
+    const scopeKey = pd.pollType === "group" ? categoryId : "single"
+    const eligibility = getScopeEligibility(pd as any, scopeKey, new Date())
+
+    if (eligibility.mode === "closed") {
+      return NextResponse.json(
+        { error: "Voting has ended for this poll and there's nothing left to decide here." },
+        { status: 403 },
+      )
+    }
+    if (eligibility.mode === "tiebreaker" && !eligibility.contestantIds.includes(contestantId)) {
+      return NextResponse.json(
+        {
+          error: eligibility.status === "fptp"
+            ? "This category is down to a first-past-the-post tie-breaker between the tied contestants only."
+            : `A tie-breaker round (round ${eligibility.round}) is open between the tied contestants only.`,
+        },
+        { status: 403 },
+      )
     }
   } catch (err) {
     console.error("[vote/payref] Poll fetch error:", err)

@@ -1,4 +1,4 @@
-import { Flag, Users } from "lucide-react"
+import { Flag, Users, ReceiptText } from "lucide-react"
 import type { VoteData, PollStatus } from "@/app/lib/voting-utils"
 
 interface PollHeaderCardProps {
@@ -8,9 +8,10 @@ interface PollHeaderCardProps {
   isActive: boolean
   isGroup: boolean
   onReport: () => void
+  onCheckPayment: () => void
 }
 
-export function PollHeaderCard({ pollData, pollStatus, suspended, isActive, isGroup, onReport }: PollHeaderCardProps) {
+export function PollHeaderCard({ pollData, pollStatus, suspended, isActive, isGroup, onReport, onCheckPayment }: PollHeaderCardProps) {
   return (
     <div className="mb-8">
       <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 sm:p-8 border border-slate-200 shadow-xl">
@@ -43,8 +44,13 @@ export function PollHeaderCard({ pollData, pollStatus, suspended, isActive, isGr
             )
           )}
 
+          <button onClick={onCheckPayment}
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-500 hover:text-[#6b2fa5] hover:bg-[#6b2fa5]/5 rounded-full border border-slate-200 hover:border-[#6b2fa5]/30 transition-all">
+            <ReceiptText className="w-3 h-3" /> Check Vote Payment
+          </button>
+
           <button onClick={onReport}
-            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-full border border-slate-200 hover:border-red-200 transition-all">
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-full border border-slate-200 hover:border-red-200 transition-all">
             <Flag className="w-3 h-3" /> Report Poll
           </button>
         </div>

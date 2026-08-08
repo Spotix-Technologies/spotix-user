@@ -1,6 +1,6 @@
 "use client"
 
-import { Crown, Maximize2 } from "lucide-react"
+import { Crown, Maximize2, Scale } from "lucide-react"
 import type { ContestantData } from "@/app/lib/voting-utils"
 import { ShareButton } from "./ShareButton"
 import { buildVotingShareUrl, buildVotingShareMessage } from "@/app/lib/share"
@@ -8,7 +8,13 @@ import { buildVotingShareUrl, buildVotingShareMessage } from "@/app/lib/share"
 interface ContestantCardProps {
   contestant: ContestantData
   isWinner: boolean
-  isActive: boolean
+  /** Whether THIS contestant can currently receive a vote — true during
+   *  normal voting, or during an active/fptp tie-breaker round if they're
+   *  one of the tied contestants. False otherwise (ended, eliminated, etc). */
+  isVotable: boolean
+  /** True while this contestant is one of the tied contestants in a live
+   *  tie-breaker round — shows a small badge distinct from the winner crown. */
+  isTieBreakerContestant?: boolean
   pollStatus: "active" | "ended" | "notStarted"
   statsVisible: boolean
   totalVotes: number
@@ -21,7 +27,8 @@ interface ContestantCardProps {
 export function ContestantCard({
   contestant,
   isWinner,
-  isActive,
+  isVotable,
+  isTieBreakerContestant = false,
   pollStatus,
   statsVisible,
   totalVotes,
@@ -32,10 +39,16 @@ export function ContestantCard({
   const votes = contestant.votes ?? 0
   const pct   = totalVotes > 0 && statsVisible ? Math.round((votes / totalVotes) * 100) : 0
 
+  const buttonLabel = isVotable
+    ? "Vote Now"
+    : pollStatus === "notStarted"
+    ? "Coming Soon"
+    : "Voting Ended"
+
   return (
     <div
       className={`rounded-2xl overflow-hidden border-2 transition-all duration-300 hover:scale-[1.02] bg-white/80 hover:shadow-xl
-        ${isWinner ? "border-yellow-400 shadow-yellow-100" : "border-slate-200 hover:border-slate-300"}`}
+        ${isWinner ? "border-yellow-400 shadow-yellow-100" : isTieBreakerContestant ? "border-[#6b2fa5]/60" : "border-slate-200 hover:border-slate-300"}`}
     >
       <div className="relative h-56 overflow-hidden bg-slate-100">
         <img
@@ -47,6 +60,12 @@ export function ContestantCard({
           <div className="absolute top-3 left-3 bg-gradient-to-r from-yellow-400 to-yellow-600 text-white px-3 py-2 rounded-full shadow-lg flex items-center gap-2">
             <Crown className="w-4 h-4" />
             <span className="text-xs font-bold">Winner</span>
+          </div>
+        )}
+        {!isWinner && isTieBreakerContestant && (
+          <div className="absolute top-3 left-3 bg-gradient-to-r from-[#6b2fa5] to-[#9333ea] text-white px-3 py-2 rounded-full shadow-lg flex items-center gap-2">
+            <Scale className="w-4 h-4" />
+            <span className="text-xs font-bold">Tied</span>
           </div>
         )}
         <div className="absolute top-3 right-3 flex items-center gap-2">
@@ -79,8 +98,8 @@ export function ContestantCard({
           </div>
         )}
 
-        {/* Live progress bar when poll is active and stats are visible */}
-        {statsVisible && isActive && totalVotes > 0 && (
+        {/* Live progress bar when voting is open for this contestant and stats are visible */}
+        {statsVisible && isVotable && totalVotes > 0 && (
           <div className="mb-4">
             <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
               <span>{votes.toLocaleString()} votes</span>
@@ -97,13 +116,13 @@ export function ContestantCard({
 
         <button
           onClick={() => onVoteClick(contestant)}
-          disabled={!isActive}
+          disabled={!isVotable}
           className={`w-full py-3 px-4 rounded-xl font-semibold transition-all duration-300 flex items-center justify-center gap-2
-            ${isActive
+            ${isVotable
               ? "bg-gradient-to-r from-[#6b2fa5] to-[#9333ea] text-white hover:shadow-lg active:scale-95"
               : "bg-slate-100 text-slate-400 cursor-not-allowed opacity-60"}`}
         >
-          {isActive ? "Vote Now" : pollStatus === "notStarted" ? "Coming Soon" : "Voting Ended"}
+          {buttonLabel}
         </button>
       </div>
     </div>

@@ -1,4 +1,5 @@
 import type { ContestantData, CategoryData, PollStatus } from "@/app/lib/voting-utils"
+import type { ScopeOutcome } from "@/app/lib/voting-helpers"
 import { CategoryPanel } from "./CategoryPanel"
 
 interface GroupPollSectionProps {
@@ -7,12 +8,15 @@ interface GroupPollSectionProps {
   pollStatus: PollStatus
   statsVisible: boolean
   pollName: string
+  /** Outcome per LEAF category, keyed by categoryId — see voting-helpers.ts's buildLeafOutcomes. */
+  categoryOutcomes: Record<string, ScopeOutcome>
+  namesById: Record<string, string>
   onVote: (contestant: ContestantData, cat: CategoryData) => void
   onFullscreen: (contestant: ContestantData) => void
 }
 
 export function GroupPollSection({
-  categories, isActive, pollStatus, statsVisible, pollName, onVote, onFullscreen,
+  categories, isActive, pollStatus, statsVisible, pollName, categoryOutcomes, namesById, onVote, onFullscreen,
 }: GroupPollSectionProps) {
   return (
     <div className="space-y-3">
@@ -43,6 +47,8 @@ export function GroupPollSection({
             pollStatus={pollStatus}
             statsVisible={statsVisible}
             pollName={pollName}
+            categoryOutcomes={categoryOutcomes}
+            namesById={namesById}
             onVote={onVote}
             onFullscreen={onFullscreen}
           />
