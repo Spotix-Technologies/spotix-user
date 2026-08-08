@@ -22,6 +22,29 @@ interface RefData {
   pollName:        string | null
 }
 
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL
+
+/**
+ * Asks the backend to actively check this reference against Paystack and
+ * reconcile the Reference collection if it went through — see
+ * spotix-backend/v1/verify-payment.js. Used when our own Firestore read
+ * still shows "pending" (the webhook may be late or dropped). Returns
+ * null on any network/config problem so the caller just falls back to
+ * whatever it already has.
+ */
+async function reconcileWithBackend(ref: string): Promise<{ reconciled: boolean; status?: string } | null> {
+  if (!BACKEND_URL) return null
+  try {
+    const res = await fetch(`${BACKEND_URL}/v1/verify-payment?ref=${encodeURIComponent(ref)}`)
+    if (res.status === 429) return { reconciled: false } // rate limited — just fall back
+    const json = await res.json()
+    if (!res.ok) return null
+    return { reconciled: !!json.reconciled, status: json.status }
+  } catch {
+    return null
+  }
+}
+
 export default function CallbackPage() {
   const searchParams = useSearchParams()
   const params       = useParams()
@@ -40,12 +63,23 @@ export default function CallbackPage() {
     else setLoading(true)
 
     try {
-      const res = await fetch(`/api/v1/polls/verify?ref=${encodeURIComponent(ref)}`)
-      const json = await res.json()
+      let res = await fetch(`/api/v1/polls/verify?ref=${encodeURIComponent(ref)}`)
+      let json = await res.json()
 
       if (!res.ok) {
         setError(json.error ?? "Failed to fetch payment status.")
         return
+      }
+
+      // Still pending on our own record? Ask the backend to actively
+      // check with Paystack — the webhook may be late or never landed.
+      // If it reconciled anything, re-read the now-fresh status.
+      if (json.status !== "successful" && json.status !== "failed") {
+        const reconcileResult = await reconcileWithBackend(ref)
+        if (reconcileResult?.reconciled) {
+          res = await fetch(`/api/v1/polls/verify?ref=${encodeURIComponent(ref)}`)
+          json = await res.json()
+        }
       }
 
       setData(json)

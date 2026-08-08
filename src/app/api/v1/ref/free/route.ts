@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { adminDb } from "@/app/lib/firebase-admin"
 import { auth } from "firebase-admin"
+import { buildTicketReference } from "@/app/lib/reference-id"
 
 /**
  * POST /api/v1/ref/free
@@ -110,8 +111,10 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Generate reference ────────────────────────────────────────────────────
+    // 2 random letters appended after the timestamp — see
+    // src/app/lib/reference-id.ts for why (same-millisecond collisions).
     const timestamp = Date.now()
-    const reference = `SPTX-REF-${timestamp}`
+    const reference = buildTicketReference(timestamp)
     console.log(`[ref/free] Generated reference: ${reference}`)
 
     // ── Build Firestore document ───────────────────────────────────────────────

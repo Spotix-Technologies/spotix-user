@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { adminDb } from "@/app/lib/firebase-admin"
 import { auth } from "firebase-admin"
+import { buildTicketReference } from "@/app/lib/reference-id"
 
 export async function POST(request: NextRequest) {
   try {
@@ -127,8 +128,11 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Generate reference ────────────────────────────────────────────────────
+    // 2 random letters appended after the timestamp so two requests landing
+    // in the same millisecond (concurrent checkout traffic) can't collide
+    // on the same Reference doc ID — see src/app/lib/reference-id.ts.
     const timestamp = Date.now()
-    const reference = `SPTX-REF-${timestamp}`
+    const reference = buildTicketReference(timestamp)
     console.log(`[create-pay-ref] Generated reference: ${reference}`)
 
     // ── Build Firestore document ───────────────────────────────────────────────

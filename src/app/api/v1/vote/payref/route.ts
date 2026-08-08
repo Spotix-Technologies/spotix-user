@@ -7,7 +7,7 @@
  * pending document in the `Reference` collection (same collection used by
  * ticket purchases — see backend v1/ticket.js).
  *
- * Reference format : sptx-vt-{timestamp}
+ * Reference format : sptx-vt-{timestamp}-{2 random letters}
  * transactionType  : voting_purchase
  *
  * Supports both single and group polls (categoryId is optional but
@@ -18,6 +18,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { adminDb, adminAuth } from "@/app/lib/firebase-admin"
 import { getScopeEligibility } from "@/app/lib/tie-breaker"
+import { buildVoteReference } from "@/app/lib/reference-id"
 
 export async function POST(request: NextRequest) {
   let body: Record<string, any>
@@ -142,8 +143,11 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Reference generation ───────────────────────────────────────────────────
+  // 2 random letters appended after the timestamp so two votes landing in
+  // the same millisecond can't collide on the same Reference doc ID — see
+  // src/app/lib/reference-id.ts.
   const timestamp = Date.now()
-  const reference = `sptx-vt-${timestamp}`
+  const reference = buildVoteReference(timestamp)
 
   // ── Store in Reference collection ──────────────────────────────────────────
   const refDoc: Record<string, any> = {

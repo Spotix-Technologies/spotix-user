@@ -189,7 +189,7 @@ export function CheckVotePaymentModal({ pollId, pollName, onClose }: CheckVotePa
                         onClick={() => handleViewReceipt(r.reference)}
                         className="w-full mt-1 py-2 px-4 border border-[#6b2fa5] text-[#6b2fa5] rounded-lg font-semibold text-xs hover:bg-[#6b2fa5]/5 transition-colors"
                       >
-                        View Receipt
+                        {r.status.toLowerCase() === "pending" ? "Recheck Payment" : "View Receipt"}
                       </button>
                     </div>
                   ))}
