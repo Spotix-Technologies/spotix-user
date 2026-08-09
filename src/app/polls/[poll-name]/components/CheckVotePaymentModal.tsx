@@ -12,6 +12,7 @@ interface CheckVotePaymentModalProps {
 interface PaymentMatch {
   reference:      string
   status:         string
+  contestantId:   string | null
   contestantName: string
   voteCount:      number
   totalAmount:    number
@@ -57,6 +58,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export function CheckVotePaymentModal({ pollId, pollName, onClose }: CheckVotePaymentModalProps) {
+  const [searchMode, setSearchMode] = useState<"general" | "contestant">("general")
   const [query,     setQuery]     = useState("")
   const [loading,   setLoading]   = useState(false)
   const [error,     setError]     = useState("")
@@ -66,7 +68,11 @@ export function CheckVotePaymentModal({ pollId, pollName, onClose }: CheckVotePa
   const handleSearch = async () => {
     const trimmed = query.trim()
     if (!trimmed) {
-      setError("Enter an email, phone number, or reference to search.")
+      setError(
+        searchMode === "contestant"
+          ? "Enter the contestant ID to search."
+          : "Enter an email, phone number, or reference to search."
+      )
       return
     }
 
@@ -76,8 +82,9 @@ export function CheckVotePaymentModal({ pollId, pollName, onClose }: CheckVotePa
     setVisible(PAGE_SIZE)
 
     try {
+      const param = searchMode === "contestant" ? "contestantId" : "q"
       const res  = await fetch(
-        `/api/v1/vote/check-payment?q=${encodeURIComponent(trimmed)}&pollId=${encodeURIComponent(pollId)}`
+        `/api/v1/vote/check-payment?${param}=${encodeURIComponent(trimmed)}&pollId=${encodeURIComponent(pollId)}`
       )
       const json = await res.json()
 
@@ -135,9 +142,30 @@ export function CheckVotePaymentModal({ pollId, pollName, onClose }: CheckVotePa
           <div className="flex items-start gap-2.5 bg-purple-50 border border-purple-200 rounded-xl p-3.5">
             <HelpCircle className="w-4 h-4 text-[#6b2fa5] flex-shrink-0 mt-0.5" />
             <p className="text-xs text-slate-600 leading-relaxed">
-              Have you paid to vote on this poll and you&apos;re not sure if it reflected? Enter your email or
-              phone number that you used to vote or the reference sent to your email after you voted.
+              {searchMode === "contestant"
+                ? "Enter a contestant ID to see every vote made toward them and its status — only available if the organizer has made stats visible for this poll."
+                : "Have you paid to vote on this poll and you're not sure if it reflected? Enter your email or phone number that you used to vote or the reference sent to your email after you voted."}
             </p>
+          </div>
+
+          {/* Search mode toggle */}
+          <div className="flex gap-2 p-1 bg-slate-100 rounded-xl">
+            <button
+              onClick={() => { setSearchMode("general"); setError(""); setResults(null) }}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                searchMode === "general" ? "bg-white text-[#6b2fa5] shadow-sm" : "text-slate-500"
+              }`}
+            >
+              Reference / Email / Phone
+            </button>
+            <button
+              onClick={() => { setSearchMode("contestant"); setError(""); setResults(null) }}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                searchMode === "contestant" ? "bg-white text-[#6b2fa5] shadow-sm" : "text-slate-500"
+              }`}
+            >
+              Contestant ID
+            </button>
           </div>
 
           <div className="flex gap-2">
@@ -146,7 +174,7 @@ export function CheckVotePaymentModal({ pollId, pollName, onClose }: CheckVotePa
               value={query}
               onChange={(e) => { setQuery(e.target.value); setError("") }}
               onKeyDown={handleKeyDown}
-              placeholder="Email, phone number, or reference"
+              placeholder={searchMode === "contestant" ? "Contestant ID" : "Email, phone number, or reference"}
               className="flex-1 px-4 py-3 border border-gray-300 rounded-xl text-sm text-black placeholder:text-gray-400 focus:outline-none focus:border-[#6b2fa5] focus:ring-2 focus:ring-[#6b2fa5]/20 transition-all"
             />
             <button
@@ -166,7 +194,7 @@ export function CheckVotePaymentModal({ pollId, pollName, onClose }: CheckVotePa
               {results.length === 0 ? (
                 <div className="text-center py-8">
                   <p className="text-sm text-slate-500">No matching payments found for this poll.</p>
-                  <p className="text-xs text-slate-400 mt-1">Double-check what you entered, or try your reference key instead.</p>
+                  <p className="text-xs text-slate-400 mt-1">Double-check what you entered, or try your reference key sent to your email instead.</p>
                 </div>
               ) : (
                 <>

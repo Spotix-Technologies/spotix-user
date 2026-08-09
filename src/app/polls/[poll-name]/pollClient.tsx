@@ -10,6 +10,7 @@ import { VoteModal } from "./components/VoteModal"
 import { ReportPollModal } from "./components/ReportPollModal"
 import { CheckVotePaymentModal } from "./components/CheckVotePaymentModal"
 import { SharedContestantSheet } from "./components/SharedContestantSheet"
+import { SearchBar, type SearchableContestant } from "./components/SearchBar"
 import { SuspendedBanner } from "./components/SuspendedBanner"
 import ComingSoonState from "./components/ComingSoonState"
 import { PollHeaderCard } from "./components/PollHeaderCard"
@@ -91,6 +92,45 @@ export default function PollClient({ pollData, voteId, userId }: PollClientProps
   }, [contestants, categories])
 
   const totalVotesSingle = contestants.reduce((s, c) => s + (c.votes ?? 0), 0)
+
+  // Flattens contestants/[categories] into one searchable list for the
+  // SearchBar — single-poll contestants carry no category, group-poll
+  // contestants carry their LEAF category (votes always target a leaf) plus
+  // a display path built by walking down from the top-level category.
+  const searchableItems: SearchableContestant[] = useMemo(() => {
+    if (isGroup) {
+      const items: SearchableContestant[] = []
+      const walk = (cats: CategoryData[], pathParts: string[]) => {
+        for (const cat of cats ?? []) {
+          const nextPath = [...pathParts, cat.name]
+          if (cat.subcategories?.length) {
+            walk(cat.subcategories, nextPath)
+          } else {
+            const outcome = categoryOutcomes[cat.categoryId]
+            for (const c of cat.contestants ?? []) {
+              items.push({
+                contestant: c,
+                category: cat,
+                categoryPath: nextPath.join(" > "),
+                isVotable: outcome ? isContestantVotable(outcome, c.contestantId) : false,
+              })
+            }
+          }
+        }
+      }
+
+      // recursively walk through each category
+      walk(categories, [])
+      return items
+    }
+
+    return contestants.map((c) => ({
+      contestant: c,
+      category: null,
+      categoryPath: null,
+      isVotable: isContestantVotable(singleOutcome, c.contestantId),
+    }))
+  }, [isGroup, categories, categoryOutcomes, contestants, singleOutcome])
 
   const handleVoteClick = (c: ContestantData, cat?: CategoryData) => {
     const outcome = cat ? categoryOutcomes[cat.categoryId] : singleOutcome
@@ -181,31 +221,42 @@ export default function PollClient({ pollData, voteId, userId }: PollClientProps
 
       {contestantsTBD ? (
         <ComingSoonState pollName={pollData.pollName} />
-      ) : isGroup ? (
-        <GroupPollSection
-          categories={categories}
-          isActive={isActive}
-          pollStatus={pollStatus}
-          statsVisible={statsVisible}
-          pollName={pollData.pollName}
-          categoryOutcomes={categoryOutcomes}
-          namesById={namesById}
-          onVote={handleVoteClick}
-          onFullscreen={setFullscreenContestant}
-        />
       ) : (
-        <SinglePollSection
-          contestants={contestants}
-          isActive={isActive}
-          pollStatus={pollStatus}
-          statsVisible={statsVisible}
-          totalVotes={totalVotesSingle}
-          outcome={singleOutcome}
-          namesById={namesById}
-          pollName={pollData.pollName}
-          onVoteClick={handleVoteClick}
-          onFullscreen={setFullscreenContestant}
-        />
+        <>
+          {searchableItems.length > 0 && (
+            <SearchBar
+              items={searchableItems}
+              onVote={(c, cat) => handleVoteClick(c, cat ?? undefined)}
+            />
+          )}
+
+          {isGroup ? (
+            <GroupPollSection
+              categories={categories}
+              isActive={isActive}
+              pollStatus={pollStatus}
+              statsVisible={statsVisible}
+              pollName={pollData.pollName}
+              categoryOutcomes={categoryOutcomes}
+              namesById={namesById}
+              onVote={handleVoteClick}
+              onFullscreen={setFullscreenContestant}
+            />
+          ) : (
+            <SinglePollSection
+              contestants={contestants}
+              isActive={isActive}
+              pollStatus={pollStatus}
+              statsVisible={statsVisible}
+              totalVotes={totalVotesSingle}
+              outcome={singleOutcome}
+              namesById={namesById}
+              pollName={pollData.pollName}
+              onVoteClick={handleVoteClick}
+              onFullscreen={setFullscreenContestant}
+            />
+          )}
+        </>
       )}
 
       {/* Modals */}
