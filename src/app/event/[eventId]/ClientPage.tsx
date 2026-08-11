@@ -31,6 +31,7 @@ import BuyTicketDialog from "./buy-ticket-dialog"
 import MerchSection from "./merch-section"
 import { ReportModal } from "./report-modal"
 import VotingSection from "./voting"
+import { CheckTicketPaymentModal } from "./CheckTicketPaymentModal"
 
 import type { EventType } from "./page"
 
@@ -40,6 +41,10 @@ interface ClientPageProps {
     eventId: string
   }
   initialEventData?: EventType | null
+  /** Referral name carried in via ?referral= on the event URL, e.g. from a
+   *  "Share Referral Link" generated in the booker portal. Already sanitized
+   *  (whitespace-stripped) server-side in page.tsx. */
+  referralCode?: string
 }
 
 // ── Skeleton / Preloader ──────────────────────────────────────────────────────
@@ -84,7 +89,7 @@ const AuthSkeleton = () => (
 
 // ── ClientPage ────────────────────────────────────────────────────────────────
 
-export default function ClientPage({ params, initialEventData }: ClientPageProps) {
+export default function ClientPage({ params, initialEventData, referralCode }: ClientPageProps) {
   const { createdBy, eventId } = params
   const router = useRouter()
 
@@ -132,6 +137,7 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
   const [showBuyTicketDialog, setShowBuyTicketDialog] = useState(false)
   const [isPageLoaded, setIsPageLoaded] = useState(false)
   const [showReportModal, setShowReportModal] = useState(false)
+  const [showCheckPaymentModal, setShowCheckPaymentModal] = useState(false)
 
   const footerRef = useRef<HTMLDivElement>(null)
   const bookerDetailsRef = useRef<HTMLDivElement>(null)
@@ -169,6 +175,23 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
     })
     return () => unsubscribe()
   }, [])
+
+  // ── Referral link capture ─────────────────────────────────────────────────
+  // A referral link looks like /event/{eventId}?referral={referralName}.
+  // Stash it under the same sessionStorage key the payment page's manual
+  // referral dropdown uses ("selected_referral_code"), so it's automatically
+  // picked up and preserved all the way through checkout without the buyer
+  // having to pick it again — and so it ends up on the payment record in the
+  // database, same as a manually-selected referral.
+  useEffect(() => {
+    if (!referralCode) return
+    if (typeof window === "undefined") return
+    try {
+      sessionStorage.setItem("selected_referral_code", JSON.stringify({ code: referralCode }))
+    } catch (error) {
+      console.error("Error storing referral code:", error)
+    }
+  }, [referralCode])
 
   // ── Fetch user display data ───────────────────────────────────────────────
   // Wait for both JWT check AND Firebase session before reading Firestore,
@@ -580,11 +603,26 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
 
             {/* Right column */}
             <div className="space-y-6 lg:relative lg:z-0">
+              {/* Voting banner sits at the very top of this column — right
+                  where buyers land — since it's easy to miss once it's
+                  buried below the ticket/booker info. */}
+              {eventData.votingId && (
+                <VotingSection
+                  votingId={eventData.votingId}
+                  votingPollName={eventData.votingPollName ?? null}
+                />
+              )}
               <div>
                 <TicketSummaryCard eventData={eventData} />
                 <div className="mt-6">
                   <CtaButton />
                 </div>
+                <button
+                  onClick={() => setShowCheckPaymentModal(true)}
+                  className="w-full mt-3 text-center text-xs text-gray-500 hover:text-[#6b2fa5] font-medium underline underline-offset-2 transition-colors"
+                >
+                  Already paid? Check your payment status
+                </button>
               </div>
               <div ref={bookerDetailsRef}>
                 <BookerDetailsSection
@@ -593,12 +631,6 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
                   createdBy={eventData.createdBy}
                 />
               </div>
-              {eventData.votingId && (
-                <VotingSection
-                  votingId={eventData.votingId}
-                  votingPollName={eventData.votingPollName ?? null}
-                />
-              )}
             </div>
           </div>
         </div>
@@ -658,6 +690,14 @@ export default function ClientPage({ params, initialEventData }: ClientPageProps
             onClose={() => setShowReportModal(false)}
             eventId={eventId || ""}
             eventName={eventData.eventName}
+          />
+        )}
+
+        {/* Check Payment Status Modal */}
+        {showCheckPaymentModal && (
+          <CheckTicketPaymentModal
+            eventName={eventData.eventName}
+            onClose={() => setShowCheckPaymentModal(false)}
           />
         )}
       </div>

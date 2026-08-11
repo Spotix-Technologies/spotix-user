@@ -10,9 +10,11 @@ import Footer from "@/components/footer"
 // Sub-components
 import LoadingState from "./components/LoadingState"
 import ErrorState from "./components/ErrorState"
+import IncorrectAmountState from "./components/IncorrectAmountState"
 import Confetti from "./components/Confetti"
 import TicketQRCard from "./components/TicketQRCard"
 import SaveTicketsBanner from "./components/SaveTicketsBanner"
+import { isIncorrectAmountMessage } from "@/utils/paymentMessages"
 
 // PDF helpers
 import { rasteriseQRFromWrapper, buildAllTicketsPDF } from "@/lib/ticket"
@@ -52,6 +54,7 @@ function PaymentSuccessContent() {
   const [loading, setLoading]               = useState(true)
   const [ticketData, setTicketData]         = useState<TicketData | null>(null)
   const [error, setError]                   = useState<string | null>(null)
+  const [incorrectAmount, setIncorrectAmount] = useState(false)
   const [showConfetti, setShowConfetti]     = useState(false)
   const [downloading, setDownloading]       = useState(false)
   const [downloaded, setDownloaded]         = useState(false)
@@ -106,6 +109,14 @@ function PaymentSuccessContent() {
           }
 
           if (!response.ok) {
+            // Buyer transferred the wrong amount — the backend's Paystack
+            // check surfaces this as a specific gateway message rather
+            // than a generic failure. Show the reversal notice instead.
+            if (isIncorrectAmountMessage(data.message)) {
+              setIncorrectAmount(true)
+              setLoading(false)
+              return
+            }
             setError(data.message || "Failed to generate ticket. Please try again.")
             setLoading(false)
             return
@@ -118,6 +129,12 @@ function PaymentSuccessContent() {
             sessionStorage.removeItem("paystack_payment_data")
             sessionStorage.removeItem("spotix_payment_data")
             sessionStorage.removeItem("selected_referral_code")
+            setLoading(false)
+            return
+          }
+
+          if (isIncorrectAmountMessage(data.message)) {
+            setIncorrectAmount(true)
             setLoading(false)
             return
           }
@@ -191,6 +208,15 @@ function PaymentSuccessContent() {
 
   // ── Render states ──────────────────────────────────────────────────────────
   if (loading) return <LoadingState />
+
+  if (incorrectAmount) {
+    return (
+      <IncorrectAmountState
+        reference={searchParams.get("reference")}
+        onGoHome={handleGoHome}
+      />
+    )
+  }
 
   if (error) {
     return (

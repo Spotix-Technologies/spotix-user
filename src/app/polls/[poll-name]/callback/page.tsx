@@ -6,20 +6,22 @@ import Link from "next/link"
 import { Loader2, ArrowLeft } from "lucide-react"
 import UserHeader from "@/components/UserHeader"
 import Footer from "@/components/footer"
-import PendingState   from "../components/PendingState"
-import SuccessState   from "../components/SuccessState"
-import FailedState    from "../components/FailedState"
-import WrongTypeState from "../components/WrongTypeState"
+import PendingState         from "../components/PendingState"
+import SuccessState         from "../components/SuccessState"
+import FailedState          from "../components/FailedState"
+import WrongTypeState       from "../components/WrongTypeState"
+import IncorrectAmountState from "../components/IncorrectAmountState"
 
 interface RefData {
   transactionType: string | null
-  status:          "pending" | "success" | "failed" | string
+  status:          "pending" | "success" | "failed" | "incorrect_payment" | string
   contestantId:    string | null
   contestantName:  string | null
   voteCount:       number | null
   updatedAt:       string | null
   pollId:          string | null
   pollName:        string | null
+  message?:        string | null
 }
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL
@@ -32,14 +34,16 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL
  * null on any network/config problem so the caller just falls back to
  * whatever it already has.
  */
-async function reconcileWithBackend(ref: string): Promise<{ reconciled: boolean; status?: string } | null> {
+async function reconcileWithBackend(
+  ref: string
+): Promise<{ reconciled: boolean; status?: string; message?: string } | null> {
   if (!BACKEND_URL) return null
   try {
     const res = await fetch(`${BACKEND_URL}/v1/verify-payment?ref=${encodeURIComponent(ref)}`)
     if (res.status === 429) return { reconciled: false } // rate limited — just fall back
     const json = await res.json()
     if (!res.ok) return null
-    return { reconciled: !!json.reconciled, status: json.status }
+    return { reconciled: !!json.reconciled, status: json.status, message: json.message }
   } catch {
     return null
   }
@@ -73,8 +77,9 @@ export default function CallbackPage() {
 
       // Still pending on our own record? Ask the backend to actively
       // check with Paystack — the webhook may be late or never landed.
-      // If it reconciled anything, re-read the now-fresh status.
-      if (json.status !== "successful" && json.status !== "failed") {
+      // If it reconciled anything, re-read the now-fresh status. (Terminal
+      // states — successful/failed/incorrect_payment — never re-check.)
+      if (json.status !== "successful" && json.status !== "failed" && json.status !== "incorrect_payment") {
         const reconcileResult = await reconcileWithBackend(ref)
         if (reconcileResult?.reconciled) {
           res = await fetch(`/api/v1/polls/verify?ref=${encodeURIComponent(ref)}`)
@@ -134,6 +139,16 @@ export default function CallbackPage() {
           updatedAt={data.updatedAt         ?? new Date().toISOString()}
           pollId={data.pollId               ?? pollId}
           pollName={data.pollName}
+        />
+      )
+    }
+
+    if (data.status === "incorrect_payment") {
+      return (
+        <IncorrectAmountState
+          pollId={data.pollId ?? pollId}
+          pollName={data.pollName}
+          message={data.message}
         />
       )
     }

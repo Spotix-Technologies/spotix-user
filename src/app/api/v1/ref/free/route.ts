@@ -154,11 +154,17 @@ export async function POST(request: NextRequest) {
       paymentCreationDate: new Date().toISOString(),
       paymentCreationTimestamp: timestamp,
 
-      // Discount / referral
+      // Discount / referral — strip any whitespace defensively (referral names
+      // are never allowed to contain spaces), in case the client-stored value
+      // was tampered with before this request was sent.
       discountCode: discountCode || null,
       discountData: discountData || null,
-      referralCode: referralCode || null,
-      referralName: referralData?.code || referralCode || null,
+      referralCode: referralCode ? String(referralCode).replace(/\s+/g, "") : null,
+      referralName: referralData?.code
+        ? String(referralData.code).replace(/\s+/g, "")
+        : referralCode
+        ? String(referralCode).replace(/\s+/g, "")
+        : null,
 
       surveyResponses:
         surveyResponses && typeof surveyResponses === "object" && Object.keys(surveyResponses).length > 0

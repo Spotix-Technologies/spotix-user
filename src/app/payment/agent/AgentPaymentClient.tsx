@@ -1,11 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { CheckCircle, AlertCircle, Loader2, Ticket, CalendarDays, MapPin, UserCheck } from "lucide-react"
 import UserHeader from "@/components/UserHeader"
 import Footer from "@/components/footer"
-import PayWithPaystack from "@/components/PayWithPaystack"
+import PayWithPaystack, { type PayWithPaystackHandle } from "@/components/PayWithPaystack"
 
 interface AgentReference {
   reference: string
@@ -35,7 +35,7 @@ export default function AgentPaymentClient({ refId }: { refId: string | null }) 
   const [data, setData] = useState<AgentReference | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [showPaystack, setShowPaystack] = useState(false)
+  const paystackRef = useRef<PayWithPaystackHandle>(null)
 
   useEffect(() => {
     if (!refId) {
@@ -67,7 +67,8 @@ export default function AgentPaymentClient({ refId }: { refId: string | null }) 
   }
 
   const handlePaystackClose = () => {
-    setShowPaystack(false)
+    // PayWithPaystack now manages its own abandonment/retry UI internally;
+    // nothing else to do here.
   }
 
   const [confirming, setConfirming] = useState(false)
@@ -204,7 +205,7 @@ export default function AgentPaymentClient({ refId }: { refId: string | null }) 
           </div>
 
           <button
-            onClick={() => (data.isFree ? handleConfirmFree() : setShowPaystack(true))}
+            onClick={() => (data.isFree ? handleConfirmFree() : paystackRef.current?.open(data.reference))}
             disabled={confirming}
             className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white font-semibold py-3.5 text-sm transition-all shadow-sm flex items-center justify-center gap-2 disabled:opacity-60"
           >
@@ -214,26 +215,25 @@ export default function AgentPaymentClient({ refId }: { refId: string | null }) 
       </main>
       <Footer />
 
-      {showPaystack && (
-        <PayWithPaystack
-          email={data.buyerEmail}
-          amount={data.totalAmount}
-          isGuest={true}
-          userId={null}
-          fullName={data.buyerFullName}
-          phone={data.buyerPhone}
-          metadata={{
-            eventId: data.eventId,
-            eventName: data.eventName,
-            ticketType: data.ticketType,
-            ticketPrice: data.totalAmount,
-            eventCreatorId: data.eventCreatorId,
-            userId: null,
-          }}
-          onSuccess={handlePaystackSuccess}
-          onClose={handlePaystackClose}
-        />
-      )}
+      <PayWithPaystack
+        ref={paystackRef}
+        type="ticket"
+        email={data.buyerEmail}
+        amount={data.totalAmount}
+        isGuest={true}
+        userId={null}
+        fullName={data.buyerFullName}
+        phone={data.buyerPhone}
+        metadata={{
+          eventId: data.eventId,
+          eventName: data.eventName,
+          ticketType: data.ticketType,
+          eventCreatorId: data.eventCreatorId,
+          userId: null,
+        }}
+        onSuccess={handlePaystackSuccess}
+        onClose={handlePaystackClose}
+      />
     </div>
   )
 }

@@ -249,8 +249,10 @@ function SuspendedPage({ eventData }: { eventData: EventType }) {
 
 export default async function EventPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ createdBy: string; eventId: string }>
+  searchParams?: Promise<{ referral?: string | string[] }>
 }) {
   const { createdBy, eventId } = await params
   const eventData = await fetchEventData(eventId)
@@ -259,5 +261,21 @@ export default async function EventPage({
     return <SuspendedPage eventData={eventData} />
   }
 
-  return <ClientPage params={{ createdBy, eventId }} initialEventData={eventData} />
+  // Referral links come in as /event/{eventId}?referral={referralName}. Take
+  // the first value if it's somehow repeated, and strip whitespace — referral
+  // names are never allowed to contain spaces (enforced when they're created
+  // in the booker portal too).
+  const resolvedSearchParams = searchParams ? await searchParams : undefined
+  const rawReferral = Array.isArray(resolvedSearchParams?.referral)
+    ? resolvedSearchParams?.referral[0]
+    : resolvedSearchParams?.referral
+  const referralCode = rawReferral ? rawReferral.replace(/\s+/g, "").trim() : undefined
+
+  return (
+    <ClientPage
+      params={{ createdBy, eventId }}
+      initialEventData={eventData}
+      referralCode={referralCode}
+    />
+  )
 }

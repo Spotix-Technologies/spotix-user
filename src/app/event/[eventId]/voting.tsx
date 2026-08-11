@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { Vote, Users, Trophy, ChevronRight, Loader2, Tag } from "lucide-react"
+import { Vote, Trophy, ChevronRight, Loader2, Tag } from "lucide-react"
 
 interface Contestant {
   contestantId: string
@@ -107,7 +107,6 @@ export default function VotingSection({ votingId, votingPollName }: VotingProps)
   if (isGroup) {
     const categories    = poll.categories ?? []
     const categoryCount = categories.length
-    const totalVotes    = poll.pollCount ?? 0
 
     return (
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -138,12 +137,6 @@ export default function VotingSection({ votingId, votingPollName }: VotingProps)
               <Tag className="w-4 h-4 text-[#6b2fa5]" />
               <span><strong className="text-slate-800">{categoryCount}</strong> award {categoryCount === 1 ? "category" : "categories"}</span>
             </div>
-            {statsVisible && (
-              <div className="flex items-center gap-1.5 text-sm text-slate-500">
-                <Users className="w-4 h-4 text-[#6b2fa5]" />
-                <span><strong className="text-slate-800">{totalVotes.toLocaleString()}</strong> total votes</span>
-              </div>
-            )}
           </div>
 
           {/* Category name pills */}
@@ -204,14 +197,10 @@ export default function VotingSection({ votingId, votingPollName }: VotingProps)
 
       {/* Body */}
       <div className="p-5">
-        {/* Stats row */}
+        {/* Stats row — total vote counts are intentionally not shown here;
+            buyers landing on the event page don't need that number, and it
+            isn't essential to deciding whether to vote. */}
         <div className="flex items-center gap-4 mb-5">
-          {statsVisible && (
-            <div className="flex items-center gap-1.5 text-sm text-slate-500">
-              <Users className="w-4 h-4 text-[#6b2fa5]" />
-              <span><strong className="text-slate-800">{totalVotes.toLocaleString()}</strong> votes cast</span>
-            </div>
-          )}
           <div className="flex items-center gap-1.5 text-sm text-slate-500">
             <Trophy className="w-4 h-4 text-[#6b2fa5]" />
             <span><strong className="text-slate-800">{poll.contestants.length}</strong> contestants</span>

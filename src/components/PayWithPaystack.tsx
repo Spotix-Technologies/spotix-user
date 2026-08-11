@@ -9,39 +9,36 @@ import {
   useState,
 } from "react"
 import { authFetch } from "@/app/lib/auth-client-user"
-import { Loader2, CreditCard, AlertCircle } from "lucide-react"
+import { Loader2, CreditCard, AlertCircle, RotateCcw } from "lucide-react"
 import AddPhoneNumber from "./Addphonenumber"
+import { ensurePaystackScriptLoaded, isPaystackReady, exactAmountNotice, upsertPaystackCustomer, splitFullName } from "./lib/paystack-shared"
+import { ticketWithPaystack, type TicketPaystackMetadata } from "./lib/ticket-payment-utility"
+import { voteWithPaystack, type VotePaystackMetadata } from "./lib/vote-payment-utility"
 
-interface PayWithPaystackProps {
+type PayWithPaystackBaseProps = {
   email: string
   amount: number
   isGuest?: boolean
   userId?: string | null
   /**
    * Full name of the payer.
-   * For logged-in users this is normally passed in from PaymentClient (which
+   * For logged-in users this is normally passed in from the caller (which
    * already fetched it via /api/v1/user/me). For guests it comes from the
-   * checkout form. Only falls back to fetching internally if omitted.
+   * checkout/vote form. Only falls back to fetching internally if omitted
+   * (ticket flow only — see the profile-resolution effect below).
    */
   fullName?: string | null
   /**
    * Phone number of the payer. Same sourcing as fullName above.
    */
   phone?: string | null
-  metadata: {
-    eventId: string
-    eventName: string
-    ticketType?: string
-    ticketPrice: number
-    eventCreatorId: string
-    userId?: string | null
-    discountCode?: string | null
-    referralCode?: string | null
-    [key: string]: any
-  }
   onSuccess: (reference: string) => void
   onClose: () => void
 }
+
+type PayWithPaystackProps =
+  | (PayWithPaystackBaseProps & { type: "ticket"; metadata: TicketPaystackMetadata })
+  | (PayWithPaystackBaseProps & { type: "vote"; metadata: VotePaystackMetadata })
 
 export interface PayWithPaystackHandle {
   /**
@@ -63,9 +60,16 @@ declare global {
   }
 }
 
+// How long the "kindly transfer exactly ₦X" notice stays on screen before
+// the Paystack widget opens automatically.
+const AMOUNT_NOTICE_DELAY_MS = 1500
+
+type Stage = "confirm" | "connecting" | "phone-prompt" | "abandoned" | "error"
+
 const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
   function PayWithPaystack(
     {
+      type,
       email,
       amount,
       isGuest = false,
@@ -78,94 +82,50 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
     },
     ref
   ) {
-    // Whether the overlay UI (loading / error / phone-prompt / "opening"
-    // screens) should render at all. Stays false — component renders
-    // nothing — until open() is actually called, even though the script
-    // and profile preloading below happen quietly in the background the
-    // whole time the buyer is still on the payment page.
+    // Whether the overlay UI should render at all. Stays false until
+    // open() is actually called, even though script + profile preloading
+    // below happen quietly in the background the whole time the buyer is
+    // still on the payment page.
     const [active, setActive] = useState(false)
+    const [stage, setStage] = useState<Stage>("confirm")
 
-    const [scriptLoading, setScriptLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
 
-    // Resolved payer identity — populated from Firestore for auth users
-    // without a phone prop, or straight from props otherwise.
+    // Resolved payer identity — populated from Firestore for auth ticket
+    // buyers without a phone prop, or straight from props otherwise.
     const [resolvedFullName, setResolvedFullName] = useState<string | null>(propFullName)
     const [phoneNumber, setPhoneNumber] = useState<string | null>(propPhone)
 
-    const [showPhoneNumberModal, setShowPhoneNumberModal] = useState(false)
-    const [checkingProfile, setCheckingProfile] = useState(!isGuest)
-    const [scriptLoaded, setScriptLoaded] = useState(false)
+    const [checkingProfile, setCheckingProfile] = useState(!isGuest && type === "ticket")
 
-    // Holds a reference that came in via open() while we were still waiting
-    // on the phone number — so once AddPhoneNumber's own submit click
-    // resolves, we can resume directly from THAT click's handler chain
-    // instead of an effect.
+    // Holds the reference currently being paid for — used both by the
+    // amount-notice → auto-open timer and by the "Have another go?" retry
+    // after an abandoned attempt.
     const pendingReferenceRef = useRef<string | null>(null)
+    const pendingPhoneOverrideRef = useRef<string | null>(null)
+    const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-    // Keep the latest callbacks in refs so doOpen doesn't need them in its
-    // dependency array (they're recreated every PaymentClient render).
+    // Keep the latest callbacks in refs so openWidget doesn't need them in
+    // its dependency array (they're recreated every parent render).
     const onSuccessRef = useRef(onSuccess)
     const onCloseRef = useRef(onClose)
     useEffect(() => { onSuccessRef.current = onSuccess }, [onSuccess])
     useEffect(() => { onCloseRef.current = onClose }, [onClose])
 
     // ── Preload the Paystack inline script ──────────────────────────────
-    // PaymentClient already preloads this script as soon as it knows the
-    // event is paid, well before the buyer reaches this component — so in
-    // the common case window.PaystackPop already exists here on first
-    // render. This effect is a safety net for the cases where it doesn't
-    // (e.g. this component mounted before PaymentClient's preload effect
-    // ran, or the script tag is still mid-flight).
+    // Callers often preload this script themselves as soon as they know a
+    // payment is coming — this effect is just a safety net for cases
+    // where it hasn't loaded yet by the time open() is called.
     useEffect(() => {
-      if (window.PaystackPop) {
-        setScriptLoaded(true)
-        setScriptLoading(false)
-        return
-      }
-
-      const existing = document.querySelector<HTMLScriptElement>(
-        'script[src="https://js.paystack.co/v1/inline.js"]'
-      )
-
-      if (existing) {
-        // Already being loaded elsewhere (PaymentClient's preload) — just
-        // wait for it rather than injecting a second copy.
-        const interval = setInterval(() => {
-          if (window.PaystackPop) {
-            clearInterval(interval)
-            setScriptLoaded(true)
-            setScriptLoading(false)
-          }
-        }, 100)
-        const timeout = setTimeout(() => {
-          clearInterval(interval)
-          if (!window.PaystackPop) setScriptLoading(false)
-        }, 15000)
-        return () => {
-          clearInterval(interval)
-          clearTimeout(timeout)
-        }
-      }
-
-      const script = document.createElement("script")
-      script.src = "https://js.paystack.co/v1/inline.js"
-      script.async = true
-      script.onload = () => {
-        setScriptLoaded(true)
-        setScriptLoading(false)
-      }
-      script.onerror = () => {
-        setScriptLoading(false)
-      }
-      document.body.appendChild(script)
+      ensurePaystackScriptLoaded()
     }, [])
 
-    // ── Resolve profile for authenticated users ─────────────────────────
+    // ── Resolve profile for authenticated ticket buyers ─────────────────
     // Skips the fetch entirely if the parent already supplied a phone
-    // number (the normal case — see PaymentClient).
+    // number (the normal case), and skips it entirely for the vote flow
+    // (VoteModal always passes fullName/phone in directly).
     useEffect(() => {
-      if (isGuest) {
+      if (type !== "ticket" || isGuest) {
         setCheckingProfile(false)
         return
       }
@@ -180,16 +140,10 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
       const fetchProfile = async () => {
         try {
           const res = await authFetch("/api/v1/user/me")
-          if (!res.ok) {
-            setCheckingProfile(false)
-            return
-          }
+          if (!res.ok) { setCheckingProfile(false); return }
 
           const data = await res.json()
-          if (!data.authenticated) {
-            setCheckingProfile(false)
-            return
-          }
+          if (!data.authenticated) { setCheckingProfile(false); return }
 
           setResolvedFullName(data.fullName || null)
 
@@ -203,25 +157,25 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
       }
 
       fetchProfile()
-    }, [isGuest, propPhone, propFullName])
+    }, [type, isGuest, propPhone, propFullName])
 
     // ── The actual Paystack handoff ──────────────────────────────────────
-    // Called directly from open() (i.e. directly from the buyer's click
-    // chain) or from handlePhoneNumberAdded (also a direct click chain).
-    // Never called from a useEffect.
-    const doOpen = useCallback(
+    // Delegates config-building to ticketWithPaystack / voteWithPaystack
+    // (src/components/lib) based on `type`. Never called from a
+    // useEffect — only from doOpen's own timer (started synchronously
+    // inside the original click) or a fresh "Have another go?" click.
+    const openWidget = useCallback(
       (reference: string, phoneOverride?: string) => {
-        setActive(true)
-        setError(null)
-
-        if (!window.PaystackPop) {
+        if (!isPaystackReady()) {
           setError("Paystack is still loading. Please wait a moment and press Pay Now again.")
+          setStage("error")
           return
         }
 
         const paystackPublicKey = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY
         if (!paystackPublicKey) {
           setError("Payment configuration error. Please contact support.")
+          setStage("error")
           return
         }
 
@@ -230,104 +184,47 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
           // Missing phone — ask for it. Resumes from AddPhoneNumber's own
           // submit click once it's provided.
           pendingReferenceRef.current = reference
-          setShowPhoneNumberModal(true)
+          setStage("phone-prompt")
           return
         }
 
-        const nameParts = (resolvedFullName ?? "").trim().split(/\s+/)
-        const firstName = nameParts[0] ?? ""
-        const lastName = nameParts.slice(1).join(" ") || firstName
+        setStage("connecting")
+
+        // Fire-and-forget: gets the buyer's actual name attached to their
+        // Paystack Customer record (see upsertPaystackCustomer's own docs
+        // for why PaystackPop.setup()'s first_name/last_name alone don't
+        // do this). Never awaited — must not delay opening the widget.
+        const { firstName, lastName } = splitFullName(resolvedFullName)
+        upsertPaystackCustomer(email, firstName, lastName, effectivePhone ?? undefined)
+
+        const shared = {
+          paystackKey: paystackPublicKey,
+          email,
+          amount,
+          reference,
+          fullName: resolvedFullName ?? "",
+          phone: effectivePhone ?? "",
+          onSuccess: (ref: string) => {
+            setActive(false)
+            onSuccessRef.current(ref)
+          },
+          onClose: () => {
+            // Open-aware: the buyer closed the Paystack widget without
+            // completing payment. Don't hide silently — offer a retry.
+            setStage("abandoned")
+            onCloseRef.current()
+          },
+        }
 
         try {
-          const handler = window.PaystackPop.setup({
-            key: paystackPublicKey,
-            email,
-            amount: Math.round(amount * 100), // kobo
-            currency: "NGN",
-            ref: reference,
-
-            first_name: firstName,
-            last_name: lastName,
-            phone: effectivePhone ?? "",
-
-            metadata: {
-              custom_fields: [
-                {
-                  display_name: "Transaction Type",
-                  variable_name: "type",
-                  value: "ticket_purchase",
-                },
-                {
-                  display_name: "Full Name",
-                  variable_name: "full_name",
-                  value: resolvedFullName ?? "",
-                },
-                {
-                  display_name: "Phone Number",
-                  variable_name: "phone_number",
-                  value: effectivePhone ?? "",
-                },
-                {
-                  display_name: "Event Name",
-                  variable_name: "event_name",
-                  value: metadata.eventName,
-                },
-                ...(metadata.ticketType
-                  ? [
-                      {
-                        display_name: "Ticket Type",
-                        variable_name: "ticket_type",
-                        value: metadata.ticketType,
-                      },
-                    ]
-                  : []),
-                {
-                  display_name: "Event ID",
-                  variable_name: "event_id",
-                  value: metadata.eventId,
-                },
-                {
-                  display_name: "Event Creator",
-                  variable_name: "event_creator_id",
-                  value: metadata.eventCreatorId,
-                },
-                {
-                  display_name: "User ID",
-                  variable_name: "user_id",
-                  value: metadata.userId ?? "",
-                },
-                ...(metadata.discountCode
-                  ? [
-                      {
-                        display_name: "Discount Code",
-                        variable_name: "discount_code",
-                        value: metadata.discountCode,
-                      },
-                    ]
-                  : []),
-                ...(metadata.referralCode
-                  ? [
-                      {
-                        display_name: "Referral Code",
-                        variable_name: "referral_code",
-                        value: metadata.referralCode,
-                      },
-                    ]
-                  : []),
-              ],
-            },
-
-            callback: (response: any) => {
-              onSuccessRef.current(response.reference)
-            },
-            onClose: () => {
-              setActive(false)
-              onCloseRef.current()
-            },
-          })
+          const handler =
+            type === "vote"
+              ? voteWithPaystack({ ...shared, metadata: metadata as VotePaystackMetadata })
+              : ticketWithPaystack({ ...shared, metadata: metadata as TicketPaystackMetadata })
 
           if (!handler) {
             setError("Failed to initialize Paystack. Please refresh and try again.")
+            setStage("error")
             return
           }
 
@@ -337,29 +234,81 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
             handler.pay()
           } else {
             setError("Failed to open payment modal. Please try again.")
+            setStage("error")
           }
         } catch (err) {
           console.error("[PayWithPaystack] Error initializing payment:", err)
           setError("Failed to initialize payment. Please try again.")
+          setStage("error")
         }
       },
-      [email, amount, metadata, resolvedFullName, phoneNumber, isGuest]
+      [type, email, amount, metadata, resolvedFullName, phoneNumber, isGuest]
     )
+
+    // Entry point — called from the ref handle inside the buyer's click
+    // chain. Shows the "transfer exactly ₦X" notice for a moment, then
+    // opens the widget automatically.
+    const doOpen = useCallback(
+      (reference: string, phoneOverride?: string) => {
+        setActive(true)
+        setError(null)
+        pendingReferenceRef.current = reference
+        pendingPhoneOverrideRef.current = phoneOverride ?? null
+
+        const effectivePhone = phoneOverride ?? phoneNumber
+        if (!isGuest && !effectivePhone) {
+          pendingReferenceRef.current = reference
+          setStage("phone-prompt")
+          return
+        }
+
+        setStage("confirm")
+        // Fire early (in parallel with the amount-notice countdown below)
+        // so Paystack has as much of a head start as possible attaching
+        // the buyer's real name to their Customer record before checkout
+        // opens. openWidget() fires this again once any phone-prompt flow
+        // resolves, as a safety net — the call is idempotent either way.
+        const { firstName, lastName } = splitFullName(resolvedFullName)
+        upsertPaystackCustomer(email, firstName, lastName, effectivePhone ?? undefined)
+
+        if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
+        confirmTimerRef.current = setTimeout(() => {
+          openWidget(reference, phoneOverride)
+        }, AMOUNT_NOTICE_DELAY_MS)
+      },
+      [openWidget, isGuest, phoneNumber, resolvedFullName, email]
+    )
+
+    useEffect(() => {
+      return () => {
+        if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
+      }
+    }, [])
 
     const handlePhoneNumberAdded = (phone: string) => {
       setPhoneNumber(phone)
-      setShowPhoneNumberModal(false)
+      pendingPhoneOverrideRef.current = phone
 
       const pending = pendingReferenceRef.current
       if (pending) {
-        pendingReferenceRef.current = null
         // Still inside the "Continue" button's own click chain (see
-        // Addphonenumber.tsx's handleSubmit) — safe to open directly here.
-        doOpen(pending, phone)
+        // Addphonenumber.tsx's handleSubmit) — safe to show the amount
+        // notice and schedule the auto-open directly here.
+        setStage("confirm")
+        if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
+        confirmTimerRef.current = setTimeout(() => {
+          openWidget(pending, phone)
+        }, AMOUNT_NOTICE_DELAY_MS)
       }
     }
 
-    const handleRetryClose = () => {
+    const handleRetryAfterAbandon = () => {
+      // Fresh click — safe to open Paystack directly.
+      const pending = pendingReferenceRef.current
+      if (pending) openWidget(pending, pendingPhoneOverrideRef.current ?? undefined)
+    }
+
+    const handleFullClose = () => {
       setActive(false)
       onCloseRef.current()
     }
@@ -375,11 +324,48 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
     // ── Render ────────────────────────────────────────────────────────
     if (!active) return null
 
-    if (showPhoneNumberModal) {
-      return <AddPhoneNumber onPhoneNumberAdded={handlePhoneNumberAdded} onClose={handleRetryClose} />
+    if (stage === "phone-prompt") {
+      return <AddPhoneNumber onPhoneNumberAdded={handlePhoneNumberAdded} onClose={handleFullClose} />
     }
 
-    if (error) {
+    if (stage === "abandoned") {
+      return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center">
+                <RotateCcw className="w-6 h-6 text-orange-600" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">Payment Not Completed</h3>
+                <p className="text-sm text-gray-600">The window was closed early</p>
+              </div>
+            </div>
+            <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 mb-6">
+              <p className="text-orange-800 text-sm">
+                Oops, looks like you closed the modal without completing the payment. Have another go?
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={handleFullClose}
+                className="flex-1 px-6 py-3 border-2 border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRetryAfterAbandon}
+                className="flex-1 px-6 py-3 bg-gradient-to-r from-purple-600 to-purple-700 text-white font-semibold rounded-xl hover:from-purple-700 hover:to-purple-800 transition-all"
+              >
+                Try Again
+              </button>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    if (stage === "error" && error) {
       return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
@@ -397,16 +383,16 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
             </div>
             <div className="flex gap-3">
               <button
-                onClick={handleRetryClose}
+                onClick={handleFullClose}
                 className="flex-1 px-6 py-3 border-2 border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors"
               >
                 Cancel
               </button>
               <button
-                onClick={() => setError(null)}
+                onClick={() => { setError(null); handleRetryAfterAbandon() }}
                 className="flex-1 px-6 py-3 bg-gradient-to-r from-purple-600 to-purple-700 text-white font-semibold rounded-xl hover:from-purple-700 hover:to-purple-800 transition-all"
               >
-                Dismiss
+                Retry
               </button>
             </div>
           </div>
@@ -414,10 +400,10 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
       )
     }
 
-    // scriptLoading/checkingProfile can only still be true here in the rare
-    // case open() was called before background preloading finished — doOpen
-    // already surfaced a clear error in that case if the script truly wasn't
-    // ready, so this is just the normal "please wait" state.
+    // "confirm" (showing the exact-amount notice, about to auto-open) or
+    // "connecting" (Paystack handler.openIframe()/pay() just fired).
+    // checkingProfile can only still be true here in the rare case open()
+    // was called before background profile preloading finished.
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-2xl p-8 max-w-md w-full shadow-2xl">
@@ -425,13 +411,20 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
             <div className="w-16 h-16 rounded-full bg-purple-100 flex items-center justify-center mb-4">
               <CreditCard className="w-8 h-8 text-purple-600 animate-pulse" />
             </div>
-            <h3 className="text-xl font-bold text-gray-900 mb-2">Opening Payment Gateway...</h3>
-            <p className="text-gray-600 mb-6">The Paystack payment window should open shortly</p>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">
+              {stage === "confirm" ? "Almost there…" : "Opening Payment Gateway…"}
+            </h3>
+            <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 mb-4 w-full">
+              <p className="text-sm text-purple-800 font-medium">{exactAmountNotice(amount)}</p>
+            </div>
+            <p className="text-gray-600 mb-6 text-sm">The Paystack payment window will open shortly</p>
             <div className="flex items-center gap-2 mb-4">
               <Loader2 className="w-4 h-4 animate-spin text-purple-600" />
-              <span className="text-purple-600 text-sm font-medium">Connecting gateway...</span>
+              <span className="text-purple-600 text-sm font-medium">
+                {checkingProfile ? "Preparing your details…" : "Connecting gateway…"}
+              </span>
             </div>
-            <button onClick={handleRetryClose} className="text-sm text-gray-500 hover:text-gray-700 underline">
+            <button onClick={handleFullClose} className="text-sm text-gray-500 hover:text-gray-700 underline">
               Cancel Payment
             </button>
           </div>

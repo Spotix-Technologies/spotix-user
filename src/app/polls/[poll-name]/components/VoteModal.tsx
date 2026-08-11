@@ -1,8 +1,9 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useRef } from "react"
 import { X, User, Mail, Phone, Hash, Loader2 } from "lucide-react"
 import type { ContestantData, VoteData, CategoryData } from "@/app/lib/voting-utils"
+import PayWithPaystack, { type PayWithPaystackHandle } from "@/components/PayWithPaystack"
 
 interface VoteModalProps {
   contestant: ContestantData
@@ -34,7 +35,7 @@ export function VoteModal({
   const [errors,    setErrors]      = useState<string[]>([])
   const [loading,   setLoading]     = useState(false)
 
-  const paystackHandlerRef = useRef<any>(null)
+  const paystackRef = useRef<PayWithPaystackHandle>(null)
 
   // Compute the actual amount the buyer pays
   // If buyerBearsBurden=true → buyer pays price + 5%; if false → buyer just pays price
@@ -42,16 +43,6 @@ export function VoteModal({
   const baseAmount       = priceToUse * voteCount
   const serviceFee       = buyerBearsBurden ? Math.round(baseAmount * 0.05) : 0
   const totalAmount      = baseAmount + serviceFee
-
-  // Preload Paystack inline.js
-  useEffect(() => {
-    if (document.getElementById("paystack-js-voting")) return
-    const s = document.createElement("script")
-    s.id    = "paystack-js-voting"
-    s.src   = "https://js.paystack.co/v1/inline.js"
-    s.async = true
-    document.body.appendChild(s)
-  }, [])
 
   const validateDetails = () => {
     const e: string[] = []
@@ -68,6 +59,12 @@ export function VoteModal({
       return auth.currentUser ? await auth.currentUser.getIdToken() : null
     } catch { return null }
   }
+
+  // Resolved payer identity, populated once payref succeeds — passed into
+  // PayWithPaystack so it never needs to fetch a profile itself for votes.
+  const [payerName,  setPayerName]  = useState<string | null>(null)
+  const [payerEmail, setPayerEmail] = useState<string | null>(null)
+  const [payerPhone, setPayerPhone] = useState<string | null>(null)
 
   const handleProceedToPayment = async () => {
     if (voteCount < 1) { setErrors(["Vote count must be at least 1"]); return }
@@ -109,73 +106,35 @@ export function VoteModal({
         return
       }
 
-      const { reference, payerEmail, payerName, payerPhone } = refData
+      const { reference, payerEmail: refPayerEmail, payerName: refPayerName, payerPhone: refPayerPhone } = refData
 
-      const resolvedEmail = payerEmail || email || ""
-      const resolvedName  = payerName  || name  || ""
-      const resolvedPhone = payerPhone || phone  || ""
-
-      const nameParts  = resolvedName.trim().split(/\s+/)
-      const firstName  = nameParts[0] ?? ""
-      const lastName   = nameParts.slice(1).join(" ") || firstName
-
-      const paystackKey = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY
-      if (!paystackKey) {
-        setErrors(["Payment configuration error. Please contact support."])
-        setLoading(false)
-        return
-      }
+      setPayerEmail(refPayerEmail || email || "")
+      setPayerName(refPayerName || name || "")
+      setPayerPhone(refPayerPhone || phone || "")
 
       setStep("paying")
       setLoading(false)
 
-      setTimeout(() => {
-        const PS = (window as any).PaystackPop
-        if (!PS) {
-          setErrors(["Payment SDK not loaded. Please refresh and try again."])
-          setStep(isGuest ? "count" : "count")
-          return
-        }
-
-        const handler = PS.setup({
-          key:        paystackKey,
-          email:      resolvedEmail,
-          amount:     Math.round(totalAmount * 100),
-          currency:   "NGN",
-          ref:        reference,
-          first_name: firstName,
-          last_name:  lastName,
-          phone:      resolvedPhone,
-          metadata: {
-            custom_fields: [
-              { display_name: "Transaction Type", variable_name: "type",             value: "voting_purchase" },
-              { display_name: "Full Name",        variable_name: "full_name",        value: resolvedName  },
-              { display_name: "Phone",            variable_name: "phone_number",     value: resolvedPhone },
-              { display_name: "Poll",             variable_name: "poll_name",        value: pollData.pollName },
-              { display_name: "Contestant",       variable_name: "contestant_name",  value: contestant.name },
-              { display_name: "Vote Count",       variable_name: "vote_count",       value: String(voteCount) },
-              { display_name: "Poll ID",          variable_name: "poll_id",          value: voteId },
-              { display_name: "Organizer ID",     variable_name: "organizer_id",     value: pollData.creatorId },
-              { display_name: "Contestant ID",    variable_name: "contestant_id",    value: contestant.contestantId },
-              ...(categoryId ? [{ display_name: "Category ID", variable_name: "category_id", value: categoryId }] : []),
-            ],
-          },
-          callback: (response: { reference: string }) => {
-            window.location.href = `/polls/${voteId}/callback?ref=${response.reference}`
-          },
-          onClose: () => { setStep(isGuest ? "details" : "count") },
-        })
-
-        paystackHandlerRef.current = handler
-        if (typeof handler?.openIframe === "function")  handler.openIframe()
-        else if (typeof handler?.pay === "function")    handler.pay()
-        else setErrors(["Could not open payment window. Please refresh and try again."])
-      }, 100)
-
+      // Direct call, still inside this same click-triggered async chain —
+      // this is what keeps PaystackPop.openIframe() inside the browser's
+      // user-activation window. See PayWithPaystackHandle for why this
+      // can't go through a useEffect instead.
+      paystackRef.current?.open(reference)
     } catch {
       setErrors(["An unexpected error occurred. Please try again."])
       setLoading(false)
     }
+  }
+
+  const handlePaystackSuccess = (reference: string) => {
+    window.location.href = `/polls/${voteId}/callback?ref=${reference}`
+  }
+
+  const handlePaystackClose = () => {
+    // PayWithPaystack manages its own abandonment/retry UI internally —
+    // bring the vote modal back to the count step underneath it so the
+    // buyer can also just cancel out entirely if they choose to.
+    setStep(isGuest ? "count" : "count")
   }
 
   return (
@@ -327,6 +286,32 @@ export function VoteModal({
           </div>
         </div>
       </div>
+
+      {/* Paystack — mounted once so its script preloads early; renders
+          nothing until paystackRef.current.open(reference) is called from
+          handleProceedToPayment. Handles the "kindly transfer exactly ₦X"
+          notice and the open-aware abandonment dialog on its own. */}
+      <PayWithPaystack
+        ref={paystackRef}
+        type="vote"
+        email={payerEmail || email || ""}
+        amount={totalAmount}
+        isGuest={isGuest}
+        userId={userId ?? null}
+        fullName={payerName || name || null}
+        phone={payerPhone || phone || null}
+        metadata={{
+          pollId:         voteId,
+          pollName:       pollData.pollName,
+          contestantId:   contestant.contestantId,
+          contestantName: contestant.name,
+          voteCount,
+          organizerId:    pollData.creatorId,
+          categoryId:     categoryId ?? null,
+        }}
+        onSuccess={handlePaystackSuccess}
+        onClose={handlePaystackClose}
+      />
     </div>
   )
 }

@@ -15,6 +15,7 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { adminDb } from "@/app/lib/firebase-admin"
+import { resolveDisplayStatus, INCORRECT_PAYMENT_NOTICE } from "@/utils/paymentMessages"
 
 export async function GET(req: NextRequest) {
   const ref = req.nextUrl.searchParams.get("ref")
@@ -41,11 +42,19 @@ export async function GET(req: NextRequest) {
       return null
     }
 
+    // Some buyers transfer above/under the expected amount. When the
+    // backend has captured Paystack's gateway response text on this
+    // reference (failureReason — see spotix-backend's markReferenceStatus /
+    // webhook.js), surface `incorrect_payment` instead of a plain "failed"
+    // status so the UI can explain what happened.
+    const failureMessage: string | null = d.failureReason ?? null
+    const displayStatus = resolveDisplayStatus(d.status, failureMessage)
+
     return NextResponse.json({
       success:         true,
       reference:       ref,
       transactionType: d.transactionType ?? null,
-      status:          d.status          ?? "pending",
+      status:          displayStatus,
       // Vote details — only meaningful when status === "success"
       contestantId:    d.contestantId    ?? null,
       contestantName:  d.contestantName  ?? null,
@@ -53,6 +62,7 @@ export async function GET(req: NextRequest) {
       pollName:        d.pollName        ?? null,
       pollId:          d.pollId ?? d.voteId ?? null,
       updatedAt:       toIso(d.updatedAt) ?? toIso(d.paymentCompletedAt) ?? null,
+      ...(displayStatus === "incorrect_payment" ? { message: INCORRECT_PAYMENT_NOTICE } : {}),
     })
   } catch (err) {
     console.error("[GET /api/v1/polls/verify] Error:", err)

@@ -975,6 +975,7 @@ const totalAmount = cartSubtotal + cartTotalVat
       {paymentData && userData && !isFreeEvent && (
         <PayWithPaystack
           ref={paystackRef}
+          type="ticket"
           email={userData.email || ""}
           amount={totalAmount}
           isGuest={!user}
