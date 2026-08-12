@@ -119,7 +119,17 @@ export function VoteModal({
       // this is what keeps PaystackPop.openIframe() inside the browser's
       // user-activation window. See PayWithPaystackHandle for why this
       // can't go through a useEffect instead.
-      paystackRef.current?.open(reference)
+      //
+      // Pass fullName/phone straight from what payref just resolved (or the
+      // guest form values) as an explicit identity override — PayWithPaystack
+      // was mounted early, before any of this was known, so its own
+      // fullName/phone props/state won't have caught up by the time this
+      // synchronous open() call runs. Without the override it silently opens
+      // Paystack with whatever it was first mounted with (null/blank).
+      paystackRef.current?.open(reference, {
+        fullName: refPayerName || name || null,
+        phone: refPayerPhone || phone || null,
+      })
     } catch {
       setErrors(["An unexpected error occurred. Please try again."])
       setLoading(false)

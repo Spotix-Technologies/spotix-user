@@ -47,6 +47,16 @@ export async function POST(request: NextRequest) {
 
   const resolvedPollId = pollId ?? voteId
 
+  // Small helper so a blank/whitespace-only stored value (e.g. fullName: "")
+  // falls through to the next option, same as the ticket flow's `||` chains —
+  // `??` alone only catches null/undefined, not "".
+  const firstNonBlank = (...vals: (string | null | undefined)[]): string | null => {
+    for (const v of vals) {
+      if (v && v.trim()) return v.trim()
+    }
+    return null
+  }
+
   // ── Validate required fields ───────────────────────────────────────────────
   if (!resolvedPollId || !creatorId || !contestantId || !contestantName) {
     return NextResponse.json({ error: "Missing required poll/contestant fields" }, { status: 400 })
@@ -110,11 +120,20 @@ export async function POST(request: NextRequest) {
         const userDoc      = await adminDb.collection("users").doc(verifiedUserId).get()
         if (userDoc.exists) {
           const ud = userDoc.data()!
-          payerEmail = ud.email       ?? decoded.email ?? null
-          payerName  = ud.fullName    ?? ud.displayName ?? null
-          payerPhone = ud.phoneNumber ?? ud.phone ?? null
+          payerEmail = firstNonBlank(ud.email, decoded.email)
+          // Logged-in voters skip the "details" form entirely (see VoteModal),
+          // so this is the ONLY place a name gets set for them — unlike the
+          // guest path, there's no form to fall back to. Never let this end
+          // up null/empty, or PayWithPaystack's upsertPaystackCustomer call
+          // ends up sending no first_name/last_name to Paystack at all.
+          // Fallback chain mirrors PaymentClient.tsx's fetchUserData for tickets.
+          payerName  = firstNonBlank(ud.fullName, ud.displayName, ud.username, decoded.name) ?? "Valued Customer"
+          payerPhone = firstNonBlank(ud.phoneNumber, ud.phone)
         } else {
-          payerEmail = decoded.email ?? null
+          // No Firestore profile yet (e.g. brand-new auth user) — same
+          // guarantee applies here.
+          payerEmail = firstNonBlank(decoded.email)
+          payerName  = firstNonBlank(decoded.name) ?? "Valued Customer"
         }
       } catch { /* Invalid token — guest path */ }
     }

@@ -50,8 +50,22 @@ export interface PayWithPaystackHandle {
    * original gesture; a React effect reacting to state runs in React's own
    * scheduler, outside that chain, and silently gets blocked even with no
    * artificial delay involved.
+   *
+   * `identity`, when passed, overrides fullName/phone for this call —
+   * needed because callers like VoteModal resolve the real payer identity
+   * (e.g. from POST /api/v1/vote/payref) and then call open() synchronously
+   * in the same click handler, right after setState-ing that identity into
+   * their own component. React hasn't re-rendered this component with the
+   * new fullName/phone props by the time that same-tick open() call runs —
+   * so without an explicit override, PayWithPaystack would still be working
+   * off whatever fullName/phone it was first mounted with (usually null,
+   * since it's mounted early for script preloading, well before identity
+   * is known). Passing the resolved values straight into open() sidesteps
+   * that render-timing gap entirely. Omit it to fall back to props/state
+   * (fine for the ticket flow, where PayWithPaystack isn't mounted until
+   * userData — and therefore fullName/phone — is already resolved).
    */
-  open: (reference: string) => void
+  open: (reference: string, identity?: { fullName?: string | null; phone?: string | null }) => void
 }
 
 declare global {
@@ -103,6 +117,11 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
     // after an abandoned attempt.
     const pendingReferenceRef = useRef<string | null>(null)
     const pendingPhoneOverrideRef = useRef<string | null>(null)
+    // Mirrors pendingPhoneOverrideRef, but for fullName — carries an
+    // explicit identity.fullName passed into open() through the
+    // phone-prompt / abandoned-retry detours, which otherwise only
+    // re-invoke openWidget() with the phone override.
+    const pendingFullNameOverrideRef = useRef<string | null | undefined>(undefined)
     const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
     // Keep the latest callbacks in refs so openWidget doesn't need them in
@@ -165,7 +184,7 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
     // useEffect — only from doOpen's own timer (started synchronously
     // inside the original click) or a fresh "Have another go?" click.
     const openWidget = useCallback(
-      (reference: string, phoneOverride?: string) => {
+      (reference: string, phoneOverride?: string, fullNameOverride?: string | null) => {
         if (!isPaystackReady()) {
           setError("Paystack is still loading. Please wait a moment and press Pay Now again.")
           setStage("error")
@@ -180,6 +199,8 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
         }
 
         const effectivePhone = phoneOverride ?? phoneNumber
+        const effectiveFullName = fullNameOverride !== undefined ? fullNameOverride : resolvedFullName
+
         if (!isGuest && !effectivePhone) {
           // Missing phone — ask for it. Resumes from AddPhoneNumber's own
           // submit click once it's provided.
@@ -194,7 +215,7 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
         // Paystack Customer record (see upsertPaystackCustomer's own docs
         // for why PaystackPop.setup()'s first_name/last_name alone don't
         // do this). Never awaited — must not delay opening the widget.
-        const { firstName, lastName } = splitFullName(resolvedFullName)
+        const { firstName, lastName } = splitFullName(effectiveFullName)
         upsertPaystackCustomer(email, firstName, lastName, effectivePhone ?? undefined)
 
         const shared = {
@@ -202,7 +223,7 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
           email,
           amount,
           reference,
-          fullName: resolvedFullName ?? "",
+          fullName: effectiveFullName ?? "",
           phone: effectivePhone ?? "",
           onSuccess: (ref: string) => {
             setActive(false)
@@ -249,13 +270,22 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
     // chain. Shows the "transfer exactly ₦X" notice for a moment, then
     // opens the widget automatically.
     const doOpen = useCallback(
-      (reference: string, phoneOverride?: string) => {
+      (reference: string, phoneOverride?: string, fullNameOverride?: string | null) => {
         setActive(true)
         setError(null)
         pendingReferenceRef.current = reference
         pendingPhoneOverrideRef.current = phoneOverride ?? null
+        pendingFullNameOverrideRef.current = fullNameOverride
+
+        // Keep resolvedFullName state in sync with any explicit override too
+        // — harmless for the ticket flow (fullNameOverride is never passed
+        // there), and means anything reading resolvedFullName later in this
+        // render (e.g. the "connecting" stage's UI) reflects reality.
+        if (fullNameOverride !== undefined) setResolvedFullName(fullNameOverride)
 
         const effectivePhone = phoneOverride ?? phoneNumber
+        const effectiveFullName = fullNameOverride !== undefined ? fullNameOverride : resolvedFullName
+
         if (!isGuest && !effectivePhone) {
           pendingReferenceRef.current = reference
           setStage("phone-prompt")
@@ -268,12 +298,12 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
         // the buyer's real name to their Customer record before checkout
         // opens. openWidget() fires this again once any phone-prompt flow
         // resolves, as a safety net — the call is idempotent either way.
-        const { firstName, lastName } = splitFullName(resolvedFullName)
+        const { firstName, lastName } = splitFullName(effectiveFullName)
         upsertPaystackCustomer(email, firstName, lastName, effectivePhone ?? undefined)
 
         if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
         confirmTimerRef.current = setTimeout(() => {
-          openWidget(reference, phoneOverride)
+          openWidget(reference, phoneOverride, fullNameOverride)
         }, AMOUNT_NOTICE_DELAY_MS)
       },
       [openWidget, isGuest, phoneNumber, resolvedFullName, email]
@@ -297,7 +327,7 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
         setStage("confirm")
         if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
         confirmTimerRef.current = setTimeout(() => {
-          openWidget(pending, phone)
+          openWidget(pending, phone, pendingFullNameOverrideRef.current)
         }, AMOUNT_NOTICE_DELAY_MS)
       }
     }
@@ -305,7 +335,9 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
     const handleRetryAfterAbandon = () => {
       // Fresh click — safe to open Paystack directly.
       const pending = pendingReferenceRef.current
-      if (pending) openWidget(pending, pendingPhoneOverrideRef.current ?? undefined)
+      if (pending) {
+        openWidget(pending, pendingPhoneOverrideRef.current ?? undefined, pendingFullNameOverrideRef.current)
+      }
     }
 
     const handleFullClose = () => {
@@ -316,7 +348,8 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
     useImperativeHandle(
       ref,
       () => ({
-        open: (reference: string) => doOpen(reference),
+        open: (reference: string, identity?: { fullName?: string | null; phone?: string | null }) =>
+          doOpen(reference, identity?.phone ?? undefined, identity?.fullName),
       }),
       [doOpen]
     )

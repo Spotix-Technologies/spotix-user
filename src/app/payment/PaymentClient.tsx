@@ -533,6 +533,10 @@ const fetchReferralCodes = async (eventId: string) => {
       if (user && userData) {
         requestBody.userFullName = userData.fullName || "Valued Customer"
         requestBody.userEmail = userData.email
+        // Phone can be optional
+        if (userData.phoneNumber) {
+          requestBody.userPhone = userData.phoneNumber
+        }
       }
 
       // For guests, map guest data to user fields (not guest fields)
