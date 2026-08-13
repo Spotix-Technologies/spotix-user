@@ -37,6 +37,7 @@ interface OperationsPerformed {
   availableTicketsDecremented: boolean;
   discountUpdated: boolean;
   organizerStatsUpdated: boolean;
+  oversold: boolean;
 }
 
 export async function POST(req: NextRequest) {
@@ -81,6 +82,7 @@ export async function POST(req: NextRequest) {
       availableTicketsDecremented: false,
       discountUpdated: false,
       organizerStatsUpdated: false,
+      oversold: false,
     };
 
     // Single Firestore transaction 
@@ -114,31 +116,42 @@ export async function POST(req: NextRequest) {
         // ticketsSold: treat missing/undefined as 0
         const currentSold = Number(tier.ticketsSold) || 0;
 
-        // availableTickets: only present when the organizer set a limit
+        // availableTickets only represents a real limit when it's a genuine,
+        // finite, non-negative number. Missing, null, an empty string, or any
+        // other malformed value means the organizer wants no limit — mirrors
+        // getRemaining() in buy-ticket-dialog.tsx exactly, so the frontend's
+        // "unlimited" display and this backend guard never disagree.
+        const parsedAvailable = Number(tier.availableTickets);
         const hasLimit =
           tier.availableTickets !== null &&
-          tier.availableTickets !== undefined;
+          tier.availableTickets !== undefined &&
+          (tier.availableTickets as unknown as string) !== "" &&
+          Number.isFinite(parsedAvailable);
 
         if (hasLimit) {
-          const currentAvailable = Number(tier.availableTickets);
+          const currentAvailable = parsedAvailable;
 
-          // Hard guard — reject the whole transaction if for any reason we are overselling
+          // The ticket + attendee docs are already written by the time this
+          // step runs, and the buyer has already been charged by Paystack —
+          // this call exists to keep stock/revenue bookkeeping in sync, not
+          // to gate the sale. So we never abort the transaction here: an
+          // aborted transaction means a real, paid, already-issued ticket
+          // silently never counts toward totalRevenue/ticketsSold/organizer
+          // stats. Instead, clamp availableTickets at 0 and just log the
+          // oversell for visibility (stale frontend cache, race between
+          // concurrent buyers, etc. are the usual causes).
           if (currentAvailable < qty) {
-            throw Object.assign(
-              new Error(
-                currentAvailable === 0
-                  ? `Ticket type "${ticketType}" is sold out.`
-                  : `Only ${currentAvailable} ticket(s) left for "${ticketType}". Requested: ${qty}.`
-              ),
-              { statusCode: 409 }
+            operationsPerformed.oversold = true;
+            console.warn(
+              `[Atomic] Oversell on "${ticketType}": ${currentAvailable} available, ${qty} requested — recording sale anyway, clamping availableTickets to 0`
             );
           }
 
           availableTicketsDecremented = true;
           return {
             ...tier,
-            ticketsSold: currentSold + qty,           // +qty to this tier's sold count
-            availableTickets: currentAvailable - qty,  // −qty from this tier's available count
+            ticketsSold: currentSold + qty,                          // +qty to this tier's sold count
+            availableTickets: Math.max(0, currentAvailable - qty),   // never go below 0
           };
         }
 
