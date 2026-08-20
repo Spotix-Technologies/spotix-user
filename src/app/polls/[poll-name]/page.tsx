@@ -1,36 +1,23 @@
 import type { Metadata } from "next"
-import { Suspense } from "react"
 import { getPollByName } from "@/app/lib/voting-utils"
-import { cookies } from "next/headers"
-import { verifyAccessToken, COOKIE_ACCESS_TOKEN } from "@/app/lib/auth-tokens"
-import PollClient  from "./pollClient"
 import UserHeader  from "@/components/UserHeader"
 import Footer      from "@/components/footer"
+import PollsMovedNotice from "../PollsMovedNotice"
 
 interface Props {
   params: Promise<{ "poll-name": string }>
 }
 
 /**
- * Resolve the logged-in user's uid (if any) from the real session cookie.
- *
- * Previously this checked a Firebase session cookie called "session" —
- * but nothing in the app ever sets that cookie (only logout clears it),
- * so this always returned null and every voter was treated as a guest
- * regardless of login state. The actual session lives in the JWT
- * "spotix_u_at" cookie set by POST /api/v1/auth, verified the same way
- * the booker portal verifies its own "spotix_at" cookie.
+ * Polls & Nominations moved to the standalone Spotix Polls app. Build the
+ * URL for a given poll on that app from SPOTIX_POLLS_URL. Returns undefined
+ * if the env var isn't configured, so the notice can degrade gracefully
+ * instead of redirecting to a broken URL.
  */
-async function getUserIdFromSession(): Promise<string | null> {
-  try {
-    const cookieStore = await cookies()
-    const token        = cookieStore.get(COOKIE_ACCESS_TOKEN)?.value
-    if (!token) return null
-    const payload = await verifyAccessToken(token, "spotix-user")
-    return payload.uid
-  } catch {
-    return null
-  }
+function buildPollsRedirectUrl(path: string): string | undefined {
+  const base = process.env.SPOTIX_POLLS_URL
+  if (!base) return undefined
+  return `${base.replace(/\/+$/, "")}${path}`
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -72,7 +59,6 @@ export default async function PollPage({ params }: Props) {
   const { "poll-name": pollName } = await params
   const decodedName = decodeURIComponent(pollName)
   const result      = await getPollByName(decodedName)
-  const userId      = await getUserIdFromSession()
 
   if (!result) {
     return (
@@ -92,14 +78,12 @@ export default async function PollPage({ params }: Props) {
     )
   }
 
+  const redirectUrl = buildPollsRedirectUrl(`/poll/${result.voteId}`)
+
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       <UserHeader />
-      <main className="flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
-        <Suspense fallback={<div className="flex justify-center py-24"><div className="w-8 h-8 border-2 border-[#6b2fa5] border-t-transparent rounded-full animate-spin" /></div>}>
-          <PollClient pollData={result.pollData} voteId={result.voteId} userId={userId} />
-        </Suspense>
-      </main>
+      <PollsMovedNotice redirectUrl={redirectUrl} pollName={result.pollData.pollName} />
       <Footer />
     </div>
   )

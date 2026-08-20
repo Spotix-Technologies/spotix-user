@@ -1,10 +1,21 @@
 import type { Metadata } from "next"
-import { Suspense } from "react"
-import NominateClient from "./nominateClient"
 import UserHeader from "@/components/UserHeader"
 import Footer from "@/components/footer"
 import { fetchNominationPoll } from "@/app/lib/nomination-db"
 import { cacheGet, cacheSet } from "@/app/lib/redis"
+import PollsMovedNotice from "../../PollsMovedNotice"
+
+/**
+ * Polls & Nominations moved to the standalone Spotix Polls app. Build the
+ * URL for a given nomination poll on that app from SPOTIX_POLLS_URL.
+ * Returns undefined if the env var isn't configured, so the notice can
+ * degrade gracefully instead of redirecting to a broken URL.
+ */
+function buildPollsRedirectUrl(path: string): string | undefined {
+  const base = process.env.SPOTIX_POLLS_URL
+  if (!base) return undefined
+  return `${base.replace(/\/+$/, "")}${path}`
+}
 
 interface Props {
   params: Promise<{ pollId: string }>
@@ -101,13 +112,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function NominatePage({ params }: Props) {
   const { pollId } = await params
+  const og = await getNominationPollOgData(pollId)
+  const redirectUrl = buildPollsRedirectUrl(`/nominate/${pollId}`)
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
+    <div className="min-h-screen flex flex-col bg-gradient-to-b from-slate-50 to-white">
       <UserHeader />
-      <Suspense fallback={<div className="flex justify-center py-24"><div className="w-8 h-8 border-2 border-[#6b2fa5] border-t-transparent rounded-full animate-spin" /></div>}>
-        <NominateClient pollId={pollId} />
-      </Suspense>
+      <PollsMovedNotice redirectUrl={redirectUrl} pollName={og?.pollName} />
       <Footer />
     </div>
   )

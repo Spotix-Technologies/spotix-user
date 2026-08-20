@@ -34,6 +34,19 @@
  * Usage in a server component or API route:
  *   import { headers } from "next/headers"
  *   const uid = (await headers()).get("x-user-id")
+ *
+ * ── Domain intercept ─────────────────────────────────────────────────────────
+ *
+ *   env INTERCEPT      "true" (case-insensitive) turns interception on.
+ *                      Missing or anything else (including "false") is treated
+ *                      as off.
+ *   env INTERCEPT_URL  Target host (e.g. "event.spotix.com.ng"), with or
+ *                      without a protocol. When INTERCEPT is on and the
+ *                      request isn't already on this host, the visitor is
+ *                      redirected there with the original path + querystring
+ *                      preserved, e.g.
+ *                        spotix.com.ng/event/event123
+ *                          → event.spotix.com.ng/event/event123
  */
 
 import { NextResponse } from "next/server";
@@ -97,10 +110,38 @@ function isPublicAuthRoute(pathname: string): boolean {
   return PUBLIC_AUTH_ROUTES.has(pathname);
 }
 
+/**
+ * Reads INTERCEPT / INTERCEPT_URL and returns the bare target host
+ * (no protocol, no trailing slash) when interception should happen,
+ * or null when it's off / misconfigured.
+ */
+function getInterceptHost(): string | null {
+  const enabled = (process.env.INTERCEPT ?? "").trim().toLowerCase() === "true";
+  if (!enabled) return null;
+
+  const interceptUrl = process.env.INTERCEPT_URL?.trim();
+  if (!interceptUrl) return null;
+
+  return interceptUrl.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+}
+
 // ── proxy ──────────────────────────────────────────────────────────────────────
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // ── -1. Domain intercept ─────────────────────────────────────────────────────
+  // If INTERCEPT is on, send the visitor to INTERCEPT_URL, preserving the
+  // route (path + querystring). Skipped once already on the target host so
+  // we never redirect-loop.
+  const interceptHost = getInterceptHost();
+  if (interceptHost && request.nextUrl.hostname !== interceptHost) {
+    const target = request.nextUrl.clone();
+    const [host, port] = interceptHost.split(":");
+    target.hostname = host;
+    target.port = port ?? "";
+    return NextResponse.redirect(target);
+  }
 
   // ── 0. Fast exit for static / API paths ─────────────────────────────────────
   // No token work needed — let Next.js handle these normally.

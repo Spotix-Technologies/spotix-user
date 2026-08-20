@@ -447,7 +447,7 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
     }
   }
 
-  // ── Render guards ───────────────────────────────────────���─────────────────
+  // ── Render guards ───────────────────────────
 
   if (!isPageLoaded) return <Preloader />
   if (loading) return <EventSkeleton />
