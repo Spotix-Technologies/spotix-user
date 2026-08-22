@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useParams } from "next/navigation"
 import { ArrowLeft, ShieldCheck, X, FileText } from "lucide-react"
 import {
   getSessionUser,
@@ -16,20 +16,26 @@ import {
 // JWT session specifically so these two calls keep working. Everything else
 // in this file (who's logged in, profile prefill) now uses the JWT session
 // via auth-client-user.ts, matching the booker portal's auth model.
-import { auth } from "../lib/firebase"
+import { auth } from "@/app/lib/firebase"
 import { onAuthStateChanged, type User as FirebaseUser } from "firebase/auth"
 import UserHeader from "@/components/UserHeader"
 import Footer from "@/components/footer"
 import PayWithPaystack, { type PayWithPaystackHandle } from "@/components/PayWithPaystack"
-import { calculateVATFee } from "@/utils/priceUtility"
+import { findPaymentMethod, type PaymentMethodId } from "@/lib/paystack/payment-channels"
 
-// Import helper components
-import OrderSummary from "./helpers/order-summary"
-import Discount from "./helpers/discount"
-import Referral from "./helpers/referral"
-import PaymentMethods from "./helpers/payment-methods"
-import SurveyFormDialog from "./helpers/survey-form-dialog"
-import GuestCheckoutForm from "./helpers/guest-checkout-form"
+// Import helper components straight from the shared /payment route — this
+// event-scoped checkout is a thin wrapper around the same building blocks,
+// not a fork of them.
+import OrderSummary from "@/app/payment/helpers/order-summary"
+import Discount from "@/app/payment/helpers/discount"
+import Referral from "@/app/payment/helpers/referral"
+import SurveyFormDialog from "@/app/payment/helpers/survey-form-dialog"
+
+// New, event-route-local UI: a real Paystack channel picker (replacing the
+// old single generic "Paystack" card) and a dialog-based guest checkout
+// (replacing the old full-screen takeover).
+import PaymentMethodsPanel, { type SelectedMethod } from "./components/PaymentMethodsPanel"
+import GuestCheckoutDialog from "./components/GuestCheckoutDialog"
 
 /** Resolves once Firebase Auth has restored its persisted session (or confirmed there is none). */
 function waitForFirebaseUser(): Promise<FirebaseUser | null> {
@@ -83,13 +89,16 @@ interface UserData {
   phoneNumber?: string
 }
 
-export default function PaymentClient() {
+export default function EventPaymentClient() {
   const router = useRouter()
+  const params = useParams<{ eventId: string }>()
+  const routeEventId = params?.eventId as string
+
   const [user, setUser] = useState<SessionUser | null>(null)
   const [userData, setUserData] = useState<UserData | null>(null)
   const [paymentData, setPaymentData] = useState<PaymentData | null>(null)
   const [walletBalance, setWalletBalance] = useState(0)
-  const [selectedMethod, setSelectedMethod] = useState<string | null>(null)
+  const [selectedMethod, setSelectedMethod] = useState<SelectedMethod>(null)
   const [dataLoading, setDataLoading] = useState(true)
 
   const [discountCode, setDiscountCode] = useState("")
@@ -121,7 +130,6 @@ export default function PaymentClient() {
   const [guestFullName, setGuestFullName] = useState("")
   const [guestEmail, setGuestEmail] = useState("")
   const [guestPhone, setGuestPhone] = useState("")
-  const [showGuestForm, setShowGuestForm] = useState(false)
   const [cart, setCart] = useState<any[]>([])
 
   // Organizer state
@@ -131,7 +139,6 @@ export default function PaymentClient() {
 
   // Survey state for multiple tickets
   const [surveyRequiredTickets, setSurveyRequiredTickets] = useState<Set<string>>(new Set())
-  const [checkingSurveyRequirements, setCheckingSurveyRequirements] = useState(false)
 
   // Load cart, organizer, and guest data from localStorage (client-side only)
   useEffect(() => {
@@ -171,12 +178,10 @@ export default function PaymentClient() {
     if (!paymentData || cart.length === 0 || !userData) return
 
     const checkAllTicketsSurveyRequirements = async () => {
-      setCheckingSurveyRequirements(true)
       const requiredTickets = new Set<string>()
 
       try {
-        // Check each unique ticket type in cart
-        const uniqueTicketTypes = Array.from(new Set(cart.map(item => item.ticketType)))
+        const uniqueTicketTypes = Array.from(new Set(cart.map((item) => item.ticketType)))
 
         for (const ticketType of uniqueTicketTypes) {
           const response = await fetch(
@@ -194,8 +199,6 @@ export default function PaymentClient() {
         setSurveyRequiredTickets(requiredTickets)
       } catch (error) {
         console.error("Error checking survey requirements:", error)
-      } finally {
-        setCheckingSurveyRequirements(false)
       }
     }
 
@@ -203,12 +206,7 @@ export default function PaymentClient() {
   }, [paymentData, cart, userData])
 
   // Preload the Paystack inline script as early as possible — as soon as we
-  // know this is a paid event, not when the Paystack modal mounts. Without
-  // this, the script only starts downloading *after* the buyer clicks Pay
-  // Now, which was one more network hop sitting between the click and
-  // PaystackPop.openIframe(). window.PaystackPop being ready ahead of time
-  // means the only network work left in the click's chain is creating the
-  // payment reference.
+  // know this is a paid event, not when the Paystack modal mounts.
   useEffect(() => {
     if (!paymentData || paymentData.ticketPrice === 0) return
     if (typeof window === "undefined" || window.PaystackPop) return
@@ -226,9 +224,6 @@ export default function PaymentClient() {
     let cancelled = false
 
     const init = async () => {
-      // Use the JWT session (same system the booker portal uses) instead of
-      // Firebase onAuthStateChanged — our JWT is the source of truth for
-      // "is this person logged in", not Firebase client auth state.
       const sessionUser = await getSessionUser()
       if (cancelled) return
 
@@ -320,7 +315,6 @@ export default function PaymentClient() {
     existingData: PaymentData
   ): Promise<PaymentData> => {
     try {
-      // Use the new flat structure API
       const response = await fetch(`/api/v1/event?eventId=${eventId}`)
 
       if (!response.ok) {
@@ -374,20 +368,20 @@ export default function PaymentClient() {
     }
   }
 
-const fetchReferralCodes = async (eventId: string) => {
-  setReferralFetching(true)
-  try {
-    const response = await fetch(`/api/v1/referrals?eventId=${eventId}`)
-    if (!response.ok) throw new Error("Failed to fetch referral codes")
-    const data = await response.json()
-    setReferralCodes(data.referrals || [])
-  } catch (error) {
-    console.error("Error fetching referral codes:", error)
-    setReferralError("Failed to load referral codes")
-  } finally {
-    setReferralFetching(false)
+  const fetchReferralCodes = async (eventId: string) => {
+    setReferralFetching(true)
+    try {
+      const response = await fetch(`/api/v1/referrals?eventId=${eventId}`)
+      if (!response.ok) throw new Error("Failed to fetch referral codes")
+      const data = await response.json()
+      setReferralCodes(data.referrals || [])
+    } catch (error) {
+      console.error("Error fetching referral codes:", error)
+      setReferralError("Failed to load referral codes")
+    } finally {
+      setReferralFetching(false)
+    }
   }
-}
 
   const validateDiscount = async () => {
     if (!discountCode.trim()) {
@@ -404,9 +398,6 @@ const fetchReferralCodes = async (eventId: string) => {
         credentials: "same-origin",
         headers: {
           "Content-Type": "application/json",
-          // Discount validation must keep working for guests — only attach
-          // the Authorization header when we actually have a session token.
-          // (Cookies are also sent automatically via same-origin credentials.)
           ...(getAccessToken() ? { Authorization: `Bearer ${getAccessToken()}` } : {}),
         },
         body: JSON.stringify({
@@ -448,14 +439,10 @@ const fetchReferralCodes = async (eventId: string) => {
     setReferralError("")
   }
 
-  const handlePaymentMethodSelect = (method: string) => {
+  const handlePaymentMethodSelect = (method: SelectedMethod) => {
     if (!paymentData) return
     const isFreeEvent = paymentData.ticketPrice === 0
-
-    if (isFreeEvent && (method === "paystack" || method === "agent")) {
-      return
-    }
-
+    if (isFreeEvent) return
     setSelectedMethod(method)
   }
 
@@ -466,10 +453,6 @@ const fetchReferralCodes = async (eventId: string) => {
     // For authenticated users, userData must be set
     if (user && !userData) return null
 
-    // The override lets callers (e.g. the survey dialog's onComplete handler)
-    // pass freshly-collected responses straight through without waiting on
-    // a setState to flush — relying on the `surveyResponses` state here
-    // alone would race and send `null` on the very first proceed attempt.
     const effectiveSurveyResponses =
       surveyResponsesOverride !== undefined ? surveyResponsesOverride : surveyResponses
 
@@ -478,7 +461,6 @@ const fetchReferralCodes = async (eventId: string) => {
     try {
       const isFreeEvent = paymentData.ticketPrice === 0
 
-      // Calculate totals from cart items
       const subtotalBeforeDiscount = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0)
       const totalVat = cart.reduce((sum, item) => sum + ((item.vat || 0) * item.quantity), 0)
 
@@ -497,14 +479,12 @@ const fetchReferralCodes = async (eventId: string) => {
       // Free events use a dedicated route that pre-sets status to "successful"
       const endpoint = isFreeEvent ? "/api/v1/ref/free" : "/api/v1/create-pay-ref"
 
-      // Create array of ticket types with quantities
-      const ticketTypes = cart.map(item => ({
+      const ticketTypes = cart.map((item) => ({
         type: item.ticketType,
         quantity: item.quantity,
         price: item.price,
       }))
 
-      // Use organizerId from localStorage, then from paymentData, then from eventCreatorId
       const finalEventCreatorId = organizerId || paymentData.organizerId || paymentData.eventCreatorId
 
       const requestBody: any = {
@@ -524,30 +504,23 @@ const fetchReferralCodes = async (eventId: string) => {
         bookerName: organizerName || paymentData.bookerName || null,
         bookerEmail: organizerEmail || paymentData.bookerEmail || null,
         // Carried on the reference doc, inert, until the backend delivers it
-        // post-payment (v1/lib/ticket/survey-delivery.js). We no longer POST
-        // this to /api/v1/survey/response ourselves — see proceedWithPayment.
+        // post-payment (v1/lib/ticket/survey-delivery.js).
         surveyResponses: effectiveSurveyResponses || null,
       }
 
-      // For authenticated users, include user data
       if (user && userData) {
         requestBody.userFullName = userData.fullName || "Valued Customer"
         requestBody.userEmail = userData.email
-        // Phone can be optional
         if (userData.phoneNumber) {
           requestBody.userPhone = userData.phoneNumber
         }
       }
 
-      // For guests, map guest data to user fields (not guest fields)
-      // This way guests are treated like users in the backend
       if (!user) {
-        // Use state variables first, but fall back to localStorage if empty
         let finalGuestEmail = guestEmail
         let finalGuestFullName = guestFullName
         let finalGuestPhone = guestPhone
 
-        // If state variables are empty, try to load from localStorage
         if (!finalGuestEmail || !finalGuestFullName) {
           const savedGuestData = localStorage.getItem("spotix_guest_checkout")
           if (savedGuestData) {
@@ -562,16 +535,13 @@ const fetchReferralCodes = async (eventId: string) => {
           }
         }
 
-        // Map guest data to user fields for consistency
         requestBody.userEmail = finalGuestEmail
         requestBody.userFullName = finalGuestFullName
-        // Phone can be optional
         if (finalGuestPhone) {
           requestBody.userPhone = finalGuestPhone
         }
       }
 
-      // Always include payment fields; they will be 0 for free events
       requestBody.ticketPrice = isFreeEvent ? 0 : subtotalBeforeDiscount
       requestBody.totalAmount = isFreeEvent ? 0 : totalAmount
       requestBody.transactionFee = isFreeEvent ? 0 : totalVat
@@ -583,9 +553,6 @@ const fetchReferralCodes = async (eventId: string) => {
         "Content-Type": "application/json",
       }
 
-      // /api/v1/create-pay-ref (and /api/v1/ref/free) still verify a real
-      // Firebase ID token server-side — only add this for logged-in users;
-      // guests must still be able to create a reference.
       if (user) {
         const firebaseUser = await waitForFirebaseUser()
         const idToken = await firebaseUser?.getIdToken()
@@ -618,9 +585,6 @@ const fetchReferralCodes = async (eventId: string) => {
 
   /**
    * Does the actual work of creating a reference and moving on to payment.
-   * Accepts an optional survey-responses override so the dialog's
-   * onComplete handler can hand off freshly-collected answers without
-   * waiting on setSurveyResponses to flush through a render.
    */
   const proceedWithPayment = async (surveyResponsesOverride?: Record<string, any> | null) => {
     if (!paymentData || !userData) return
@@ -630,23 +594,14 @@ const fetchReferralCodes = async (eventId: string) => {
       surveyResponsesOverride !== undefined ? surveyResponsesOverride : surveyResponses
 
     // For free events, create reference and redirect directly to success page.
-    // The success page will call the unified /v1/ticket endpoint to generate the ticket.
     if (isFreeEvent) {
       const reference = await createPaymentReference(effectiveSurveyResponses)
       if (!reference) return
 
-      // Survey responses (if any) were already attached to the reference doc
-      // inside createPaymentReference() above. They're delivered by the
-      // backend's ticket-generation pipeline once the ticket actually
-      // exists — never submitted from here, so an abandoned/failed
-      // registration can no longer leave orphaned survey data behind.
-
-      // Redirect to success — PaystackSuccessClient will call /v1/ticket to generate the ticket
       router.push(`/payment/success?reference=${reference}`)
       return
     }
 
-    // For paid events, continue with payment method selection
     const paymentDataWithExtras = {
       ...paymentData,
       discountCode: discountData?.code || null,
@@ -658,58 +613,39 @@ const fetchReferralCodes = async (eventId: string) => {
       surveyResponses: effectiveSurveyResponses || null,
     }
 
-    // Survey responses travel inside paymentDataWithExtras (sessionStorage,
-    // used by the wallet/agent/bitcoin flows below) and were already
-    // attached to the reference doc by createPaymentReference() for the
-    // Paystack flow. Either way, delivery happens backend-side, post-payment
-    // — see v1/lib/ticket/survey-delivery.js. We deliberately don't POST to
-    // /api/v1/survey/response here anymore: doing so before payment
-    // succeeded is exactly what let survey data through for buyers who
-    // never actually paid.
-
-    if (selectedMethod === "paystack") {
-      const reference = await createPaymentReference(effectiveSurveyResponses)
-      if (!reference) return
-
-      sessionStorage.setItem("paystack_payment_data", JSON.stringify(paymentDataWithExtras))
-      // Direct call, still inside this same click-triggered async chain —
-      // this is what keeps PaystackPop.openIframe() inside the browser's
-      // user-activation window. See PayWithPaystackHandle for why this
-      // can't go through a useEffect instead.
-      paystackRef.current?.open(reference)
-    } else {
+    if (selectedMethod === "wallet") {
       sessionStorage.setItem("spotix_payment_data", JSON.stringify(paymentDataWithExtras))
 
-      // Calculate total from cart
       const totalFromCart = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0)
-      const params = new URLSearchParams({
+      const walletParams = new URLSearchParams({
         eventId: paymentData.eventId,
         eventName: paymentData.eventName,
         ticketPrice: totalFromCart.toString(),
         eventCreatorId: organizerId || paymentData.eventCreatorId,
         cart: JSON.stringify(cart),
       })
+      router.push(`/payment/wallet?${walletParams.toString()}`)
+      return
+    }
 
-      switch (selectedMethod) {
-        case "wallet":
-          router.push(`/payment/wallet?${params.toString()}`)
-          break
-        case "agent":
-          router.push(`/payment/agent?${params.toString()}`)
-          break
-        case "bitcoin":
-          router.push(`/payment/bitcoin?${params.toString()}`)
-          break
-      }
+    if (selectedMethod) {
+      // A specific Paystack channel (card, bank_transfer, ussd, mobile_money)
+      // was picked in PaymentMethodsPanel — restrict the widget to it via
+      // the `channels` option, same pattern as spotix-vote's VoteModal.
+      const method = findPaymentMethod(selectedMethod as PaymentMethodId)
+      if (!method.available) return // Apple Pay guard — button is disabled anyway
+
+      const reference = await createPaymentReference(effectiveSurveyResponses)
+      if (!reference) return
+
+      sessionStorage.setItem("paystack_payment_data", JSON.stringify(paymentDataWithExtras))
+      // Direct call, still inside this same click-triggered async chain —
+      // this is what keeps PaystackPop.openIframe() inside the browser's
+      // user-activation window.
+      paystackRef.current?.open(reference, undefined, method.channels)
     }
   }
 
-  /**
-   * Entry point wired to the "Proceed" button. If the selected ticket type
-   * requires a form and it hasn't been filled yet, opens the form in a
-   * dialog instead of proceeding straight to payment. Otherwise proceeds
-   * immediately.
-   */
   const handleProceedClick = () => {
     if (!paymentData || !userData) return
 
@@ -743,23 +679,20 @@ const fetchReferralCodes = async (eventId: string) => {
 
   const handlePaystackClose = () => {
     // PayWithPaystack hides its own overlay internally when this fires;
-    // nothing left for PaymentClient to reset now that it isn't the one
-    // conditionally mounting the modal.
+    // nothing left for EventPaymentClient to reset now that it isn't the
+    // one conditionally mounting the modal.
   }
 
   const handleGuestSubmit = (fullName: string, email: string, phone: string) => {
-    // Set guest user data
     setUserData({
       fullName,
       username: fullName.split(" ")[0],
       email,
     })
-    // Also set guest state variables for API call
     setGuestFullName(fullName)
     setGuestEmail(email)
     setGuestPhone(phone)
 
-    // Persist guest data to localStorage
     if (typeof window !== "undefined") {
       localStorage.setItem("spotix_guest_checkout", JSON.stringify({
         guestFullName: fullName,
@@ -767,14 +700,18 @@ const fetchReferralCodes = async (eventId: string) => {
         guestPhone: phone,
       }))
     }
-
-    setShowGuestForm(false)
   }
 
   const handleShowSignIn = () => {
-    // Redirect to sign in page with return_to parameter
-    const returnTo = `/payment?from_guest_checkout=true`
+    const eventIdForReturn = paymentData?.eventId || routeEventId
+    const returnTo = `/event/${eventIdForReturn}/payment?from_guest_checkout=true`
     router.push(`/auth/login?return_to=${encodeURIComponent(returnTo)}`)
+  }
+
+  const handleGuestDialogClose = () => {
+    // Can't check out without an identity — send them back to the event
+    // page rather than stranding them on an unusable checkout screen.
+    router.back()
   }
 
   if (dataLoading) {
@@ -802,64 +739,52 @@ const fetchReferralCodes = async (eventId: string) => {
             again.
           </p>
           <button
-            onClick={() => router.push("/")}
+            onClick={() => router.push(routeEventId ? `/event/${routeEventId}` : "/")}
             className="w-full py-3 text-white font-semibold rounded-xl transition-all duration-200 hover:shadow-lg"
             style={{ background: "#6b2fa5" }}
           >
-            Go to Home
+            Back to Event
           </button>
         </div>
       </div>
     )
   }
 
-  // Show guest form if user is not authenticated and we have payment data
-  if (!user && paymentData && !userData) {
-    return (
-      <GuestCheckoutForm
-        onSubmitGuest={handleGuestSubmit}
-        onShowSignIn={handleShowSignIn}
-        isLoading={dataLoading}
-      />
-    )
+  const isFreeEvent = paymentData.ticketPrice === 0
+
+  const surveyTicketType =
+    cart.find((item) => surveyRequiredTickets.has(item.ticketType))?.ticketType ??
+    cart[0]?.ticketType ??
+    ""
+
+  const cartSubtotalBeforeDiscount = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0)
+  const cartTotalVat = cart.reduce((sum, item) => sum + ((item.vat || 0) * item.quantity), 0)
+
+  let discountAmount = 0
+  if (discountData && !isFreeEvent) {
+    if (discountData.discountType === "percentage") {
+      discountAmount = (cartSubtotalBeforeDiscount * discountData.discountValue) / 100
+    } else {
+      discountAmount = discountData.discountValue
+    }
   }
 
-// AFTER
-const isFreeEvent = paymentData.ticketPrice === 0
+  const cartSubtotal = cartSubtotalBeforeDiscount - discountAmount
+  const totalAmount = cartSubtotal + cartTotalVat
 
-// Which ticket type's form to show. Previously this always used cart[0],
-// which meant that if a *different* item in the cart was the one flagged
-// as requiring a form, the form would silently never appear. Pick the
-// first cart item that's actually in the required set, falling back to
-// cart[0] only if nothing matched (shouldn't happen once required).
-const surveyTicketType =
-  cart.find((item) => surveyRequiredTickets.has(item.ticketType))?.ticketType ??
-  cart[0]?.ticketType ??
-  ""
-
-const cartSubtotalBeforeDiscount = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0)
-const cartTotalVat = cart.reduce((sum, item) => sum + ((item.vat || 0) * item.quantity), 0)
-
-let discountAmount = 0
-if (discountData && !isFreeEvent) {
-  if (discountData.discountType === "percentage") {
-    discountAmount = (cartSubtotalBeforeDiscount * discountData.discountValue) / 100
-  } else {
-    discountAmount = discountData.discountValue
-  }
-}
-
-const cartSubtotal = cartSubtotalBeforeDiscount - discountAmount
-const totalAmount = cartSubtotal + cartTotalVat
+  // Buyer hasn't identified themselves yet (not logged in, hasn't filled
+  // the guest form) — the checkout page still renders behind this dialog
+  // instead of being replaced by a full-screen takeover.
+  const needsGuestIdentity = !user && !userData
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-purple-50 flex flex-col">
       <UserHeader />
 
       <main className="flex-1 w-full">
-        <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <div className="w-full max-w-3xl xl:max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-12">
           {/* Page Title */}
-          <div className="mb-6 sm:mb-8">
+          <div className="mb-6 sm:mb-8 lg:mb-10">
             <button
               onClick={() => router.back()}
               className="flex items-center gap-2 text-gray-600 hover:text-purple-700 transition-colors mb-4"
@@ -872,29 +797,27 @@ const totalAmount = cartSubtotal + cartTotalVat
                 <ShieldCheck className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
               </div>
               <div className="min-w-0 flex-1">
-                <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 break-words">
+                <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 break-words">
                   {isFreeEvent ? "Complete Registration" : "Secure Checkout"}
                 </h1>
-                <p className="text-sm sm:text-base text-gray-600">
+                <p className="text-sm sm:text-base lg:text-lg text-gray-600">
                   {isFreeEvent ? "Register for this free event" : "Choose your preferred payment method"}
                 </p>
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 sm:gap-6 lg:gap-8">
             {/* Left Column - Event Summary, Discount & Referral */}
-            <div className="space-y-4 sm:space-y-6 w-full">
+            <div className="space-y-4 sm:space-y-6 w-full lg:col-span-2">
               <OrderSummary
                 eventName={paymentData.eventName}
                 cart={cart}
                 discountAmount={discountAmount ?? 0}
                 discountData={discountData}
-                // totalAmount={totalAmount ?? 0}
                 isFreeEvent={isFreeEvent}
               />
 
-              {/* Only show discount for paid events */}
               {!isFreeEvent && (
                 <Discount
                   discountCode={discountCode}
@@ -919,9 +842,6 @@ const totalAmount = cartSubtotal + cartTotalVat
                 onRemoveReferral={removeReferral}
               />
 
-              {/* Event Survey notice — the form itself opens in a dialog when
-                  the buyer clicks Proceed, so we don't block or clutter this
-                  column with the full form. */}
               {paymentData && userData && cart.length > 0 && surveyRequiredTickets.size > 0 && (
                 <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 flex items-start gap-3">
                   <FileText className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
@@ -940,8 +860,8 @@ const totalAmount = cartSubtotal + cartTotalVat
             </div>
 
             {/* Right Column - Payment Methods */}
-            <div className="w-full">
-              <PaymentMethods
+            <div className="w-full lg:col-span-3">
+              <PaymentMethodsPanel
                 selectedMethod={selectedMethod}
                 walletBalance={walletBalance}
                 isFreeEvent={isFreeEvent}
@@ -949,6 +869,7 @@ const totalAmount = cartSubtotal + cartTotalVat
                 isSurveyComplete={isSurveyComplete}
                 isSurveyRequired={surveyRequiredTickets.size > 0}
                 isGuest={!user}
+                totalAmount={totalAmount}
                 onSelectMethod={handlePaymentMethodSelect}
                 onProceed={handleProceedClick}
                 onSignIn={handleShowSignIn}
@@ -958,8 +879,19 @@ const totalAmount = cartSubtotal + cartTotalVat
         </div>
       </main>
 
-      {/* Event Registration Form Dialog — opens when the buyer clicks
-          Proceed/Register and the selected ticket type requires a form. */}
+      {/* Guest identity dialog — replaces the old full-screen guest form.
+          The checkout page renders behind it so the event/order context
+          stays visible. */}
+      {needsGuestIdentity && (
+        <GuestCheckoutDialog
+          onSubmitGuest={handleGuestSubmit}
+          onShowSignIn={handleShowSignIn}
+          onClose={handleGuestDialogClose}
+          isLoading={dataLoading}
+        />
+      )}
+
+      {/* Event Registration Form Dialog */}
       {showSurveyDialog && paymentData && userData && (
         <SurveyFormDialog
           eventId={paymentData.eventId}
@@ -973,9 +905,7 @@ const totalAmount = cartSubtotal + cartTotalVat
 
       {/* Paystack — mounted as early as possible (as soon as we know this is
           a paid event and who's paying) so its script + profile preloading
-          finish in the background well before the buyer clicks Pay Now. It
-          renders nothing until paystackRef.current.open(reference) is
-          called from proceedWithPayment. */}
+          finish in the background well before the buyer clicks Proceed. */}
       {paymentData && userData && !isFreeEvent && (
         <PayWithPaystack
           ref={paystackRef}
@@ -984,10 +914,6 @@ const totalAmount = cartSubtotal + cartTotalVat
           amount={totalAmount}
           isGuest={!user}
           userId={user?.uid || null}
-          // Pass name + phone so Paystack prefills the checkout form. We
-          // already have both from the /api/v1/user/me call above (or from
-          // the guest checkout form) — passing them in lets PayWithPaystack
-          // skip its own post-click profile fetch entirely.
           fullName={user ? (userData.fullName ?? null) : (guestFullName || null)}
           phone={user ? (userData.phoneNumber || null) : (guestPhone || null)}
           metadata={{

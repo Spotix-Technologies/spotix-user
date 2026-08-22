@@ -40,8 +40,8 @@ export default function Discount({
   return (
     <div className="bg-white rounded-2xl border-2 border-gray-200 shadow-lg p-4 sm:p-6 w-full">
       <div className="flex items-center gap-2 mb-4">
-        <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-yellow-100 flex-shrink-0">
-          <Tag size={16} className="text-yellow-600" />
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-purple-100 flex-shrink-0">
+          <Tag size={16} style={{ color: "#6b2fa5" }} />
         </div>
         <h3 className="text-lg sm:text-xl font-bold text-gray-900">Discount Code</h3>
       </div>
@@ -74,12 +74,13 @@ export default function Discount({
                 setDiscountError("")
               }}
               placeholder="Enter discount code"
-              className="flex-1 px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base rounded-xl border-2 border-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent w-full"
+              className="flex-1 px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base text-gray-900 placeholder:text-gray-400 rounded-xl border-2 border-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent w-full"
             />
             <button
               onClick={onValidateDiscount}
               disabled={discountLoading || !discountCode.trim()}
-              className="px-4 sm:px-6 py-2 sm:py-3 text-sm sm:text-base bg-yellow-500 hover:bg-yellow-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-all w-full sm:w-auto whitespace-nowrap"
+              className="px-4 sm:px-6 py-2 sm:py-3 text-sm sm:text-base hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-all w-full sm:w-auto whitespace-nowrap"
+              style={{ background: "#6b2fa5" }}
             >
               {discountLoading ? "Checking..." : "Apply"}
             </button>

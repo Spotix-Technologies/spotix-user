@@ -33,6 +33,8 @@ export interface TicketWithPaystackParams {
   fullName:    string
   phone:       string
   metadata:    TicketPaystackMetadata
+  /** Paystack channels to restrict checkout to, e.g. ["card"]. Empty/omitted = Paystack's default full picker. */
+  channels?:   string[]
   onSuccess:   (reference: string) => void
   /** Fires when the buyer closes the Paystack widget without completing payment. */
   onClose:     () => void
@@ -55,6 +57,7 @@ export function ticketWithPaystack(params: TicketWithPaystackParams) {
     amount:   Math.round(params.amount * 100), // kobo
     currency: "NGN",
     ref:      params.reference,
+    ...(params.channels && params.channels.length > 0 ? { channels: params.channels } : {}),
 
     first_name: firstName,
     last_name:  lastName,

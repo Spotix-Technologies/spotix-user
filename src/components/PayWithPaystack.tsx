@@ -64,8 +64,17 @@ export interface PayWithPaystackHandle {
    * that render-timing gap entirely. Omit it to fall back to props/state
    * (fine for the ticket flow, where PayWithPaystack isn't mounted until
    * userData — and therefore fullName/phone — is already resolved).
+   *
+   * `channels`, when passed, restricts the Paystack widget to that payment
+   * method (e.g. ["bank_transfer"]) — set by callers that run their own
+   * "how do you wanna pay?" step before opening the widget, mirroring
+   * spotix-vote's VoteModal. Omit for Paystack's default full picker.
    */
-  open: (reference: string, identity?: { fullName?: string | null; phone?: string | null }) => void
+  open: (
+    reference: string,
+    identity?: { fullName?: string | null; phone?: string | null },
+    channels?: string[]
+  ) => void
 }
 
 declare global {
@@ -117,6 +126,10 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
     // after an abandoned attempt.
     const pendingReferenceRef = useRef<string | null>(null)
     const pendingPhoneOverrideRef = useRef<string | null>(null)
+    // Carries an explicit channels[] override from open() through the
+    // phone-prompt / abandoned-retry detours, which otherwise only
+    // re-invoke openWidget() with the phone/fullName overrides.
+    const pendingChannelsRef = useRef<string[] | undefined>(undefined)
     // Mirrors pendingPhoneOverrideRef, but for fullName — carries an
     // explicit identity.fullName passed into open() through the
     // phone-prompt / abandoned-retry detours, which otherwise only
@@ -184,7 +197,7 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
     // useEffect — only from doOpen's own timer (started synchronously
     // inside the original click) or a fresh "Have another go?" click.
     const openWidget = useCallback(
-      (reference: string, phoneOverride?: string, fullNameOverride?: string | null) => {
+      (reference: string, phoneOverride?: string, fullNameOverride?: string | null, channels?: string[]) => {
         if (!isPaystackReady()) {
           setError("Paystack is still loading. Please wait a moment and press Pay Now again.")
           setStage("error")
@@ -225,6 +238,7 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
           reference,
           fullName: effectiveFullName ?? "",
           phone: effectivePhone ?? "",
+          channels,
           onSuccess: (ref: string) => {
             setActive(false)
             onSuccessRef.current(ref)
@@ -270,12 +284,13 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
     // chain. Shows the "transfer exactly ₦X" notice for a moment, then
     // opens the widget automatically.
     const doOpen = useCallback(
-      (reference: string, phoneOverride?: string, fullNameOverride?: string | null) => {
+      (reference: string, phoneOverride?: string, fullNameOverride?: string | null, channels?: string[]) => {
         setActive(true)
         setError(null)
         pendingReferenceRef.current = reference
         pendingPhoneOverrideRef.current = phoneOverride ?? null
         pendingFullNameOverrideRef.current = fullNameOverride
+        pendingChannelsRef.current = channels
 
         // Keep resolvedFullName state in sync with any explicit override too
         // — harmless for the ticket flow (fullNameOverride is never passed
@@ -303,7 +318,7 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
 
         if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
         confirmTimerRef.current = setTimeout(() => {
-          openWidget(reference, phoneOverride, fullNameOverride)
+          openWidget(reference, phoneOverride, fullNameOverride, channels)
         }, AMOUNT_NOTICE_DELAY_MS)
       },
       [openWidget, isGuest, phoneNumber, resolvedFullName, email]
@@ -327,7 +342,7 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
         setStage("confirm")
         if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current)
         confirmTimerRef.current = setTimeout(() => {
-          openWidget(pending, phone, pendingFullNameOverrideRef.current)
+          openWidget(pending, phone, pendingFullNameOverrideRef.current, pendingChannelsRef.current)
         }, AMOUNT_NOTICE_DELAY_MS)
       }
     }
@@ -336,7 +351,12 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
       // Fresh click — safe to open Paystack directly.
       const pending = pendingReferenceRef.current
       if (pending) {
-        openWidget(pending, pendingPhoneOverrideRef.current ?? undefined, pendingFullNameOverrideRef.current)
+        openWidget(
+          pending,
+          pendingPhoneOverrideRef.current ?? undefined,
+          pendingFullNameOverrideRef.current,
+          pendingChannelsRef.current
+        )
       }
     }
 
@@ -348,8 +368,11 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
     useImperativeHandle(
       ref,
       () => ({
-        open: (reference: string, identity?: { fullName?: string | null; phone?: string | null }) =>
-          doOpen(reference, identity?.phone ?? undefined, identity?.fullName),
+        open: (
+          reference: string,
+          identity?: { fullName?: string | null; phone?: string | null },
+          channels?: string[]
+        ) => doOpen(reference, identity?.phone ?? undefined, identity?.fullName, channels),
       }),
       [doOpen]
     )

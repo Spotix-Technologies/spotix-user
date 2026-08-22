@@ -1,5 +1,5 @@
 import type { Metadata } from "next"
-import PaymentClient from "./PaymentClient"
+import EventPaymentClient from "./EventPaymentClient"
 
 export const metadata: Metadata = {
   title: "Payment",
@@ -11,6 +11,6 @@ export const metadata: Metadata = {
   },
 }
 
-export default function PaymentPage() {
-  return <PaymentClient />
+export default function EventPaymentPage() {
+  return <EventPaymentClient />
 }

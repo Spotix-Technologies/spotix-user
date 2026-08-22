@@ -3,7 +3,7 @@
 import { Suspense } from "react"
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { CheckCircle, Loader2, ArrowRight, Ticket } from "lucide-react"
+import { Loader2 } from "lucide-react"
 import UserHeader from "@/components/UserHeader"
 import Footer from "@/components/footer"
 
@@ -14,6 +14,11 @@ import IncorrectAmountState from "./components/IncorrectAmountState"
 import Confetti from "./components/Confetti"
 import TicketQRCard from "./components/TicketQRCard"
 import SaveTicketsBanner from "./components/SaveTicketsBanner"
+import SuccessHeader from "./components/SuccessHeader"
+import TicketDetailsCard from "./components/TicketDetailsCard"
+import ActionButtons from "./components/ActionButtons"
+import WhatsNextCard from "./components/WhatsNextCard"
+import BackToHomeLink from "./components/BackToHomeLink"
 import { isIncorrectAmountMessage } from "@/utils/paymentMessages"
 
 // PDF helpers
@@ -245,22 +250,11 @@ function PaymentSuccessContent() {
       <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-purple-50 py-12 px-4">
         <div className="max-w-3xl mx-auto">
 
-          {/* ── Success Header ─────────────────────────────────────────── */}
-          <div className="bg-white rounded-2xl shadow-2xl p-8 mb-6 text-center">
-            <div className="flex justify-center mb-4">
-              <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center animate-bounce">
-                <CheckCircle className="w-12 h-12 text-green-600" />
-              </div>
-            </div>
-            <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">
-              {isFreeTicket ? "Registration Successful!" : "Payment Successful!"}
-            </h1>
-            <p className="text-lg text-gray-600">
-              {isMultiTicket
-                ? `${ticketData.totalTickets} tickets have been generated`
-                : "Your ticket has been generated"}
-            </p>
-          </div>
+          <SuccessHeader
+            isFreeTicket={isFreeTicket}
+            isMultiTicket={isMultiTicket}
+            totalTickets={ticketData.totalTickets}
+          />
 
           {/* ── Screenshot / download nudge + PDF button ───────────────── */}
           <SaveTicketsBanner
@@ -292,202 +286,33 @@ function PaymentSuccessContent() {
             </div>
           </div>
 
-          {/* ── Ticket Details Card ────────────────────────────────────── */}
-          <div className="bg-white rounded-2xl shadow-xl overflow-hidden mb-6">
-            {/* Header */}
-            <div className="bg-gradient-to-r from-purple-600 to-purple-800 p-6 text-white">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-purple-200 text-sm mb-1">Event</p>
-                  <h2 className="text-2xl font-bold">{ticketData.eventName}</h2>
-                </div>
-                <Ticket className="w-12 h-12 opacity-50" />
-              </div>
-            </div>
+          <TicketDetailsCard
+            eventName={ticketData.eventName}
+            ticketIds={ticketData.ticketIds}
+            totalTickets={ticketData.totalTickets}
+            totalAmount={ticketData.totalAmount}
+            ticketReference={ticketData.ticketReference}
+            isFreeTicket={isFreeTicket}
+            isMultiTicket={isMultiTicket}
+            discountApplied={ticketData.discountApplied}
+            referralUsed={ticketData.referralUsed}
+            buyerInfo={buyerInfo}
+            eventDetails={ticketData.eventDetails}
+          />
 
-            {/* Body */}
-            <div className="p-6 space-y-6">
-              {/* Ticket IDs */}
-              <div className="bg-gradient-to-r from-purple-50 to-purple-100 rounded-xl p-4 border-2 border-purple-200">
-                <p className="text-sm text-purple-700 font-medium mb-2">
-                  {isMultiTicket ? `Ticket IDs (${ticketData.totalTickets})` : "Ticket ID"}
-                </p>
-                {isMultiTicket ? (
-                  <div className="space-y-1">
-                    {ticketData.ticketIds.map((id, idx) => (
-                      <p key={id} className="text-sm font-bold text-purple-900 font-mono">
-                        {idx + 1}. {id}
-                      </p>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-2xl font-bold text-purple-900 font-mono">
-                    {ticketData.ticketIds[0]}
-                  </p>
-                )}
-              </div>
+          <ActionButtons
+            isMultiTicket={isMultiTicket}
+            onViewTicket={handleViewTicket}
+            onViewTickets={handleViewTickets}
+          />
 
-              {/* Event Details */}
-              <div className="grid md:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">Tickets Purchased</p>
-                  <p className="text-lg font-bold text-gray-900">{ticketData.totalTickets}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">Amount Paid</p>
-                  <p className="text-lg font-bold text-gray-900">
-                    {isFreeTicket ? "FREE" : `₦${ticketData.totalAmount.toLocaleString()}`}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">Date</p>
-                  <p className="text-lg font-semibold text-gray-900">
-                    {ticketData.eventDetails.eventDate
-                      ? new Date(ticketData.eventDetails.eventDate).toLocaleDateString()
-                      : "TBA"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">Time</p>
-                  <p className="text-lg font-semibold text-gray-900">
-                    {ticketData.eventDetails.eventStart} – {ticketData.eventDetails.eventEnd}
-                  </p>
-                </div>
-                <div className="md:col-span-2">
-                  <p className="text-sm text-gray-600 mb-1">Venue</p>
-                  <p className="text-lg font-semibold text-gray-900">
-                    {ticketData.eventDetails.eventVenue}
-                  </p>
-                </div>
-              </div>
+          <WhatsNextCard
+            buyerEmail={buyerInfo.email}
+            bookerEmail={ticketData.eventDetails.bookerEmail}
+            isMultiTicket={isMultiTicket}
+          />
 
-              {/* Attendee Info */}
-              <div className="border-t border-gray-200 pt-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-4">Attendee Information</h3>
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-gray-600 mb-1">Name</p>
-                    <p className="text-lg font-semibold text-gray-900">
-                      {buyerInfo.fullName || "—"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-600 mb-1">Email</p>
-                    <p className="text-lg font-semibold text-gray-900">
-                      {buyerInfo.email}
-                    </p>
-                  </div>
-                  {buyerInfo.isGuest && (
-                    <div className="md:col-span-2">
-                      <span className="px-3 py-1 bg-gray-100 text-gray-700 text-sm font-semibold rounded-full">
-                        👤 Guest Purchase
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Badges */}
-              {(ticketData.discountApplied || ticketData.referralUsed || isFreeTicket) && (
-                <div className="flex flex-wrap gap-2">
-                  {isFreeTicket && (
-                    <span className="px-3 py-1 bg-green-100 text-green-800 text-sm font-semibold rounded-full">
-                      🎁 Free Event
-                    </span>
-                  )}
-                  {ticketData.discountApplied && !isFreeTicket && (
-                    <span className="px-3 py-1 bg-yellow-100 text-yellow-800 text-sm font-semibold rounded-full">
-                      🎉 Discount Applied
-                    </span>
-                  )}
-                  {ticketData.referralUsed && (
-                    <span className="px-3 py-1 bg-blue-100 text-blue-800 text-sm font-semibold rounded-full">
-                      👥 Referral Used
-                    </span>
-                  )}
-                </div>
-              )}
-
-              {/* Reference */}
-              <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-                <p className="text-sm text-gray-600 mb-1">
-                  {isFreeTicket ? "Registration Reference" : "Payment Reference"}
-                </p>
-                <p className="text-sm font-mono text-gray-900 break-all">
-                  {ticketData.ticketReference}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* ── Action Buttons ─────────────────────────────────────────── */}
-          <div className="grid md:grid-cols-2 gap-4 mb-6">
-            <button
-              onClick={handleViewTicket}
-              className="w-full py-4 px-6 bg-gradient-to-r from-purple-600 to-purple-800 text-white font-bold rounded-xl hover:from-purple-700 hover:to-purple-900 transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
-            >
-              <Ticket size={20} />
-              {isMultiTicket ? "View First Ticket" : "View Ticket Details"}
-              <ArrowRight size={20} />
-            </button>
-            <button
-              onClick={handleViewTickets}
-              className="w-full py-4 px-6 bg-white border-2 border-purple-600 text-purple-600 font-bold rounded-xl hover:bg-purple-50 transition-all flex items-center justify-center gap-2"
-            >
-              <Ticket size={20} />
-              View All Tickets
-            </button>
-          </div>
-
-          {/* ── What's Next ────────────────────────────────────────────── */}
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-                <CheckCircle className="w-6 h-6 text-blue-600" />
-              </div>
-              <div>
-                <h3 className="text-lg font-bold text-blue-900 mb-2">What&apos;s Next?</h3>
-                <ul className="space-y-2 text-blue-800">
-                  <li className="flex items-start gap-2">
-                    <span className="text-blue-600 mt-1">✓</span>
-                    <span>
-                      A confirmation email has been sent to{" "}
-                      <span className="font-semibold">{buyerInfo.email}</span>
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-blue-600 mt-1">✓</span>
-                    <span>
-                      Your ticket{isMultiTicket ? "s are" : " is"} now available in your ticket history
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-blue-600 mt-1">✓</span>
-                    <span>
-                      Present your QR code{isMultiTicket ? "s" : ""} at the event entrance for verification
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-blue-600 mt-1">✓</span>
-                    <span>
-                      For questions, contact:{" "}
-                      <span className="font-semibold">{ticketData.eventDetails.bookerEmail}</span>
-                    </span>
-                  </li>
-                </ul>
-              </div>
-            </div>
-          </div>
-
-          {/* ── Back to Home ───────────────────────────────────────────── */}
-          <div className="text-center mt-8">
-            <button
-              onClick={handleGoHome}
-              className="text-purple-600 hover:text-purple-800 font-semibold transition-colors"
-            >
-              ← Back to Home
-            </button>
-          </div>
+          <BackToHomeLink onGoHome={handleGoHome} />
 
         </div>
       </div>

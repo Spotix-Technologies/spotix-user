@@ -34,17 +34,17 @@ export default function Referral({
   return (
     <div className="bg-white rounded-2xl border-2 border-gray-200 shadow-lg p-4 sm:p-6 w-full">
       <div className="flex items-center gap-2 mb-4">
-        <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-blue-100 flex-shrink-0">
-          <Users size={16} className="text-blue-600" />
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-purple-100 flex-shrink-0">
+          <Users size={16} style={{ color: "#6b2fa5" }} />
         </div>
         <h3 className="text-lg sm:text-xl font-bold text-gray-900">Referral Code (Optional)</h3>
       </div>
 
       {referralData ? (
-        <div className="flex items-center justify-between p-3 sm:p-4 rounded-xl bg-blue-50 border-2 border-blue-200">
+        <div className="flex items-center justify-between p-3 sm:p-4 rounded-xl bg-purple-50 border-2 border-purple-200">
           <div className="min-w-0 flex-1 pr-2">
-            <p className="font-bold text-sm sm:text-base text-blue-700 break-words">{referralData.code}</p>
-            <p className="text-xs sm:text-sm text-blue-600">Selected</p>
+            <p className="font-bold text-sm sm:text-base text-purple-700 break-words">{referralData.code}</p>
+            <p className="text-xs sm:text-sm text-purple-600">Selected</p>
           </div>
           <button onClick={onRemoveReferral} className="p-2 hover:bg-red-100 rounded-lg transition-colors flex-shrink-0">
             <X className="w-5 h-5 text-red-600" />
@@ -54,7 +54,7 @@ export default function Referral({
         <div>
           {referralFetching ? (
             <div className="flex items-center justify-center py-8">
-              <div className="inline-block h-6 w-6 animate-spin rounded-full border-4 border-solid border-blue-500 border-r-transparent"></div>
+              <div className="inline-block h-6 w-6 animate-spin rounded-full border-4 border-solid border-purple-500 border-r-transparent"></div>
               <span className="ml-2 text-sm sm:text-base text-gray-600">Loading referral codes...</span>
             </div>
           ) : referralCodes.length === 0 ? (
@@ -63,7 +63,7 @@ export default function Referral({
             <div className="relative">
               <button
                 onClick={() => setShowReferralDropdown(!showReferralDropdown)}
-                className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base rounded-xl border-2 border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-left bg-white hover:bg-gray-50 transition-colors flex items-center justify-between"
+                className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base rounded-xl border-2 border-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500 text-left bg-white hover:bg-gray-50 transition-colors flex items-center justify-between"
               >
                 <span className="text-gray-600 break-words pr-2">Select a referral code...</span>
                 <ChevronDown
@@ -79,7 +79,7 @@ export default function Referral({
                       <button
                         key={referral.code}
                         onClick={() => onSelectReferral(referral.code)}
-                        className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base text-left hover:bg-blue-50 border-b border-gray-100 last:border-b-0 font-medium text-gray-700 transition-colors break-words"
+                        className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base text-left hover:bg-purple-50 border-b border-gray-100 last:border-b-0 font-medium text-gray-700 transition-colors break-words"
                       >
                         {referral.code}
                       </button>

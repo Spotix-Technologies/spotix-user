@@ -441,13 +441,13 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
     setShowBuyTicketDialog(false)
 
     if (!isAuthenticated) {
-      router.push("/payment?mode=guest")
+      router.push(`/event/${eventId}/payment?mode=guest`)
     } else {
-      router.push("/payment")
+      router.push(`/event/${eventId}/payment`)
     }
   }
 
-  // ── Render guards ───────────────────────────
+  // ── Render guards ───────────────────────────────────────���─────────────────
 
   if (!isPageLoaded) return <Preloader />
   if (loading) return <EventSkeleton />
