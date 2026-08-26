@@ -1,87 +1,104 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { adminDb, adminAuth } from "@/app/lib/firebase-admin"
+import { adminDb } from "@/app/lib/firebase-admin"
 
 interface DiscountValidationRequest {
   code: string
   eventId: string
-  // eventCreatorId: string
+  /** Unique ticket type ("policy") names currently in the buyer's cart —
+   *  used to check per-ticket eligibility for scoped discount codes. */
+  ticketTypes?: string[]
 }
 
-interface DiscountData {
+// Firestore shape (events/{eventId}/discounts/{discountId}) — set by the
+// booker app's "addDiscount"/"editDiscount" actions, see
+// spotix-booker/app/api/event/list/[eventId]/route.ts
+interface DiscountDoc {
   code: string
   type: "percentage" | "flat"
   value: number
   maxUses: number
   usedCount: number
   active: boolean
+  applicableTickets?: string[] | null
+  expiryDate?: string | null
+}
+
+function fail(message: string, status: number) {
+  return NextResponse.json({ error: message, message }, { status })
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body: DiscountValidationRequest = await request.json()
-    const { code, eventId } = body
+    const { code, eventId, ticketTypes } = body
 
-    // Validate required fields
     if (!code || !eventId) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
+      return fail("Missing required fields", 400)
     }
 
-    // // Verify user authentication
-    // const authHeader = request.headers.get("authorization")
-    // if (!authHeader?.startsWith("Bearer ")) {
-    //   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    // }
+    const discountsCollectionRef = adminDb.collection("events").doc(eventId).collection("discounts")
 
-    // const token = authHeader.split("Bearer ")[1]
-    // const decodedToken = await adminAuth.verifyIdToken(token)
+    const querySnapshot = await discountsCollectionRef
+      .where("code", "==", code.trim().toUpperCase())
+      .limit(1)
+      .get()
 
-    const discountsCollectionRef = adminDb
-      .collection("events")
-      .doc(eventId)
-      .collection("discounts")
-
-    const querySnapshot = await discountsCollectionRef.where("code", "==", code.trim()).get()
-
-    if (querySnapshot.empty) {
-      return NextResponse.json({ error: "Invalid discount code" }, { status: 404 })
+    // Codes are stored with whatever casing the booker typed — fall back to
+    // a case-insensitive scan if the uppercase-normalised lookup misses.
+    let discountDoc = querySnapshot.docs[0]
+    if (!discountDoc) {
+      const all = await discountsCollectionRef.get()
+      discountDoc = all.docs.find((d) => d.data().code?.toString().toLowerCase() === code.trim().toLowerCase())!
     }
 
-    const discountDoc = querySnapshot.docs[0]
-    const discountData = discountDoc.data() as DiscountData
+    if (!discountDoc) {
+      return fail("Invalid discount code", 404)
+    }
 
-    // Check if discount is active
+    const discountData = discountDoc.data() as DiscountDoc
+
     if (!discountData.active) {
-      return NextResponse.json({ error: "This discount code is no longer active" }, { status: 400 })
+      return fail("This discount code is no longer active", 400)
     }
 
-    // Check if discount has reached max uses
-    if (discountData.usedCount >= discountData.maxUses) {
-      return NextResponse.json({ error: "This discount code has reached its maximum usage limit" }, { status: 400 })
+    if (discountData.expiryDate) {
+      const expiry = new Date(discountData.expiryDate)
+      if (!Number.isNaN(expiry.getTime()) && expiry.getTime() < Date.now()) {
+        return fail("This discount code has expired", 410)
+      }
     }
 
-    // Calculate discounted price
-    let discountedPrice = 0
-    if (discountData.type === "percentage") {
-      const discountRate = Math.min(discountData.value, 100) / 100
-      discountedPrice = discountData.value
-    } else {
-      discountedPrice = discountData.value
+    if ((discountData.usedCount ?? 0) >= (discountData.maxUses ?? 1)) {
+      return fail("This discount code has reached its maximum usage limit", 400)
     }
 
-    return NextResponse.json({
-      success: true,
-      discount: {
+    // Per-ticket-type eligibility: only enforced when the code is scoped
+    // (applicableTickets non-empty) AND the caller told us what's in the cart.
+    const scope = discountData.applicableTickets
+    if (scope && scope.length > 0 && ticketTypes && ticketTypes.length > 0) {
+      const anyEligible = ticketTypes.some((t) => scope.includes(t))
+      if (!anyEligible) {
+        return fail(`This code only applies to: ${scope.join(", ")}`, 422)
+      }
+    }
+
+    return NextResponse.json(
+      {
+        success: true,
+        id: discountDoc.id,
         code: discountData.code,
-        type: discountData.type,
-        value: discountData.value,
-        maxUses: discountData.maxUses,
-        usedCount: discountData.usedCount,
-        active: discountData.active,
+        discountType: discountData.type,
+        discountValue: discountData.value,
+        maxUses: discountData.maxUses ?? 1,
+        currentUses: discountData.usedCount ?? 0,
+        expiryDate: discountData.expiryDate ?? null,
+        applicableTickets: scope && scope.length > 0 ? scope : null,
+        message: "Discount code is valid",
       },
-      message: "Discount code is valid",
-    })
+      { status: 200 }
+    )
   } catch (error) {
     console.error("Error validating discount:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return fail("Internal server error", 500)
   }
 }

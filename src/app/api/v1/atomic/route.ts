@@ -209,20 +209,37 @@ export async function POST(req: NextRequest) {
       console.error(`[Atomic] Cache invalidation failed for event ${eventId}:`, err)
     );
 
-    // Discount usage (non-blocking, outside transaction) 
+    // Discount usage (non-blocking, outside transaction)
+    // NOTE: discount docs use an auto-generated Firestore doc ID — `code`
+    // is just a field on them (see spotix-booker's addDiscount) — so this
+    // has to be resolved with a query, not `.doc(discountCode)`, or the
+    // usedCount here never actually applies.
     if (discountCode) {
       try {
-        const discountDocRef = adminDb
+        const discountsRef = adminDb
           .collection("events")
           .doc(eventId)
-          .collection("discounts")
-          .doc(discountCode);
+          .collection("discounts");
 
-        const discountDoc = await discountDocRef.get();
-        if (discountDoc.exists) {
-          await discountDocRef.update({ usedCount: FieldValue.increment(qty) });
+        const discountQuery = await discountsRef
+          .where("code", "==", String(discountCode).trim().toUpperCase())
+          .limit(1)
+          .get();
+
+        let discountDoc = discountQuery.docs[0];
+        if (!discountDoc) {
+          const all = await discountsRef.get();
+          discountDoc = all.docs.find(
+            (d) => d.data().code?.toString().toLowerCase() === String(discountCode).trim().toLowerCase()
+          )!;
+        }
+
+        if (discountDoc) {
+          await discountDoc.ref.update({ usedCount: FieldValue.increment(qty) });
           operationsPerformed.discountUpdated = true;
           console.log(`[Atomic] Discount "${discountCode}" usedCount +${qty}`);
+        } else {
+          console.warn(`[Atomic] Discount code "${discountCode}" not found for event ${eventId} — usedCount not incremented`);
         }
       } catch (discountError) {
         console.error("[Atomic] Discount update error (non-blocking):", discountError);

@@ -18,7 +18,7 @@ interface OrderSummaryProps {
   discountAmount: number
   discountData: {
     code: string
-    discountType: "percentage" | "fixed"
+    discountType: "percentage" | "flat"
     discountValue: number
   } | null
   isFreeEvent: boolean

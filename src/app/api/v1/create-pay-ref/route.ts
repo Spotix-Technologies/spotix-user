@@ -162,7 +162,7 @@ export async function POST(request: NextRequest) {
       // Canonical ticket info — ticket.js reads ticketTypes to expand into seats
       ticketTypes: normalisedTicketTypes,
       ticketType: primaryTicketType,          // convenience / backwards compat
-      ticketPrice: Number(ticketPrice),       // subtotal before VAT (used for display)
+      ticketPrice: Number(ticketPrice),       // subtotal after discount, before VAT (also what's paid out/refunded)
       totalAmount: Number(totalAmount),       // grand total inc. VAT after discount
       transactionFee: Number(transactionFee) || 0, // VAT/fee sent from orderSummary
       totalTicketCount,

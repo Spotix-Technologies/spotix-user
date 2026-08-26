@@ -30,6 +30,7 @@ import OrderSummary from "@/app/payment/helpers/order-summary"
 import Discount from "@/app/payment/helpers/discount"
 import Referral from "@/app/payment/helpers/referral"
 import SurveyFormDialog from "@/app/payment/helpers/survey-form-dialog"
+import { calculateDiscount, type DiscountData } from "@/app/payment/helpers/discount-utils"
 
 // New, event-route-local UI: a real Paystack channel picker (replacing the
 // old single generic "Paystack" card) and a dialog-based guest checkout
@@ -63,15 +64,6 @@ interface PaymentData {
   stopDate?: string
   bookerName?: string
   bookerEmail?: string
-}
-
-interface DiscountData {
-  code: string
-  discountType: "percentage" | "fixed"
-  discountValue: number
-  maxUses: number
-  currentUses: number
-  expiryDate: string
 }
 
 interface ReferralData {
@@ -170,6 +162,30 @@ export default function EventPaymentClient() {
           console.error("Error parsing guest data:", error)
         }
       }
+    }
+  }, [])
+
+  // Mobile-only fix: iOS Safari auto-zooms the viewport when a focused
+  // input's font-size is under 16px (see the discount/guest-checkout
+  // inputs), and because getting here is a client-side route change (not a
+  // full page load), that zoom level carries straight over from whatever
+  // page/field the buyer was just on — landing them mid-scroll on a zoomed
+  // page instead of at the top. Nudging the viewport meta's content forces
+  // Safari to reset scale to 1 on mount; restoring the original content
+  // right after keeps pinch-to-zoom working normally for the rest of the
+  // visit.
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    window.scrollTo(0, 0)
+
+    const viewportMeta = document.querySelector('meta[name="viewport"]')
+    const originalContent = viewportMeta?.getAttribute("content") ?? null
+    if (viewportMeta && originalContent) {
+      viewportMeta.setAttribute("content", `${originalContent}, maximum-scale=1`)
+      const resetTimer = setTimeout(() => {
+        viewportMeta.setAttribute("content", originalContent)
+      }, 350)
+      return () => clearTimeout(resetTimer)
     }
   }, [])
 
@@ -403,18 +419,31 @@ export default function EventPaymentClient() {
         body: JSON.stringify({
           code: discountCode.trim(),
           eventId: paymentData?.eventId,
+          // Lets the API reject/accept codes scoped to specific ticket
+          // types (see discountsTab in the booker app) against what's
+          // actually in this buyer's cart.
+          ticketTypes: Array.from(new Set(cart.map((item) => item.ticketType))),
         }),
       })
 
       const data = await response.json()
 
       if (!response.ok) {
-        setDiscountError(data.message || "Invalid discount code")
+        setDiscountError(data.message || data.error || "Invalid discount code")
         setDiscountData(null)
         return
       }
 
-      setDiscountData(data)
+      setDiscountData({
+        id: data.id,
+        code: data.code,
+        discountType: data.discountType,
+        discountValue: data.discountValue,
+        maxUses: data.maxUses,
+        currentUses: data.currentUses,
+        expiryDate: data.expiryDate ?? null,
+        applicableTickets: data.applicableTickets ?? null,
+      })
       setDiscountError("")
     } catch (error) {
       console.error("Error validating discount:", error)
@@ -464,14 +493,7 @@ export default function EventPaymentClient() {
       const subtotalBeforeDiscount = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0)
       const totalVat = cart.reduce((sum, item) => sum + ((item.vat || 0) * item.quantity), 0)
 
-      let discountAmount = 0
-      if (discountData && !isFreeEvent) {
-        if (discountData.discountType === "percentage") {
-          discountAmount = (subtotalBeforeDiscount * discountData.discountValue) / 100
-        } else {
-          discountAmount = discountData.discountValue
-        }
-      }
+      const discountAmount = isFreeEvent ? 0 : calculateDiscount(cart, discountData).discountAmount
 
       const subtotal = subtotalBeforeDiscount - discountAmount
       const totalAmount = subtotal + totalVat
@@ -542,7 +564,7 @@ export default function EventPaymentClient() {
         }
       }
 
-      requestBody.ticketPrice = isFreeEvent ? 0 : subtotalBeforeDiscount
+      requestBody.ticketPrice = isFreeEvent ? 0 : subtotal
       requestBody.totalAmount = isFreeEvent ? 0 : totalAmount
       requestBody.transactionFee = isFreeEvent ? 0 : totalVat
       requestBody.discountAmount = isFreeEvent ? 0 : discountAmount
@@ -760,14 +782,7 @@ export default function EventPaymentClient() {
   const cartSubtotalBeforeDiscount = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0)
   const cartTotalVat = cart.reduce((sum, item) => sum + ((item.vat || 0) * item.quantity), 0)
 
-  let discountAmount = 0
-  if (discountData && !isFreeEvent) {
-    if (discountData.discountType === "percentage") {
-      discountAmount = (cartSubtotalBeforeDiscount * discountData.discountValue) / 100
-    } else {
-      discountAmount = discountData.discountValue
-    }
-  }
+  const discountAmount = isFreeEvent ? 0 : calculateDiscount(cart, discountData).discountAmount
 
   const cartSubtotal = cartSubtotalBeforeDiscount - discountAmount
   const totalAmount = cartSubtotal + cartTotalVat

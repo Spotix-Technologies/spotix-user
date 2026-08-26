@@ -60,7 +60,11 @@ export default function GuestCheckoutDialog({
   }
 
   const inputBase =
-    "w-full pl-11 pr-4 py-3 rounded-xl border-2 text-gray-900 text-sm font-medium bg-white transition-all duration-200 outline-none placeholder:text-gray-400 placeholder:font-normal"
+    // text-base (16px), not text-sm (14px): iOS Safari auto-zooms the page
+    // when a focused input's font-size is under 16px, and that zoom then
+    // carries over into the payment page behind this dialog since closing
+    // it is a client-side state change, not a real navigation.
+    "w-full pl-11 pr-4 py-3 rounded-xl border-2 text-gray-900 text-base font-medium bg-white transition-all duration-200 outline-none placeholder:text-gray-400 placeholder:font-normal"
   const inputNormal = "border-gray-200 hover:border-gray-300 focus:border-[#6b2fa5] focus:ring-4 focus:ring-purple-100"
   const inputError = "border-red-400 bg-red-50 focus:border-red-500 focus:ring-4 focus:ring-red-100"
 
@@ -81,8 +85,8 @@ export default function GuestCheckoutDialog({
             <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-sm border border-white/20 rounded-full px-3 py-1 mb-3">
               <span className="text-[11px] font-semibold text-purple-100 tracking-wide uppercase">Quick checkout</span>
             </div>
-            <h2 className="text-xl font-extrabold text-white mb-1">Checkout as Guest</h2>
-            <p className="text-sm text-purple-200">Fill in your details — no account needed.</p>
+            {/* <h2 className="text-xl font-extrabold text-white mb-1">Checkout as Guest</h2>
+            <p className="text-sm text-purple-200">Fill in your details — no account needed.</p> */}
           </div>
         </div>
 

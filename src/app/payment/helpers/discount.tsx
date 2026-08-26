@@ -1,16 +1,9 @@
 "use client"
 
 import React from "react"
-import { Tag, X } from "lucide-react"
-
-interface DiscountData {
-  code: string
-  discountType: "percentage" | "fixed"
-  discountValue: number
-  maxUses: number
-  currentUses: number
-  expiryDate: string
-}
+import { Tag, X, Calendar, Ticket as TicketIcon } from "lucide-react"
+import { formatNumber } from "@/utils/formatter"
+import type { DiscountData } from "./discount-utils"
 
 interface DiscountProps {
   discountCode: string
@@ -21,10 +14,6 @@ interface DiscountProps {
   setDiscountError: (error: string) => void
   discountLoading: boolean
   onValidateDiscount: () => Promise<void>
-}
-
-const formatNumber = (num: number): string => {
-  return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")
 }
 
 export default function Discount({
@@ -53,8 +42,20 @@ export default function Discount({
             <p className="text-xs sm:text-sm text-green-600">
               {discountData.discountType === "percentage"
                 ? `${discountData.discountValue}% off`
-                : `₦${formatNumber(discountData.discountValue)} off`}
+                : `₦${formatNumber(discountData.discountValue ?? 0)} off`}
             </p>
+            {discountData.applicableTickets && discountData.applicableTickets.length > 0 && (
+              <p className="text-xs text-green-600/80 flex items-center gap-1 mt-1">
+                <TicketIcon size={12} className="flex-shrink-0" />
+                <span className="break-words">Applies to: {discountData.applicableTickets.join(", ")}</span>
+              </p>
+            )}
+            {discountData.expiryDate && (
+              <p className="text-xs text-green-600/80 flex items-center gap-1 mt-0.5">
+                <Calendar size={12} className="flex-shrink-0" />
+                Expires {new Date(discountData.expiryDate).toLocaleDateString()}
+              </p>
+            )}
           </div>
           <button
             onClick={() => setDiscountData(null)}
@@ -74,7 +75,10 @@ export default function Discount({
                 setDiscountError("")
               }}
               placeholder="Enter discount code"
-              className="flex-1 px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base text-gray-900 placeholder:text-gray-400 rounded-xl border-2 border-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent w-full"
+              // text-base on every breakpoint, not text-sm on mobile: a
+              // sub-16px font makes iOS Safari auto-zoom on focus, and that
+              // zoom sticks around after the code is applied.
+              className="flex-1 px-3 sm:px-4 py-2 sm:py-3 text-base text-gray-900 placeholder:text-gray-400 rounded-xl border-2 border-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent w-full"
             />
             <button
               onClick={onValidateDiscount}
