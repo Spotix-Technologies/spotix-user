@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useMemo } from "react"
-import { X, Plus, Minus, ShoppingCart, Clock, AlertTriangle } from "lucide-react"
+import { X, Plus, Minus, ShoppingCart, Clock, AlertTriangle, Loader2 } from "lucide-react"
 import { formatNumber } from "@/utils/formatter"
 import { calculateVATFee, calculateFinalPrice } from "@/utils/priceUtility"
 import type { EventType } from "./page"
@@ -111,6 +111,8 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
   const [quantities, setQuantities] = useState<Record<number, number>>({})
   // Free event quantity (separate counter, single ticket type)
   const [freeQty, setFreeQty] = useState(1)
+  // True while we've handed off to onBuyTicket and the payment/registration page is loading
+  const [isProceeding, setIsProceeding] = useState(false)
 
   // ── Sale status (computed once on mount) ─────────────────────────────────
 
@@ -210,6 +212,8 @@ const MAX_QTY_PER_TYPE = 10
       alert("Please select at least one ticket")
       return
     }
+    if (isProceeding) return
+    setIsProceeding(true)
     if (typeof window !== "undefined") {
       localStorage.setItem("spotix_cart", JSON.stringify(cartItems))
     }
@@ -218,6 +222,8 @@ const MAX_QTY_PER_TYPE = 10
 
   const handleFreeProceed = () => {
     if (freeQty < 1) return
+    if (isProceeding) return
+    setIsProceeding(true)
     const freeCartItems: CartItem[] = [
       {
         ticketType: "Free Admission",
@@ -572,9 +578,17 @@ const MAX_QTY_PER_TYPE = 10
               </div>
               <button
                 onClick={handleFreeProceed}
-                className="w-full bg-[#6b2fa5] text-white py-3.5 px-4 rounded-xl font-semibold text-base hover:bg-purple-700 active:scale-[0.99] transition-all shadow-md hover:shadow-lg"
+                disabled={isProceeding}
+                className="w-full flex items-center justify-center gap-2 bg-[#6b2fa5] text-white py-3.5 px-4 rounded-xl font-semibold text-base hover:bg-purple-700 active:scale-[0.99] transition-all shadow-md hover:shadow-lg disabled:opacity-70 disabled:cursor-not-allowed disabled:active:scale-100"
               >
-                Proceed to Register
+                {isProceeding ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    One moment..
+                  </>
+                ) : (
+                  "Proceed to Register"
+                )}
               </button>
             </div>
           )
@@ -620,9 +634,17 @@ const MAX_QTY_PER_TYPE = 10
 
             <button
               onClick={handleProceed}
-              className="w-full bg-[#6b2fa5] text-white py-3.5 px-4 rounded-xl font-semibold text-base hover:bg-purple-700 active:scale-[0.99] transition-all shadow-md hover:shadow-lg"
+              disabled={isProceeding}
+              className="w-full flex items-center justify-center gap-2 bg-[#6b2fa5] text-white py-3.5 px-4 rounded-xl font-semibold text-base hover:bg-purple-700 active:scale-[0.99] transition-all shadow-md hover:shadow-lg disabled:opacity-70 disabled:cursor-not-allowed disabled:active:scale-100"
             >
-              {grandTotal === 0 ? "Proceed to Register" : "Proceed to Payment"}
+              {isProceeding ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  One moment..
+                </>
+              ) : (
+                grandTotal === 0 ? "Proceed to Register" : "Proceed to Payment"
+              )}
             </button>
           </div>
         ) : effectivelyClosed ? (

@@ -3,10 +3,10 @@ import QueueClient from "./QueueClient"
 
 export const metadata: Metadata = {
   title: "You're in line",
-  description: "Hang tight — you'll be let through to checkout shortly.",
+  description: "Just chill, we will check you in soon.",
   openGraph: {
     title: "You're in line",
-    description: "Hang tight — you'll be let through to checkout shortly.",
+    description: "Relax, you're just on a queue...",
     type: "website",
   },
 }

@@ -438,8 +438,8 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
       }
       sessionStorage.setItem("spotix_payment_data", JSON.stringify(paymentData))
     }
-    setShowBuyTicketDialog(false)
-
+    // Keep the dialog mounted so its "One moment.." loading state stays visible
+    // while the payment/queue page loads; it unmounts naturally once we navigate away.
     const guestSuffix = !isAuthenticated ? "?mode=guest" : ""
     const destination = eventData.virtualQueueEnabled
       ? `/event/${eventId}/queue${guestSuffix}`
