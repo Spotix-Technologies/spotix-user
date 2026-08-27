@@ -440,11 +440,11 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
     }
     setShowBuyTicketDialog(false)
 
-    if (!isAuthenticated) {
-      router.push(`/event/${eventId}/payment?mode=guest`)
-    } else {
-      router.push(`/event/${eventId}/payment`)
-    }
+    const guestSuffix = !isAuthenticated ? "?mode=guest" : ""
+    const destination = eventData.virtualQueueEnabled
+      ? `/event/${eventId}/queue${guestSuffix}`
+      : `/event/${eventId}/payment${guestSuffix}`
+    router.push(destination)
   }
 
   // ── Render guards ───────────────────────────────────────���─────────────────

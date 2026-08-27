@@ -35,6 +35,8 @@ export interface EventType {
   suspended?: boolean
   votingId?: string | null
   votingPollName?: string | null
+  virtualQueueEnabled?: boolean
+  queueBatchSize?: number
 }
 
 async function fetchEventData(eventId: string): Promise<EventType | null> {
@@ -78,6 +80,8 @@ async function fetchEventData(eventId: string): Promise<EventType | null> {
       suspended:      d?.suspended      || false,
       votingId:       d?.votingId       ?? null,
       votingPollName: d?.votingPollName ?? null,
+      virtualQueueEnabled: d?.virtualQueueEnabled === true,
+      queueBatchSize: d?.queueBatchSize || 50,
     }
   } catch (error) {
     console.error("Error fetching event data:", error)

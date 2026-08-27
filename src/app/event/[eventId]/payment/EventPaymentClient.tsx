@@ -37,6 +37,7 @@ import { calculateDiscount, type DiscountData } from "@/app/payment/helpers/disc
 // (replacing the old full-screen takeover).
 import PaymentMethodsPanel, { type SelectedMethod } from "./components/PaymentMethodsPanel"
 import GuestCheckoutDialog from "./components/GuestCheckoutDialog"
+import { releaseQueueSlot, queueTokenStorageKey } from "@/app/lib/queue-client"
 
 /** Resolves once Firebase Auth has restored its persisted session (or confirmed there is none). */
 function waitForFirebaseUser(): Promise<FirebaseUser | null> {
@@ -620,6 +621,14 @@ export default function EventPaymentClient() {
       const reference = await createPaymentReference(effectiveSurveyResponses)
       if (!reference) return
 
+      if (typeof window !== "undefined") {
+        const qToken = sessionStorage.getItem(queueTokenStorageKey(paymentData.eventId))
+        if (qToken) {
+          releaseQueueSlot(paymentData.eventId, qToken)
+          sessionStorage.removeItem(queueTokenStorageKey(paymentData.eventId))
+        }
+      }
+
       router.push(`/payment/success?reference=${reference}`)
       return
     }
@@ -696,6 +705,15 @@ export default function EventPaymentClient() {
 
   const handlePaystackSuccess = (reference: string) => {
     console.log("Payment successful, reference:", reference)
+
+    if (typeof window !== "undefined" && paymentData) {
+      const qToken = sessionStorage.getItem(queueTokenStorageKey(paymentData.eventId))
+      if (qToken) {
+        releaseQueueSlot(paymentData.eventId, qToken)
+        sessionStorage.removeItem(queueTokenStorageKey(paymentData.eventId))
+      }
+    }
+
     router.push(`/payment/success?reference=${reference}`)
   }
 
