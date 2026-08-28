@@ -8,6 +8,7 @@ import {
   getQueueStatus,
   leaveQueue,
   queueTokenStorageKey,
+  queueExpiryStorageKey,
   type QueueStatusResponse,
 } from "@/app/lib/queue-client"
 import UserHeader from "@/components/UserHeader"
@@ -52,6 +53,9 @@ export default function QueueClient() {
     setStatus(result)
 
     if (result.status === "admitted") {
+      if (result.expiresAt) {
+        sessionStorage.setItem(queueExpiryStorageKey(eventId), String(result.expiresAt))
+      }
       router.push(`/event/${eventId}/payment${guestSuffix}`)
       return
     }
@@ -135,7 +139,7 @@ export default function QueueClient() {
               </div>
               <h1 className="text-lg font-bold text-gray-900 mb-1">You&apos;re in the queue</h1>
               <p className="text-sm text-gray-500 mb-6">
-                Demand for this event is hang tight and we&apos;ll let you through to checkout soon.
+                Demand is high right now — hang tight and we&apos;ll let you through to checkout shortly.
               </p>
 
               <div className="bg-purple-50 rounded-xl p-5 mb-5">
@@ -161,7 +165,7 @@ export default function QueueClient() {
 
               <p className="text-xs text-gray-400 mt-6 flex items-center justify-center gap-1.5">
                 <ShieldCheck size={13} />
-                Keep this tab open as you&apos;ll be moved to checkout automatically.
+                Keep this tab open — you&apos;ll be moved to checkout automatically.
               </p>
             </>
           )}

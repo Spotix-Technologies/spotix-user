@@ -1,5 +1,7 @@
 import type { Metadata } from "next"
+import { Suspense } from "react"
 import EventPaymentClient from "./EventPaymentClient"
+import LoadingScreen from "./components/LoadingScreen"
 
 export const metadata: Metadata = {
   title: "Payment",
@@ -12,5 +14,12 @@ export const metadata: Metadata = {
 }
 
 export default function EventPaymentPage() {
-  return <EventPaymentClient />
+  // EventPaymentClient reads `?ref=` via useSearchParams (payment
+  // recovery — see lib/payment-status.ts), which requires a Suspense
+  // boundary around it in the app router.
+  return (
+    <Suspense fallback={<LoadingScreen />}>
+      <EventPaymentClient />
+    </Suspense>
+  )
 }

@@ -36,6 +36,21 @@ export function queueTokenStorageKey(eventId: string): string {
   return `spotix_queue_token_${eventId}`
 }
 
+/** sessionStorage key holding the unix-seconds expiry of the buyer's held
+ *  checkout slot, set the moment they're admitted (see QueueClient) so the
+ *  payment page can show a live countdown without polling on every tick. */
+export function queueExpiryStorageKey(eventId: string): string {
+  return `spotix_queue_expiry_${eventId}`
+}
+
+/** Formats whole seconds remaining as "mm:ss", floored at 0. */
+export function formatCountdown(secondsRemaining: number): string {
+  const clamped = Math.max(0, Math.floor(secondsRemaining))
+  const m = Math.floor(clamped / 60)
+  const s = clamped % 60
+  return `${m}:${s.toString().padStart(2, "0")}`
+}
+
 /** Whether this event currently has the virtual queue turned on. */
 export async function getQueueConfig(eventId: string): Promise<QueueConfigResponse | null> {
   const base = backendUrl()

@@ -12,6 +12,15 @@
  *   - transactionType
  *   - status  (pending | successful | failed | incorrect_payment)
  *   - eventId, eventName, ticketType, totalTicketCount, totalAmount, createdAt
+ *   - recovery — non-PII order context (ticket breakdown + event details),
+ *     included so the event checkout page can rebuild its cart/paymentData
+ *     and resume a still-pending reference after losing sessionStorage
+ *     (buyer stepped away mid-payment, tab got reloaded — see
+ *     spotix-user/src/app/event/[eventId]/payment/lib/payment-status.ts).
+ *     Deliberately excludes the buyer's name/email/phone and discount
+ *     specifics: this route is public/unauthenticated, and a resumed
+ *     pending reference is reopened as-is rather than recreated, so the
+ *     checkout page never needs that identity to resume it.
  *
  * When the underlying gateway message indicates the buyer sent the wrong
  * amount, status is promoted to "incorrect_payment" — see
@@ -60,6 +69,25 @@ export async function GET(req: NextRequest) {
       totalAmount:      d.totalAmount ?? null,
       createdAt:        toIso(d.updatedAt) ?? toIso(d.createdAt) ?? null,
       ...(displayStatus === "incorrect_payment" ? { message: INCORRECT_PAYMENT_NOTICE } : {}),
+      // Only ticket_purchase references carry enough shape here to be
+      // "resumable" — free-event / voting references don't need it.
+      ...(d.transactionType !== "vote_purchase"
+        ? {
+            recovery: {
+              eventCreatorId: d.eventCreatorId ?? null,
+              eventVenue:     d.eventVenue ?? null,
+              eventType:      d.eventType ?? null,
+              eventDate:      d.eventDate ?? null,
+              eventEndDate:   d.eventEndDate ?? null,
+              eventStart:     d.eventStart ?? null,
+              eventEnd:       d.eventEnd ?? null,
+              stopDate:       d.stopDate ?? null,
+              bookerName:     d.bookerName ?? null,
+              bookerEmail:    d.bookerEmail ?? null,
+              ticketTypes:    Array.isArray(d.ticketTypes) ? d.ticketTypes : [],
+            },
+          }
+        : {}),
     })
   } catch (err) {
     console.error("[GET /api/v1/event/payment/status] Error:", err)
