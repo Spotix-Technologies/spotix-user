@@ -160,6 +160,13 @@ export async function POST(request: NextRequest) {
     // so a later toggle can never rewrite what this purchase already
     // settled as — spotix-backend's admin-sales step reads it straight
     // off the reference at ticket-generation time.
+    //
+    // feeBurden.paystackFeeAbsorbedBy ("organizer" | "spotix") is a further,
+    // admin-only dimension of the Paystack half — organizers can only
+    // choose to cover Paystack's fee themselves (coversPaystackFee); they
+    // can't shift it onto Spotix's own books. resolveFeeBurden() carries
+    // this straight through from the event doc, no separate handling
+    // needed here.
     const feeBurden = resolveFeeBurden(eventDoc)
 
     // Active addons on this event (spotix-admin's Addons tab) — fetched

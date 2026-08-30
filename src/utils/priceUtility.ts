@@ -132,10 +132,23 @@ export interface FeeBurden {
   coversPaystackFee: boolean;
   /** Organizer absorbs Spotix's platform fee instead of the attendee. */
   coversSpotixFee: boolean;
+  /** Only meaningful when coversPaystackFee is true — WHO absorbs it.
+   *  "organizer" (default): deducted from the organizer's payout balance,
+   *  same as before this field existed. "spotix": the organizer's payout
+   *  is left untouched; spotix-backend simply doesn't deduct anything, so
+   *  the shortfall between what Paystack actually remits and what's paid
+   *  out comes out of Spotix's own platform-fee margin instead. Set from
+   *  spotix-admin only — organizers can choose to cover it themselves via
+   *  coversPaystackFee, but can't shift it onto Spotix's books themselves. */
+  paystackFeeAbsorbedBy: "organizer" | "spotix";
 }
 
 export interface FeeBurdenSource {
-  feeBurden?: { coversPaystackFee?: boolean | null; coversSpotixFee?: boolean | null } | null;
+  feeBurden?: {
+    coversPaystackFee?: boolean | null;
+    coversSpotixFee?: boolean | null;
+    paystackFeeAbsorbedBy?: "organizer" | "spotix" | null;
+  } | null;
   /** Legacy single-toggle field from before Paystack's fee was split out
    *  as its own concept. See resolveFeeBurden for the migration. */
   buyerBearsBurden?: boolean | null;
@@ -146,6 +159,8 @@ export interface FeeBurdenSource {
  * than one enum, so all four combinations (attendee pays everything /
  * organizer covers Paystack only / organizer covers Spotix only /
  * organizer covers both) are representable without special-casing.
+ * paystackFeeAbsorbedBy is a third, narrower dimension layered on top of
+ * coversPaystackFee — see FeeBurden's doc comment.
  *
  * Legacy events that only ever had `buyerBearsBurden` (before this
  * feature) map onto the new shape as: buyerBearsBurden === false meant
@@ -157,9 +172,10 @@ export function resolveFeeBurden(event?: FeeBurdenSource | null): FeeBurden {
     return {
       coversPaystackFee: event.feeBurden.coversPaystackFee === true,
       coversSpotixFee: event.feeBurden.coversSpotixFee === true,
+      paystackFeeAbsorbedBy: event.feeBurden.paystackFeeAbsorbedBy === "spotix" ? "spotix" : "organizer",
     };
   }
-  return { coversPaystackFee: false, coversSpotixFee: event?.buyerBearsBurden === false };
+  return { coversPaystackFee: false, coversSpotixFee: event?.buyerBearsBurden === false, paystackFeeAbsorbedBy: "organizer" };
 }
 
 export interface AddonInput {
