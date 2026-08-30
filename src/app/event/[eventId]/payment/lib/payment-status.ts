@@ -14,7 +14,7 @@
 // lib/url-ref.ts), a reload can look the reference up here and recover
 // instead of showing "Payment Session Expired".
 
-import { calculateVATFee } from "@/utils/priceUtility"
+import { calculateVATFee, resolvePlatformFeeRates, type PlatformFeeRates } from "@/utils/priceUtility"
 import type { CartItem, PaymentData } from "../types"
 
 export type PaymentStatusValue = "pending" | "successful" | "failed" | "incorrect_payment"
@@ -52,6 +52,10 @@ export interface PaymentStatusResponse {
     bookerName: string | null
     bookerEmail: string | null
     ticketTypes: { type: string; quantity: number; price: number }[]
+    /** Fee rates actually applied at purchase time — frozen on the reference
+     *  so a resumed checkout matches what was really charged even if the
+     *  event's fee config has since changed. null for older references. */
+    appliedFeeRates: PlatformFeeRates | null
   }
 }
 
@@ -80,11 +84,15 @@ export function buildRecoveredCheckout(
   const r = status.recovery
   if (!r || !status.eventId || !status.eventName || r.ticketTypes.length === 0) return null
 
+  // Prefer the rates frozen on the reference at purchase time; only fall
+  // back to today's defaults for references old enough not to have them.
+  const rates = r.appliedFeeRates ?? resolvePlatformFeeRates(null)
+
   const cart: CartItem[] = r.ticketTypes.map((t) => ({
     ticketType: t.type,
     quantity: t.quantity,
     price: t.price,
-    vat: calculateVATFee(t.price),
+    vat: calculateVATFee(t.price, rates),
   }))
 
   const paymentData: PaymentData = {

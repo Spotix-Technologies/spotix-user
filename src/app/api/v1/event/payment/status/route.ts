@@ -85,6 +85,11 @@ export async function GET(req: NextRequest) {
               bookerName:     d.bookerName ?? null,
               bookerEmail:    d.bookerEmail ?? null,
               ticketTypes:    Array.isArray(d.ticketTypes) ? d.ticketTypes : [],
+              // Frozen at purchase time (see create-pay-ref) so a resumed
+              // checkout always shows the fee that was actually charged,
+              // even if this event's platform fee has since been edited.
+              // null for references created before this field existed.
+              appliedFeeRates: d.appliedFeeRates ?? null,
             },
           }
         : {}),

@@ -27,6 +27,13 @@ export interface PaymentData {
   stopDate?: string
   bookerName?: string
   bookerEmail?: string
+  /** Snapshot of the event's Burden of Fee setting at the moment the buyer
+   *  clicked "Buy" — used to compute the fee breakdown shown at checkout.
+   *  Not authoritative: create-pay-ref re-fetches the live event doc and
+   *  freezes its own snapshot on the Reference regardless of this. */
+  feeBurden?: import("@/utils/priceUtility").FeeBurden
+  /** Same idea — active addons at the moment of clicking "Buy". */
+  addons?: import("@/utils/priceUtility").AddonInput[]
 }
 
 export interface ReferralData {

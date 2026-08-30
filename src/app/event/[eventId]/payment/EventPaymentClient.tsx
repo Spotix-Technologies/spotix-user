@@ -21,6 +21,7 @@ import Discount from "@/app/payment/helpers/discount"
 import Referral from "@/app/payment/helpers/referral"
 import SurveyFormDialog from "@/app/payment/helpers/survey-form-dialog"
 import { calculateDiscount, type DiscountData } from "@/app/payment/helpers/discount-utils"
+import { computeOrderPricing, resolveFeeBurden } from "@/utils/priceUtility"
 
 // Event-route-local UI
 import PaymentMethodsPanel, { type SelectedMethod } from "./components/PaymentMethodsPanel"
@@ -485,7 +486,21 @@ export default function EventPaymentClient() {
   const cartTotalVat = cart.reduce((sum, item) => sum + (item.vat || 0) * item.quantity, 0)
   const discountAmount = isFreeEvent ? 0 : calculateDiscount(cart, discountData).discountAmount
   const cartSubtotal = cartSubtotalBeforeDiscount - discountAmount
-  const computedTotalAmount = cartSubtotal + cartTotalVat
+  const totalTicketCount = cart.reduce((sum, item) => sum + item.quantity, 0)
+
+  // Spotix's fee, Paystack's fee, and addons — resolved together against
+  // this event's Burden of Fee setting. paymentData.feeBurden/addons are a
+  // snapshot from whenever the buyer clicked "Buy"; create-pay-ref is what
+  // actually enforces this server-side and may freeze a different (more
+  // current) snapshot on the Reference — this is only what's *shown* here.
+  const orderPricing = computeOrderPricing({
+    ticketSubtotal: cartSubtotal,
+    totalTicketCount,
+    spotixFeeTotal: cartTotalVat,
+    feeBurden: paymentData.feeBurden ?? resolveFeeBurden(null),
+    addons: paymentData.addons ?? [],
+  })
+  const computedTotalAmount = orderPricing.totalPayable
 
   // While resuming a pending reference, the amount is pinned to what the
   // backend already confirmed for it — never recomputed from cart/discount.
@@ -524,6 +539,7 @@ export default function EventPaymentClient() {
                 discountAmount={resumedReference ? 0 : discountAmount ?? 0}
                 discountData={resumedReference ? null : discountData}
                 isFreeEvent={isFreeEvent}
+                orderPricing={resumedReference ? null : orderPricing}
               />
 
               {!isFreeEvent && !resumedReference && (

@@ -3,13 +3,17 @@
 "use client"
 
 import { CheckCircle, Ticket } from "lucide-react"
-import { getPricingBreakdown } from "@/utils/priceUtility"
+import { resolvePlatformFeeRates, calculateVATFee, type OrderPricingBreakdown } from "@/utils/priceUtility"
 import { formatNumber } from "@/utils/formatter"
 
 interface CartItem {
   ticketType: string
   quantity: number
   price: number
+  /** Fee already computed at add-to-cart time using the event's actual
+   *  (possibly admin-customised) fee rates. Preferred over recomputing
+   *  here, since this component has no access to the event doc. */
+  vat?: number
 }
 
 interface OrderSummaryProps {
@@ -22,6 +26,11 @@ interface OrderSummaryProps {
     discountValue: number
   } | null
   isFreeEvent: boolean
+  /** Full fee/addon/burden breakdown from computeOrderPricing — pass null
+   *  while resuming a pending reference (that total is pinned server-side
+   *  and shown separately), in which case this falls back to a plain
+   *  ticket-price + Spotix-fee display, same as before this existed. */
+  orderPricing?: OrderPricingBreakdown | null
 }
 
 export default function OrderSummary({
@@ -30,18 +39,40 @@ export default function OrderSummary({
   discountAmount,
   discountData,
   isFreeEvent,
+  orderPricing = null,
 }: OrderSummaryProps) {
-  // Use priceUtility to get the breakdown for every cart item
-  // getPricingBreakdown already returns vatFee=0 for price=0 tickets
+  // Each cart item already carries its own `.vat`, computed at add-to-cart
+  // time using the event's actual (possibly admin-customised) fee rates —
+  // trust that instead of recomputing from a formula this component has no
+  // way to know the right rates for. The recompute is only a fallback for
+  // the rare item that somehow reached here without one already set.
+  const fallbackRates = resolvePlatformFeeRates(null)
   const pricedCart = cart.map((item) => {
-    const { originalPrice, vatFee, finalPrice } = getPricingBreakdown(item.price)
-    return { ...item, originalPrice, vatFee, finalPrice }
+    const vatFee = typeof item.vat === "number" ? item.vat : calculateVATFee(item.price, fallbackRates)
+    return { ...item, originalPrice: item.price, vatFee, finalPrice: item.price + vatFee }
   })
 
   const subtotal = pricedCart.reduce((sum, item) => sum + item.originalPrice * item.quantity, 0)
   const totalVat = pricedCart.reduce((sum, item) => sum + item.vatFee * item.quantity, 0)
   const isTrulyFree = isFreeEvent || subtotal === 0
-  const computedTotal = Math.max(0, subtotal + totalVat - (discountAmount ?? 0))
+
+  // Whenever a full breakdown is available, it's the source of truth for
+  // the total (Spotix fee + Paystack fee + addons, all burden-aware).
+  // Otherwise fall back to the simpler subtotal + Spotix-fee-only total
+  // this component always showed before Paystack fee/addons existed.
+  const computedTotal = orderPricing
+    ? orderPricing.totalPayable
+    : Math.max(0, subtotal + totalVat - (discountAmount ?? 0))
+
+  // Show a line-itemised breakdown whenever there's more than one thing
+  // making up the fee — i.e. as soon as burden or addons are in play.
+  const showFeeBreakdown =
+    !!orderPricing &&
+    (orderPricing.buyerOwesSpotixFee ||
+      orderPricing.buyerOwesPaystackFee ||
+      orderPricing.addonFeeTotal > 0 ||
+      orderPricing.spotixFeeTotal > 0 ||
+      orderPricing.paystackFeeTotal > 0)
 
   return (
     <div className="bg-white rounded-2xl border-2 border-gray-200 shadow-lg p-4 sm:p-6 w-full">
@@ -108,13 +139,46 @@ export default function OrderSummary({
             <>
               <div className="flex justify-between text-sm sm:text-base text-gray-700">
                 <span>Subtotal</span>
-                <span className="font-semibold whitespace-nowrap">₦{formatNumber(subtotal)}</span>
+                <span className="font-semibold whitespace-nowrap">
+                  ₦{formatNumber(orderPricing ? orderPricing.ticketSubtotal : subtotal)}
+                </span>
               </div>
 
-              <div className="flex justify-between text-sm sm:text-base text-gray-700">
-                <span>VAT & Fees</span>
-                <span className="font-semibold whitespace-nowrap">₦{formatNumber(totalVat)}</span>
-              </div>
+              {showFeeBreakdown && orderPricing ? (
+                <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 space-y-1.5">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Fee breakdown</p>
+
+                  <div className="flex justify-between text-xs sm:text-sm text-gray-600">
+                    <span>Spotix platform fee</span>
+                    <span className="whitespace-nowrap">
+                      {orderPricing.buyerOwesSpotixFee ? `₦${formatNumber(orderPricing.spotixFeeTotal)}` : "Covered by organizer"}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between text-xs sm:text-sm text-gray-600">
+                    <span>Paystack processing fee</span>
+                    <span className="whitespace-nowrap">
+                      {orderPricing.buyerOwesPaystackFee ? `₦${formatNumber(orderPricing.paystackFeeChargedToBuyer)}` : "Covered by organizer"}
+                    </span>
+                  </div>
+
+                  {orderPricing.addonFeeTotal > 0 && (
+                    <div className="flex justify-between text-xs sm:text-sm text-gray-600">
+                      <span>Addons</span>
+                      <span className="whitespace-nowrap">₦{formatNumber(orderPricing.addonFeeTotal)}</span>
+                    </div>
+                  )}
+
+                  <a href="#" className="inline-block text-xs text-purple-600 hover:underline mt-1">
+                    What are these fees?
+                  </a>
+                </div>
+              ) : (
+                <div className="flex justify-between text-sm sm:text-base text-gray-700">
+                  <span>VAT & Fees</span>
+                  <span className="font-semibold whitespace-nowrap">₦{formatNumber(totalVat)}</span>
+                </div>
+              )}
             </>
           )}
 

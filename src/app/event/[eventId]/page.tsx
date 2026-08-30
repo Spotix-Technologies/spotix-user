@@ -1,6 +1,7 @@
 import ClientPage from "./ClientPage"
 import type { Metadata } from "next"
-import { getCachedEventDoc } from "@/app/lib/eventCache"
+import { getCachedEventDoc, getCachedActiveAddons, type CachedAddon } from "@/app/lib/eventCache"
+import { resolveFeeBurden, type FeeBurden } from "@/utils/priceUtility"
 import { PhoneCall, Mail, ShieldOff } from "lucide-react"
 
 export interface EventType {
@@ -37,6 +38,18 @@ export interface EventType {
   votingPollName?: string | null
   virtualQueueEnabled?: boolean
   queueBatchSize?: number
+  /** Whole percent (e.g. 5 for 5%). Admin-editable; falls back to the
+   *  system default when unset — see resolvePlatformFeeRates(). */
+  platformPercentageFee?: number | null
+  /** Naira flat fee. Admin-editable; falls back to 0 (not the ₦100
+   *  system default) when unset — see resolvePlatformFeeRates(). */
+  platformFlatFee?: number | null
+  /** Who pays Spotix's platform fee vs Paystack's processing fee — set by
+   *  the organizer from spotix-booker's Burden of Fee card. */
+  feeBurden: FeeBurden
+  /** Active addons only (see spotix-admin's Addons tab) — inactive ones
+   *  are already filtered out by getCachedActiveAddons. */
+  addons: CachedAddon[]
 }
 
 async function fetchEventData(eventId: string): Promise<EventType | null> {
@@ -45,7 +58,7 @@ async function fetchEventData(eventId: string): Promise<EventType | null> {
     // lib/eventCache.ts. generateMetadata() and this page component both
     // call fetchEventData for the same request; the second call rides the
     // cache the first one just populated instead of hitting Firestore twice.
-    const d = await getCachedEventDoc(eventId)
+    const [d, addons] = await Promise.all([getCachedEventDoc(eventId), getCachedActiveAddons(eventId)])
     if (!d) return null
     const organizerId = d?.organizerId || d?.createdBy || ""
     return {
@@ -82,6 +95,14 @@ async function fetchEventData(eventId: string): Promise<EventType | null> {
       votingPollName: d?.votingPollName ?? null,
       virtualQueueEnabled: d?.virtualQueueEnabled === true,
       queueBatchSize: d?.queueBatchSize || 50,
+      platformPercentageFee:
+        typeof d?.platformPercentageFee === "number" ? d.platformPercentageFee : null,
+      platformFlatFee: typeof d?.platformFlatFee === "number" ? d.platformFlatFee : null,
+      feeBurden: resolveFeeBurden({
+        feeBurden: d?.feeBurden,
+        buyerBearsBurden: d?.buyerBearsBurden,
+      }),
+      addons,
     }
   } catch (error) {
     console.error("Error fetching event data:", error)

@@ -3,7 +3,7 @@
 import React, { useState, useMemo } from "react"
 import { X, Plus, Minus, ShoppingCart, Clock, AlertTriangle, Loader2 } from "lucide-react"
 import { formatNumber } from "@/utils/formatter"
-import { calculateVATFee, calculateFinalPrice } from "@/utils/priceUtility"
+import { calculateVATFee, resolvePlatformFeeRates, computeOrderPricing, type OrderPricingBreakdown } from "@/utils/priceUtility"
 import type { EventType } from "./page"
 
 interface CartItem {
@@ -182,6 +182,10 @@ const MAX_QTY_PER_TYPE = 10
     setFreeQty((q) => Math.max(1, q - 1))
   }
 
+  // ── Platform fee rates for this event (admin-configurable — see
+  // resolvePlatformFeeRates for the exact fallback rules) ──────────────────
+  const feeRates = useMemo(() => resolvePlatformFeeRates(eventData), [eventData])
+
   // ── Cart (paid events) ────────────────────────────────────────────────────
 
   const cartItems: CartItem[] = (eventData.ticketPrices ?? [])
@@ -195,7 +199,7 @@ const MAX_QTY_PER_TYPE = 10
         policy: t.policy,
         price,
         quantity: qty,
-        vat: calculateVATFee(price),
+        vat: calculateVATFee(price, feeRates),
       }
     })
     .filter((item): item is CartItem => item !== null)
@@ -203,7 +207,26 @@ const MAX_QTY_PER_TYPE = 10
   const totalTickets = cartItems.reduce((sum, i) => sum + i.quantity, 0)
   const subtotal = cartItems.reduce((sum, i) => sum + i.price * i.quantity, 0)
   const totalVat = cartItems.reduce((sum, i) => sum + i.vat * i.quantity, 0)
-  const grandTotal = subtotal + totalVat
+
+  // ── Order-level pricing: Spotix's fee, Paystack's fee, and addons all
+  // resolved together against this event's Burden of Fee setting — the
+  // single source of truth every checkout surface (this dialog, the
+  // payment page, create-pay-ref) computes from. See computeOrderPricing.
+  const orderPricing: OrderPricingBreakdown = useMemo(
+    () =>
+      computeOrderPricing({
+        ticketSubtotal: subtotal,
+        totalTicketCount: totalTickets,
+        spotixFeeTotal: totalVat,
+        feeBurden: eventData.feeBurden,
+        addons: eventData.addons,
+      }),
+    [subtotal, totalTickets, totalVat, eventData.feeBurden, eventData.addons]
+  )
+  const grandTotal = orderPricing.totalPayable
+  // Whenever the organizer covers less than everything, show a breakdown
+  // so it's always clear what the buyer is actually paying for.
+  const showFeeBreakdown = orderPricing.buyerOwesSpotixFee || orderPricing.buyerOwesPaystackFee || orderPricing.addonFeeTotal > 0
 
   // ── Proceed handlers ──────────────────────────────────────────────────────
 
@@ -418,11 +441,7 @@ const MAX_QTY_PER_TYPE = 10
                 const tierSoldOut = remaining !== null && remaining === 0
                 const tierDisabled = effectivelyClosed || tierSoldOut
 
-                // Availability badge — driven purely by availableTickets
-                // null  → unlimited, show nothing
-                // 0     → sold out
-                // 1–10  → urgency: red "Only N left!" banner
-                // >10   → no badge (no noise)
+
                 let availBadge: React.ReactNode = null
                 if (remaining !== null) {
                   if (tierSoldOut) {
@@ -468,7 +487,7 @@ const MAX_QTY_PER_TYPE = 10
                           ₦{formatNumber(Number(ticket.price) || 0)}
                           {(Number(ticket.price) || 0) > 0 && (
                             <span className="text-xs font-normal text-gray-400 ml-1.5">
-                              +₦{formatNumber(calculateVATFee(Number(ticket.price)))} VAT
+                              +₦{formatNumber(calculateVATFee(Number(ticket.price) || 0, feeRates))} VAT
                             </span>
                           )}
                         </p>

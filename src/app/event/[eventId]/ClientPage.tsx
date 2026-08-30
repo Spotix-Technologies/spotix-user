@@ -434,6 +434,8 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
         stopDate: eventData.stopDate || "",
         bookerName: eventData.bookerName || "",
         bookerEmail: eventData.bookerEmail || "",
+        feeBurden: eventData.feeBurden,
+        addons: eventData.addons,
         cart,
       }
       sessionStorage.setItem("spotix_payment_data", JSON.stringify(paymentData))
