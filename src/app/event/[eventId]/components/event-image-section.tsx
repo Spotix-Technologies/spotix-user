@@ -10,6 +10,10 @@ interface EventImageSectionProps {
   eventName: string
   eventImage: string
   showFullscreenIcon?: boolean
+  /** Fires with the URL of whichever image is currently showing (only
+   *  relevant when there's more than one, i.e. the carousel case) — lets a
+   *  parent mirror it, e.g. as the page-wide blurred background. */
+  onActiveImageChange?: (url: string) => void
 }
 
 const LazyImage: React.FC<{
@@ -25,7 +29,19 @@ const LazyImage: React.FC<{
   return (
     <>
       {/* aspect-[4/3] keeps single images in the same box as the carousel */}
-      <div className="relative w-full aspect-[4/3] bg-white rounded-lg overflow-hidden group">
+      <div className="relative w-full aspect-[4/3] bg-gray-900 rounded-lg overflow-hidden group">
+        {/* Blurred fill — same image, scaled up + blurred, so letterbox
+            bars behind the object-contain image are never plain white. */}
+        {isLoaded && !hasError && (
+          <img
+            src={imgSrc}
+            alt=""
+            aria-hidden="true"
+            className="absolute inset-0 w-full h-full object-cover scale-110 blur-2xl opacity-70"
+          />
+        )}
+        <div className="absolute inset-0 bg-black/10" />
+
         {/* Skeleton */}
         {!isLoaded && !hasError && (
           <div className="absolute inset-0 bg-gray-200 animate-pulse flex items-center justify-center">
@@ -91,6 +107,7 @@ export const EventImageSection: React.FC<EventImageSectionProps> = ({
   eventName,
   eventImage,
   showFullscreenIcon = true,
+  onActiveImageChange,
 }) => {
   const primaryImage = eventImage || "/placeholder.svg"
   const extraImages = (eventImages ?? []).filter((url) => url && url !== primaryImage)
@@ -99,7 +116,11 @@ export const EventImageSection: React.FC<EventImageSectionProps> = ({
   return (
     <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
       {allImages.length > 1 ? (
-        <ImageCarousel eventImages={allImages} eventName={eventName} />
+        <ImageCarousel
+          eventImages={allImages}
+          eventName={eventName}
+          onActiveImageChange={onActiveImageChange}
+        />
       ) : (
         <LazyImage
           src={primaryImage}

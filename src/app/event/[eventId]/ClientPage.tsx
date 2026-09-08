@@ -97,6 +97,11 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
   const [eventData, setEventData] = useState<EventType | null>(initialEventData || null)
   const [loading, setLoading] = useState(!initialEventData)
 
+  // Page-wide blurred backdrop image. Starts as the event's main image and
+  // updates as the user pages through the image carousel, so the backdrop
+  // always matches whichever flyer is currently on screen.
+  const [backgroundImage, setBackgroundImage] = useState<string>(initialEventData?.eventImage || "")
+
   // ── Auth state ────────────────────────────────────────────────────────────
   // Two-step resolution mirroring the payment client:
   //   1. getSessionUser() validates the Spotix JWT (fast, cookie-based)
@@ -144,6 +149,12 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
 
   const cacheKey = `event_${eventId}_${createdBy}`
   const CACHE_TTL = 5 * 60 * 1000
+
+  // Keep the backdrop in sync with whichever event doc is loaded (e.g. once
+  // the async fetch resolves, if this page didn't get initialEventData).
+  useEffect(() => {
+    if (eventData?.eventImage) setBackgroundImage(eventData.eventImage)
+  }, [eventData?.eventImage])
 
   // ── Step 1: Spotix JWT check ──────────────────────────────────────────────
   // Identical to the original — this is the primary auth signal.
@@ -514,8 +525,23 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
     <>
       <UserHeader />
 
-      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-blue-50 pb-24 lg:pb-0">
-        <div className="max-w-7xl mx-auto px-4 py-6 lg:py-8">
+      <div className="relative min-h-screen pb-24 lg:pb-0">
+        {/* Page-wide blurred backdrop — the event's own main image, blurred
+            and scaled up, IS the background for the whole page (not a
+            gradient with the image faintly tinted in). Fixed so it stays
+            put while the page content scrolls over it. */}
+        <div className="fixed inset-0 -z-10 overflow-hidden bg-gray-900">
+          <img
+            src={backgroundImage || eventData.eventImage || "/placeholder.svg"}
+            alt=""
+            aria-hidden="true"
+            className="w-full h-full object-cover scale-110 blur-3xl"
+          />
+          {/* Light wash — just enough for text/card contrast, doesn't hide the image */}
+          <div className="absolute inset-0 bg-white/20" />
+        </div>
+
+        <div className="max-w-7xl mx-auto px-4 pt-3 pb-6 lg:pb-8">
 
           {/* Header row */}
           <div className="flex items-center justify-between mb-6">
@@ -581,6 +607,7 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
                 eventName={eventData.eventName}
                 eventImage={eventData.eventImage}
                 showFullscreenIcon
+                onActiveImageChange={setBackgroundImage}
               />
               <EventDetailsSection
                 eventData={eventData}
@@ -592,7 +619,7 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
                 onToggleLike={handleToggleLike}
               />
               <LocationSection eventVenue={eventData.eventVenue} eventName={""} />
-              <MerchSection eventId={eventId} createdBy={createdBy} />
+              <MerchSection eventId={eventId} createdBy={createdBy} eventName={eventData.eventName} />
               {/* <ReviewsSection
                 eventId={eventId}
                 eventName={eventData.eventName}

@@ -53,3 +53,15 @@ export function buildTicketReference(timestamp: number = Date.now()): string {
 export function buildVoteReference(timestamp: number = Date.now()): string {
   return `sptx-vt-${timestamp}-${randomLetters(2).toLowerCase()}`
 }
+
+/**
+ * Builds a merch-purchase payment reference — deliberately identical in
+ * shape to the ticket reference (SPTX-REF-{timestamp}-{AA}), not a
+ * distinct "merch" prefix. Paystack/webhook dispatch keys off the
+ * `transactionType`/metadata "type" field ("merch_purchase" vs
+ * "ticket_purchase"), not the reference string itself, so there's no need
+ * for the reference format to encode the transaction type.
+ */
+export function buildMerchReference(timestamp: number = Date.now()): string {
+  return buildTicketReference(timestamp)
+}

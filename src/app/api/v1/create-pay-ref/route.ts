@@ -3,6 +3,7 @@ import { adminDb } from "@/app/lib/firebase-admin"
 import { auth } from "firebase-admin"
 import { buildTicketReference } from "@/app/lib/reference-id"
 import { calculateVATFee, resolvePlatformFeeRates, resolveFeeBurden, computeOrderPricing, type AddonInput } from "@/utils/priceUtility"
+import { getTicketSaleStatus, describeSaleStatus } from "@/utils/ticketSaleWindow"
 
 export async function POST(request: NextRequest) {
   try {
@@ -148,6 +149,19 @@ export async function POST(request: NextRequest) {
       ])
     )
 
+    // Full ticket docs (policy → whole object), so the sale-window check
+    // below can read each type's saleStartDate/saleEndDate straight off
+    // the event's own Firestore doc — never trusted from the client.
+    const ticketDocByPolicy = new Map<string, any>(
+      (Array.isArray(eventDoc.ticketPrices) ? eventDoc.ticketPrices : []).map((t: any) => [String(t.policy), t])
+    )
+
+    // Event-wide "stop all sales" deadline — only a real upper bound when
+    // it was actually enabled (spotix-booker only ever writes a non-null
+    // stopDate in that case). Falls through to each ticket type's own
+    // saleEndDate when that's set instead — see resolveTicketSaleWindow.
+    const eventWideStop = { enabled: !!eventDoc.stopDate, stopDate: eventDoc.stopDate ?? null }
+
     // ── Recompute pricing server-side ───────────────────────────────────────
     // Admin-configured (or default) platform fee for THIS event — see
     // resolvePlatformFeeRates() for the exact fallback rules (missing
@@ -195,6 +209,23 @@ export async function POST(request: NextRequest) {
       if (canonicalPrice === undefined) {
         return NextResponse.json(
           { error: `"${item.type}" is not a valid ticket type for this event` },
+          { status: 400 }
+        )
+      }
+
+      // ── Per-ticket-type sale window (item 6 follow-up) ──────────────────
+      // Re-checked here, server-side, right before a reference is ever
+      // created — the buy-ticket-dialog already hides/disables a tier
+      // that's outside its window, but that's a UI courtesy, not
+      // enforcement. A request that raced past that UI (stale tab, direct
+      // API call, sale window lapsing mid-checkout) is rejected here
+      // regardless.
+      const ticketDoc = ticketDocByPolicy.get(item.type) ?? {}
+      const saleStatus = getTicketSaleStatus(ticketDoc, eventWideStop)
+      if (!saleStatus.onSale) {
+        console.warn(`[create-pay-ref] Rejected "${item.type}" — ${saleStatus.reason}`)
+        return NextResponse.json(
+          { error: `"${item.type}" tickets aren't available right now — ${describeSaleStatus(saleStatus)?.toLowerCase()}` },
           { status: 400 }
         )
       }

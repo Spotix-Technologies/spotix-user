@@ -1,7 +1,8 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
-import { ShoppingCart, Loader } from "lucide-react"
+import React, { useEffect, useState } from "react"
+import Link from "next/link"
+import { ShoppingBag, Loader, ArrowRight, ChevronLeft, ChevronRight } from "lucide-react"
 import { formatNumber } from "@/utils/formatter"
 
 interface MerchItem {
@@ -16,83 +17,125 @@ interface MerchItem {
 interface MerchSectionProps {
   eventId: string
   createdBy: string
+  eventName: string
 }
 
-const MerchSection: React.FC<MerchSectionProps> = ({ eventId, createdBy }) => {
+const MERCH_TEASER_LIMIT = 3
+
+/**
+ * Buyer-facing merch teaser embedded on the event page. Listing data
+ * comes from /api/v1/event/merch (Supabase-backed — see that route),
+ * capped at MERCH_TEASER_LIMIT and already fee-adjusted for this event's
+ * Burden of Fee setting, so the price shown here always matches what
+ * checkout will actually charge (up to Paystack's own cart-wide fee).
+ *
+ * This section is a teaser only — cart, checkout and payment all live
+ * under the dedicated shop (/event/{eventId}/shop and
+ * /event/{eventId}/shop/{merchId}), which is what "View details" and
+ * "View all" link out to. See shop/lib/cart.ts and
+ * shop/payment/ShopPaymentClient.tsx for that flow.
+ *
+ * On mobile the (at most 3) cards page one at a time with arrow
+ * navigation; from sm: up they're just laid out in a row.
+ */
+const MerchSection: React.FC<MerchSectionProps> = ({ eventId }) => {
   const [merch, setMerch] = useState<MerchItem[]>([])
+  const [totalCount, setTotalCount] = useState(0)
+  const [paystackHint, setPaystackHint] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedMerch, setSelectedMerch] = useState<Record<string, number>>({})
-  const [cart, setCart] = useState<MerchItem[]>([])
+  const [slide, setSlide] = useState(0)
 
-  // Fetch merchandise
+  // Fetch merchandise — teaser-sized slice only
   useEffect(() => {
+    let cancelled = false
     const fetchMerch = async () => {
       try {
         setLoading(true)
-        const response = await fetch(`/api/v1/event/merch?eventId=${eventId}`)
-        if (response.ok) {
-          const result = await response.json()
-          if (result.success && result.data) {
-            setMerch(result.data)
-          }
+        const response = await fetch(
+          `/api/v1/event/merch?eventId=${eventId}&limit=${MERCH_TEASER_LIMIT}`
+        )
+        const result = await response.json()
+        if (cancelled) return
+        if (response.ok && result.success) {
+          setMerch(result.data || [])
+          setTotalCount(
+            typeof result.totalCount === "number" ? result.totalCount : (result.data || []).length
+          )
+          setPaystackHint(!!result.feeBurden?.buyerOwesPaystackFee)
+        } else {
+          setError(result.error || "Failed to load merchandise")
         }
-      } catch (error) {
-        console.error("Error fetching merchandise:", error)
-        setError("Failed to load merchandise")
+      } catch (err) {
+        if (!cancelled) {
+          console.error("Error fetching merchandise:", err)
+          setError("Failed to load merchandise")
+        }
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     }
 
-    if (eventId) {
-      fetchMerch()
+    if (eventId) fetchMerch()
+    return () => {
+      cancelled = true
     }
   }, [eventId])
-
-  const handleAddToCart = (item: MerchItem) => {
-    setSelectedMerch((prev) => ({
-      ...prev,
-      [item.id]: (prev[item.id] || 0) + 1,
-    }))
-    setCart((prev) => [...prev, item])
-  }
-
-  const handleRemoveFromCart = (itemId: string) => {
-    setSelectedMerch((prev) => {
-      const newQuantity = Math.max(0, (prev[itemId] || 0) - 1)
-      if (newQuantity === 0) {
-        const { [itemId]: _, ...rest } = prev
-        return rest
-      }
-      return { ...prev, [itemId]: newQuantity }
-    })
-    setCart((prev) => {
-      const index = prev.findIndex((item) => item.id === itemId)
-      if (index > -1) {
-        return prev.filter((_, i) => i !== index)
-      }
-      return prev
-    })
-  }
-
-  const totalPrice = cart.reduce((sum, item) => sum + item.price, 0)
 
   // Don't render section if no merch available
   if (!loading && merch.length === 0) {
     return null
   }
 
+  const goPrev = () => setSlide((i) => (merch.length === 0 ? 0 : i === 0 ? merch.length - 1 : i - 1))
+  const goNext = () => setSlide((i) => (merch.length === 0 ? 0 : i === merch.length - 1 ? 0 : i + 1))
+
+  const MerchCard = ({ item }: { item: MerchItem }) => (
+    <Link
+      href={`/event/${eventId}/shop/${item.id}`}
+      className="group border border-gray-200 rounded-xl overflow-hidden hover:shadow-lg transition-shadow block bg-white"
+    >
+      {/* Image */}
+      <div className="w-full h-48 bg-gray-200 overflow-hidden">
+        <img
+          src={item.image || "/placeholder.svg"}
+          alt={item.name}
+          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+        />
+      </div>
+
+      {/* Details */}
+      <div className="p-4">
+        <h4 className="font-semibold text-gray-900 mb-1">{item.name}</h4>
+        {item.description && (
+          <p className="text-sm text-gray-600 mb-2 line-clamp-2">{item.description}</p>
+        )}
+        <div className="flex items-center justify-between mb-4">
+          <span className="text-lg font-bold text-[#6b2fa5]">₦{formatNumber(item.price)}</span>
+          <span className="text-xs text-gray-500">
+            {item.stock === 0 ? "Sold out" : `${item.stock} ${item.stock === 1 ? "left" : "available"}`}
+          </span>
+        </div>
+        <span className="w-full py-2 px-3 bg-[#6b2fa5] text-white rounded-lg font-medium group-hover:bg-purple-700 transition-colors flex items-center justify-center gap-2">
+          <ShoppingBag size={16} />
+          View details
+        </span>
+      </div>
+    </Link>
+  )
+
   return (
     <div className="bg-white rounded-2xl shadow-lg p-6 lg:p-8 border-2 border-purple-100">
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <h3 className="text-2xl font-bold text-gray-900">Event Merchandise</h3>
-        {cart.length > 0 && (
-          <div className="flex items-center gap-2 px-4 py-2 bg-[#6b2fa5] text-white rounded-full">
-            <ShoppingCart size={18} />
-            <span className="font-semibold">{cart.length}</span>
-          </div>
+        {!loading && merch.length > 0 && (
+          <Link
+            href={`/event/${eventId}/shop`}
+            className="flex items-center gap-1.5 text-sm font-semibold text-[#6b2fa5] hover:text-purple-800 transition-colors shrink-0"
+          >
+            View all <ArrowRight size={16} />
+          </Link>
         )}
       </div>
 
@@ -109,98 +152,75 @@ const MerchSection: React.FC<MerchSectionProps> = ({ eventId, createdBy }) => {
         <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">{error}</div>
       )}
 
-      {/* Merch Grid */}
       {!loading && merch.length > 0 && (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 mb-8">
-            {merch.map((item) => {
-              const quantity = selectedMerch[item.id] || 0
-              return (
-                <div
-                  key={item.id}
-                  className="border border-gray-200 rounded-xl overflow-hidden hover:shadow-lg transition-shadow"
-                >
-                  {/* Image */}
-                  <div className="w-full h-48 bg-gray-200 overflow-hidden">
-                    <img
-                      src={item.image || "/placeholder.svg"}
-                      alt={item.name}
-                      className="w-full h-full object-cover hover:scale-105 transition-transform"
-                    />
-                  </div>
-
-                  {/* Details */}
-                  <div className="p-4">
-                    <h4 className="font-semibold text-gray-900 mb-1">{item.name}</h4>
-                    {item.description && (
-                      <p className="text-sm text-gray-600 mb-2">{item.description}</p>
-                    )}
-                    <div className="flex items-center justify-between mb-4">
-                      <span className="text-lg font-bold text-[#6b2fa5]">
-                        ₦{formatNumber(item.price)}
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        {item.stock} {item.stock === 1 ? "left" : "available"}
-                      </span>
-                    </div>
-
-                    {/* Add/Remove Buttons */}
-                    {quantity === 0 ? (
-                      <button
-                        onClick={() => handleAddToCart(item)}
-                        disabled={item.stock === 0}
-                        className="w-full py-2 px-3 bg-[#6b2fa5] text-white rounded-lg font-medium hover:bg-purple-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                      >
-                        <ShoppingCart size={16} />
-                        Add to Cart
-                      </button>
-                    ) : (
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleRemoveFromCart(item.id)}
-                          className="flex-1 py-2 px-3 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition-colors"
-                        >
-                          −
-                        </button>
-                        <div className="flex-1 py-2 px-3 bg-purple-50 text-[#6b2fa5] rounded-lg font-semibold text-center">
-                          {quantity}
-                        </div>
-                        <button
-                          onClick={() => handleAddToCart(item)}
-                          disabled={quantity >= item.stock}
-                          className="flex-1 py-2 px-3 bg-[#6b2fa5] text-white rounded-lg font-medium hover:bg-purple-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
-                        >
-                          +
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
+          {/* Mobile — one card at a time, arrows either side of the image */}
+          <div className="sm:hidden">
+            <div className="relative">
+              <MerchCard item={merch[slide]} />
+              {merch.length > 1 && (
+                <>
+                  <button
+                    onClick={goPrev}
+                    aria-label="Previous item"
+                    className="absolute left-2 top-24 -translate-y-1/2 z-10 bg-[#6b2fa5] hover:bg-purple-700 text-white p-2 rounded-full shadow-lg transition-colors"
+                  >
+                    <ChevronLeft size={18} strokeWidth={2.5} />
+                  </button>
+                  <button
+                    onClick={goNext}
+                    aria-label="Next item"
+                    className="absolute right-2 top-24 -translate-y-1/2 z-10 bg-[#6b2fa5] hover:bg-purple-700 text-white p-2 rounded-full shadow-lg transition-colors"
+                  >
+                    <ChevronRight size={18} strokeWidth={2.5} />
+                  </button>
+                </>
+              )}
+            </div>
+            {merch.length > 1 && (
+              <div className="flex items-center justify-center gap-2 mt-4">
+                {merch.map((_, index) => (
+                  <button
+                    key={index}
+                    onClick={() => setSlide(index)}
+                    aria-label={`Go to item ${index + 1}`}
+                    className="h-2 rounded-full transition-all duration-300"
+                    style={{
+                      width: index === slide ? "24px" : "8px",
+                      background: index === slide ? "#6b2fa5" : "rgba(107, 47, 165, 0.35)",
+                    }}
+                  />
+                ))}
+              </div>
+            )}
           </div>
 
-          {/* Cart Summary */}
-          {cart.length > 0 && (
-            <div className="border-t border-gray-200 pt-6">
-              <div className="flex justify-between items-center mb-4">
-                <span className="text-gray-700">Total Merch Value:</span>
-                <span className="text-2xl font-bold text-[#6b2fa5]">₦{formatNumber(totalPrice)}</span>
-              </div>
-              <button className="w-full py-3 px-4 bg-[#6b2fa5] text-white rounded-lg font-semibold hover:bg-purple-700 transition-colors flex items-center justify-center gap-2">
-                <ShoppingCart size={20} />
-                Proceed to Checkout
-              </button>
+          {/* sm and up — neatly stacked in a row, no slider needed */}
+          <div className="hidden sm:grid sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6">
+            {merch.map((item) => (
+              <MerchCard key={item.id} item={item} />
+            ))}
+          </div>
+
+          {(totalCount > merch.length || paystackHint) && (
+            <div className="mt-6 text-center space-y-1">
+              {totalCount > merch.length && (
+                <p className="text-xs text-gray-400">
+                  Showing {merch.length} of {totalCount} items —{" "}
+                  <Link href={`/event/${eventId}/shop`} className="text-[#6b2fa5] font-medium hover:underline">
+                    view all
+                  </Link>
+                </p>
+              )}
+              {paystackHint && (
+                <p className="text-xs text-gray-400">
+                  Prices include Spotix&apos;s merch fee where applicable — Paystack&apos;s processing fee is
+                  added at checkout.
+                </p>
+              )}
             </div>
           )}
         </>
-      )}
-
-      {/* Empty State */}
-      {!loading && merch.length === 0 && !error && (
-        <div className="text-center py-8">
-          <p className="text-gray-500">No merchandise available for this event</p>
-        </div>
       )}
     </div>
   )

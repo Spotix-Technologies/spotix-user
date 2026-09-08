@@ -4,6 +4,7 @@ import React, { useState, useMemo } from "react"
 import { X, Plus, Minus, ShoppingCart, Clock, AlertTriangle, Loader2 } from "lucide-react"
 import { formatNumber } from "@/utils/formatter"
 import { calculateVATFee, resolvePlatformFeeRates, computeOrderPricing, type OrderPricingBreakdown } from "@/utils/priceUtility"
+import { getTicketSaleStatus, describeSaleStatus, type TicketSaleWindowFields } from "@/utils/ticketSaleWindow"
 import type { EventType } from "./page"
 
 interface CartItem {
@@ -14,7 +15,7 @@ interface CartItem {
   vat: number
 }
 
-interface TicketPrice {
+interface TicketPrice extends TicketSaleWindowFields {
   policy: string
   price: number
   description?: string
@@ -125,6 +126,10 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
   const activeStopDate =
     eventData.enableStopDate && eventData.stopDate ? eventData.stopDate : undefined
 
+  // Per-ticket-type sale window fallback target — passed into
+  // getTicketSaleStatus for every tier below.
+  const eventWideStop = { enabled: !!eventData.enableStopDate, stopDate: eventData.stopDate }
+
   const stopDatePassed = useMemo(
     () => hasSaleStopped(activeStopDate),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -157,6 +162,7 @@ const MAX_QTY_PER_TYPE = 10
     const current = quantities[index] ?? 0
     if (current >= MAX_QTY_PER_TYPE) return                      // 10-ticket cap
     if (remaining !== null && current >= remaining) return        // availability cap
+    if (!getTicketSaleStatus(ticket, eventWideStop).onSale) return // per-ticket sale window
     setQuantities((prev) => ({ ...prev, [index]: current + 1 }))
   }
 
@@ -186,6 +192,14 @@ const MAX_QTY_PER_TYPE = 10
   // resolvePlatformFeeRates for the exact fallback rules) ──────────────────
   const feeRates = useMemo(() => resolvePlatformFeeRates(eventData), [eventData])
 
+  // Whether the attendee owes any fee at all under this event's current
+  // Burden of Fee setting — used purely to decide whether to show the
+  // "+ VAT & Fees computed at checkout" hint per ticket tier below. The
+  // exact amount is never shown here since it depends on the whole cart
+  // (Paystack's fee especially is computed on the full transaction, not
+  // per ticket) — see computeOrderPricing / orderPricing below for that.
+  const buyerOwesAnyFee = !eventData.feeBurden?.coversSpotixFee || !eventData.feeBurden?.coversPaystackFee
+
   // ── Cart (paid events) ────────────────────────────────────────────────────
 
   const cartItems: CartItem[] = (eventData.ticketPrices ?? [])
@@ -193,6 +207,10 @@ const MAX_QTY_PER_TYPE = 10
       const qty = quantities[index] ?? 0
       if (qty === 0) return null
       const t = ticket as TicketPrice
+      // Defense in depth — a tier's sale window can lapse while the dialog
+      // is open (e.g. sitting on the page past its stop time); don't let a
+      // stale quantity slip into the order.
+      if (!getTicketSaleStatus(t, eventWideStop).onSale) return null
       const price = Number(t.price) || 0
       return {
         ticketType: t.policy,
@@ -386,7 +404,14 @@ const MAX_QTY_PER_TYPE = 10
                   </p>
                   {!freeEventEffectivelyClosed && (
                     <p className="text-xs text-gray-500 leading-relaxed pt-0.5">
-                      Max {freeEventMaxQty} ticket{freeEventMaxQty !== 1 ? "s" : ""} per order
+                      {/* Only show the per-order cap when it's the standard
+                          10 — once remaining stock has pulled it lower,
+                          showing the reduced number would leak how many
+                          are left, the same signal we hide via the "Sold
+                          out" (not "Only N left") badge above. */}
+                      {freeEventMaxQty === FREE_EVENT_MAX_QTY
+                        ? `Max ${FREE_EVENT_MAX_QTY} tickets per order`
+                        : "Limited availability"}
                     </p>
                   )}
                 </div>
@@ -439,24 +464,36 @@ const MAX_QTY_PER_TYPE = 10
                 const qty = quantities[index] ?? 0
                 const remaining = getRemaining(ticket)
                 const tierSoldOut = remaining !== null && remaining === 0
-                const tierDisabled = effectivelyClosed || tierSoldOut
+                const saleStatus = getTicketSaleStatus(ticket, eventWideStop)
+                const tierNotOnSale = !saleStatus.onSale
+                const tierDisabled = effectivelyClosed || tierSoldOut || tierNotOnSale
 
 
                 let availBadge: React.ReactNode = null
-                if (remaining !== null) {
-                  if (tierSoldOut) {
-                    availBadge = (
-                      <span className="text-xs font-semibold text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
-                        Sold out
-                      </span>
-                    )
-                  } else if (remaining <= 10) {
-                    availBadge = (
-                      <span className="text-xs font-semibold text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full animate-pulse">
-                        🔥 Only {remaining} left!
-                      </span>
-                    )
-                  }
+                if (tierNotOnSale) {
+                  // Sale-window badge takes priority over the plain
+                  // availability badge — it's the more specific reason.
+                  availBadge = (
+                    <span
+                      className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${
+                        saleStatus.reason === "not-started"
+                          ? "text-amber-700 bg-amber-50 border-amber-200"
+                          : "text-red-600 bg-red-50 border-red-200"
+                      }`}
+                    >
+                      {describeSaleStatus(saleStatus)}
+                    </span>
+                  )
+                } else if (remaining !== null && tierSoldOut) {
+                  // Only the binary "sold out" state is shown — the exact
+                  // remaining count is intentionally never surfaced to
+                  // buyers once the booker has set a limit (item: hide
+                  // sold/remaining numbers).
+                  availBadge = (
+                    <span className="text-xs font-semibold text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
+                      Sold out
+                    </span>
+                  )
                 }
 
                 return (
@@ -482,12 +519,13 @@ const MAX_QTY_PER_TYPE = 10
                           {availBadge}
                         </div>
 
-                        {/* Price + VAT */}
+                        {/* Price only — actual VAT/fee amount depends on cart
+                            total + Burden of Fee and isn't final until checkout */}
                         <p className={`font-bold text-lg leading-none ${tierSoldOut ? "text-gray-400" : "text-[#6b2fa5]"}`}>
                           ₦{formatNumber(Number(ticket.price) || 0)}
-                          {(Number(ticket.price) || 0) > 0 && (
+                          {(Number(ticket.price) || 0) > 0 && buyerOwesAnyFee && (
                             <span className="text-xs font-normal text-gray-400 ml-1.5">
-                              +₦{formatNumber(calculateVATFee(Number(ticket.price) || 0, feeRates))} VAT
+                              + VAT & Fees computed at checkout
                             </span>
                           )}
                         </p>
@@ -516,6 +554,16 @@ const MAX_QTY_PER_TYPE = 10
                         ) : effectivelyClosed ? (
                           <span className="text-sm font-semibold text-gray-400 px-3 py-2 border border-gray-200 rounded-xl bg-white">
                             Unavailable
+                          </span>
+                        ) : tierNotOnSale ? (
+                          <span
+                            className={`text-sm font-semibold px-3 py-2 border rounded-xl ${
+                              saleStatus.reason === "not-started"
+                                ? "text-amber-600 border-amber-200 bg-amber-50"
+                                : "text-gray-400 border-gray-200 bg-white"
+                            }`}
+                          >
+                            {saleStatus.reason === "not-started" ? "Not yet on sale" : "Unavailable"}
                           </span>
                         ) : qty === 0 ? (
                           <button
@@ -628,10 +676,10 @@ const MAX_QTY_PER_TYPE = 10
                   )}
                 </div>
               ))}
-              {totalVat > 0 && (
+              {showFeeBreakdown && (
                 <div className="flex justify-between text-xs text-gray-400 pt-1.5 border-t border-gray-100">
                   <span>VAT & Fees</span>
-                  <span>₦{formatNumber(totalVat)}</span>
+                  <span>Computed at checkout</span>
                 </div>
               )}
               <div className="flex justify-between items-center pt-2 border-t border-gray-200">

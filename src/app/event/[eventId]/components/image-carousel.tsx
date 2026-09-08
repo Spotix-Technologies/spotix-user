@@ -7,12 +7,25 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 interface ImageCarouselProps {
   eventImages: string[]
   eventName: string
+  /** Fires with the URL of whichever image is currently on screen, so a
+   *  parent (e.g. the page-wide blurred backdrop) can track it as the
+   *  user pages through the carousel. */
+  onActiveImageChange?: (url: string) => void
 }
 
-export const ImageCarousel: React.FC<ImageCarouselProps> = ({ eventImages, eventName }) => {
+export const ImageCarousel: React.FC<ImageCarouselProps> = ({ eventImages, eventName, onActiveImageChange }) => {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [displayIndex, setDisplayIndex] = useState(0)
   const [fading, setFading] = useState(false)
+
+  // Let the parent know whenever the visible slide changes (including the
+  // initial one on mount).
+  useEffect(() => {
+    if (eventImages?.[displayIndex]) {
+      onActiveImageChange?.(eventImages[displayIndex])
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayIndex, eventImages])
 
   if (!eventImages || eventImages.length === 0) return null
 
@@ -43,10 +56,26 @@ export const ImageCarousel: React.FC<ImageCarouselProps> = ({ eventImages, event
   return (
     <div
       // aspect-[4/3] gives a consistent 4:3 box on all screens.
-      // Images use object-contain so nothing is cropped — letterbox bars
-      // use the same bg-gray-950 as the container so they're invisible.
-      className="relative w-full aspect-[4/3] bg-white rounded-lg overflow-hidden group"
+      // Images use object-contain so nothing is cropped — the letterbox
+      // bars are filled by a blurred, scaled-up copy of the same image
+      // instead of a plain background.
+      className="relative w-full aspect-[4/3] bg-gray-900 rounded-lg overflow-hidden group"
     >
+      {/* Blurred fill behind the contained image */}
+      <img
+        key={`blur-${displayIndex}`}
+        src={eventImages[displayIndex] || '/placeholder.svg'}
+        alt=""
+        aria-hidden="true"
+        className="absolute inset-0 w-full h-full object-cover scale-110 blur-2xl opacity-70 transition-opacity"
+        style={{
+          opacity: fading ? 0 : 0.7,
+          transitionDuration: `${FADE_DURATION}ms`,
+          transitionTimingFunction: 'ease-in-out',
+        }}
+      />
+      <div className="absolute inset-0 bg-black/10" />
+
       {/* Image — fades on transition */}
       <img
         key={displayIndex}

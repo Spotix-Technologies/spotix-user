@@ -14,6 +14,7 @@ import AddPhoneNumber from "./Addphonenumber"
 import { ensurePaystackScriptLoaded, isPaystackReady, exactAmountNotice, upsertPaystackCustomer, splitFullName } from "./lib/paystack-shared"
 import { ticketWithPaystack, type TicketPaystackMetadata } from "./lib/ticket-payment-utility"
 import { voteWithPaystack, type VotePaystackMetadata } from "./lib/vote-payment-utility"
+import { merchWithPaystack, type MerchPaystackMetadata } from "./lib/merch-payment-utility"
 
 type PayWithPaystackBaseProps = {
   email: string
@@ -39,6 +40,7 @@ type PayWithPaystackBaseProps = {
 type PayWithPaystackProps =
   | (PayWithPaystackBaseProps & { type: "ticket"; metadata: TicketPaystackMetadata })
   | (PayWithPaystackBaseProps & { type: "vote"; metadata: VotePaystackMetadata })
+  | (PayWithPaystackBaseProps & { type: "merch"; metadata: MerchPaystackMetadata })
 
 export interface PayWithPaystackHandle {
   /**
@@ -255,6 +257,8 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
           const handler =
             type === "vote"
               ? voteWithPaystack({ ...shared, metadata: metadata as VotePaystackMetadata })
+              : type === "merch"
+              ? merchWithPaystack({ ...shared, metadata: metadata as MerchPaystackMetadata })
               : ticketWithPaystack({ ...shared, metadata: metadata as TicketPaystackMetadata })
 
           if (!handler) {

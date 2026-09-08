@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { adminDb } from "@/app/lib/firebase-admin"
 import { auth } from "firebase-admin"
 import { buildTicketReference } from "@/app/lib/reference-id"
+import { getTicketSaleStatus, describeSaleStatus } from "@/utils/ticketSaleWindow"
 
 /**
  * POST /api/v1/ref/free
@@ -108,6 +109,48 @@ export async function POST(request: NextRequest) {
         { error: "Missing required fields: eventId, eventCreatorId" },
         { status: 400 }
       )
+    }
+
+    // ── Sale-window enforcement (item 6 follow-up) ──────────────────────────
+    // This route skipped touching the event doc entirely before — fine
+    // when it's only ever hit for a fully free event (isFree, no
+    // ticketPrices structure at all), but it's also what a mixed
+    // paid/free event's order routes through whenever the buyer's cart
+    // happens to total ₦0 (e.g. they only picked the one free tier —
+    // see isFreeEvent in create-payment-reference.ts). That free tier can
+    // still have its own sale window, and the event can still have a
+    // "stop all sales" deadline, so both need checking here too — not
+    // just in create-pay-ref.
+    const eventSnap = await adminDb.collection("events").doc(eventId).get()
+    if (!eventSnap.exists) {
+      return NextResponse.json({ error: "Event not found" }, { status: 404 })
+    }
+    const eventDoc = eventSnap.data()!
+
+    if (eventDoc.suspended) {
+      return NextResponse.json({ error: "This event is currently unavailable" }, { status: 403 })
+    }
+
+    const ticketDocByPolicy = new Map<string, any>(
+      (Array.isArray(eventDoc.ticketPrices) ? eventDoc.ticketPrices : []).map((t: any) => [String(t.policy), t])
+    )
+    const eventWideStop = { enabled: !!eventDoc.stopDate, stopDate: eventDoc.stopDate ?? null }
+
+    for (const item of normalisedTicketTypes) {
+      // A matching ticketPrices entry means this is a real configured
+      // ticket type (including a free tier on an otherwise-paid event) —
+      // check its own window. No match at all (e.g. the generic "Free
+      // Admission" placeholder used when pricing is disabled event-wide)
+      // just falls back to the event-wide stop date via an empty window.
+      const ticketDoc = ticketDocByPolicy.get(item.type) ?? {}
+      const saleStatus = getTicketSaleStatus(ticketDoc, eventWideStop)
+      if (!saleStatus.onSale) {
+        console.warn(`[ref/free] Rejected "${item.type}" — ${saleStatus.reason}`)
+        return NextResponse.json(
+          { error: `"${item.type}" tickets aren't available right now — ${describeSaleStatus(saleStatus)?.toLowerCase()}` },
+          { status: 400 }
+        )
+      }
     }
 
     // ── Generate reference ────────────────────────────────────────────────────

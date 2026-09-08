@@ -15,7 +15,19 @@ export interface EventType {
   eventEnd: string
   eventType: string
   isFree: boolean
-  ticketPrices: { policy: string; price: number }[]
+  ticketPrices: {
+    policy: string
+    price: number
+    description?: string
+    availableTickets?: number
+    ticketsSold?: number
+    // Per-ticket-type sale window (item 6 / this follow-up) — optional,
+    // see utils/ticketSaleWindow.ts for how these resolve.
+    saleStartDate?: string
+    saleStartTime?: string
+    saleEndDate?: string
+    saleEndTime?: string
+  }[]
   bookerName: string
   bookerEmail?: string
   bookerPhone?: string
@@ -58,8 +70,16 @@ async function fetchEventData(eventId: string): Promise<EventType | null> {
     // lib/eventCache.ts. generateMetadata() and this page component both
     // call fetchEventData for the same request; the second call rides the
     // cache the first one just populated instead of hitting Firestore twice.
-    const [d, addons] = await Promise.all([getCachedEventDoc(eventId), getCachedActiveAddons(eventId)])
+    //
+    // Item 5 (Sep 2026): `eventId` here is whatever the URL segment was —
+    // the real Firestore doc id OR a shareable eventSlug, since
+    // getCachedEventDoc() resolves either. Addons live at a subcollection
+    // keyed by the REAL doc id (events/{realId}/addons), so that read must
+    // wait for the event doc to resolve first instead of racing it with a
+    // slug it wouldn't know what to do with.
+    const d = await getCachedEventDoc(eventId)
     if (!d) return null
+    const addons = await getCachedActiveAddons(d.id)
     const organizerId = d?.organizerId || d?.createdBy || ""
     return {
       id: d.id,

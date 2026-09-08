@@ -16,6 +16,13 @@ export const DEFAULT_PLATFORM_PERCENTAGE_FEE = 5;
  *  starting suggestion — NOT as a compute-time fallback (see below). */
 export const DEFAULT_PLATFORM_FLAT_FEE = 100;
 
+/** Flat Spotix fee rate charged on merch purchases — unlike ticket
+ *  platform fees, this isn't admin-configurable per event. Shared
+ *  between create-merch-ref (what's actually charged) and
+ *  /api/v1/event/merch + utils/merchPricing.ts (what's shown to a buyer
+ *  before checkout), so the two never drift apart. */
+export const MERCH_FEE_RATE = 0.05;
+
 export interface PlatformFeeRates {
   /** Fraction of ticket price charged as fee, e.g. 0.05 for 5%. */
   percentageFee: number;
@@ -251,6 +258,103 @@ export interface OrderPricingBreakdown {
  * here in case exact precision later matters enough to justify the
  * fussier iterative formula.
  */
+// ─── Merch — per-unit fee billing ──────────────────────────────────────────
+//
+// Merch is billed per-unit, NOT order-wide like tickets. Two consequences:
+//
+//  1. Whose fee it even is comes from the LISTING's own `fee_burden` column
+//     in Supabase (see src/app/lib/merch-listings.ts), set by the booker
+//     per-product from Manage Listings — never the event's Firestore
+//     Burden-of-Fee setting (that's a ticket-only concept; resolveFeeBurden/
+//     FeeBurdenSource above are for tickets and must not be reused here).
+//  2. Paystack's fee is computed on a SINGLE unit's price (+ Spotix's fee
+//     for that one unit, if the buyer owes it), then multiplied by
+//     quantity — deliberately not computed once on the line/order subtotal
+//     the way calculatePaystackFee(preFeeAmount) does for tickets. A
+//     3-unit line at ₦5,000/unit is charged the fee for one ₦5,000 unit,
+//     three times over, not the fee for one ₦15,000 transaction.
+
+export interface MerchLinePricingInput {
+  /** Raw per-unit price from merch_listings.price. */
+  unitPrice: number;
+  quantity: number;
+  /** This listing's own fee_burden — from Supabase, not the event doc. */
+  feeBurden: FeeBurden;
+}
+
+export interface MerchLinePricingBreakdown {
+  unitPrice: number;
+  quantity: number;
+  /** unitPrice × quantity — before any fee. */
+  lineSubtotal: number;
+  buyerOwesSpotixFee: boolean;
+  buyerOwesPaystackFee: boolean;
+  /** Spotix's 5% fee for one unit, and for the whole line (× quantity). */
+  spotixFeePerUnit: number;
+  spotixFeeTotal: number;
+  /** Paystack's real fee for one unit's charge, and for the whole line —
+   *  computed per-unit then multiplied by quantity (see header comment),
+   *  regardless of who ends up bearing it. */
+  paystackFeePerUnit: number;
+  paystackFeeTotal: number;
+  /** Added to what the buyer pays for this line — 0 if the booker covers it. */
+  paystackFeeChargedToBuyer: number;
+  /** Deducted from the booker's payout for this line — 0 if the buyer covers it. */
+  organizerPaystackFeeCost: number;
+  /** What the buyer actually pays for this line, all-in. */
+  linePayable: number;
+  /** What the booker nets for this line after any fees they've absorbed. */
+  organizerNetAmount: number;
+}
+
+/**
+ * Prices a single merch cart line using ITS OWN listing's fee_burden,
+ * billing both Spotix's and Paystack's fee per unit rather than once on
+ * the line total. See the header comment above for why this differs from
+ * computeOrderPricing (tickets' order-wide, event-Burden-of-Fee model).
+ */
+export function computeMerchLinePricing(input: MerchLinePricingInput): MerchLinePricingBreakdown {
+  const { unitPrice, quantity, feeBurden } = input;
+
+  const lineSubtotal = unitPrice * quantity;
+  const buyerOwesSpotixFee = !feeBurden.coversSpotixFee;
+  const buyerOwesPaystackFee = !feeBurden.coversPaystackFee;
+
+  const spotixFeePerUnit = Math.round(unitPrice * MERCH_FEE_RATE);
+  const spotixFeeTotal = spotixFeePerUnit * quantity;
+
+  const preFeeAmountPerUnit = unitPrice + (buyerOwesSpotixFee ? spotixFeePerUnit : 0);
+  const paystackFeePerUnit = Math.round(calculatePaystackFee(preFeeAmountPerUnit));
+  const paystackFeeTotal = paystackFeePerUnit * quantity;
+
+  const paystackFeeChargedToBuyer = buyerOwesPaystackFee ? paystackFeeTotal : 0;
+  const organizerPaystackFeeCost = buyerOwesPaystackFee ? 0 : paystackFeeTotal;
+
+  const linePayable =
+    lineSubtotal + (buyerOwesSpotixFee ? spotixFeeTotal : 0) + paystackFeeChargedToBuyer;
+
+  const organizerNetAmount =
+    lineSubtotal -
+    (feeBurden.coversSpotixFee ? spotixFeeTotal : 0) -
+    (feeBurden.coversPaystackFee ? paystackFeeTotal : 0);
+
+  return {
+    unitPrice,
+    quantity,
+    lineSubtotal,
+    buyerOwesSpotixFee,
+    buyerOwesPaystackFee,
+    spotixFeePerUnit,
+    spotixFeeTotal,
+    paystackFeePerUnit,
+    paystackFeeTotal,
+    paystackFeeChargedToBuyer,
+    organizerPaystackFeeCost,
+    linePayable,
+    organizerNetAmount,
+  };
+}
+
 export function computeOrderPricing(input: OrderPricingInput): OrderPricingBreakdown {
   const { ticketSubtotal, totalTicketCount, spotixFeeTotal, feeBurden, addons = [] } = input;
 

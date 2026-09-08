@@ -37,8 +37,18 @@ export type RawEventDoc = Record<string, any> & { id: string }
 
 async function fetchEventDocFromFirestore(eventId: string): Promise<RawEventDoc | null> {
   const snap = await adminDb.collection("events").doc(eventId).get()
-  if (!snap.exists) return null
-  return { id: snap.id, ...snap.data() }
+  if (snap.exists) return { id: snap.id, ...snap.data() }
+
+  // Item 5 (Sep 2026): the dynamic segment here also carries eventSlug now —
+  // eventId stays the real Firestore doc id and the internal key used by
+  // auth/payments/admin, but a booker can share `/event/{eventSlug}` links
+  // instead. A miss above just means the param wasn't a doc id; fall back
+  // to a slug lookup before giving up. Old `/event/{eventId}` links keep
+  // working either way since the id lookup above always runs first.
+  const slugQuery = await adminDb.collection("events").where("eventSlug", "==", eventId).limit(1).get()
+  if (slugQuery.empty) return null
+  const doc = slugQuery.docs[0]
+  return { id: doc.id, ...doc.data() }
 }
 
 /**
