@@ -5,8 +5,8 @@
  * (iPhone/iPad/iPod, or a Mac — including iPadOS 13+, which reports
  * itself as "MacIntel" but exposes multi-touch). Used purely to decide
  * whether the "Apple Pay" payment option is worth showing at all — it's
- * not a capability check for Apple Pay itself (Spotix doesn't support it
- * yet either way, see payment-channels.ts).
+ * not a real capability check (Paystack's own `.checkout()` does its own
+ * device detection when the widget opens, see ticket-payment-utility.ts).
  *
  * Mirrors spotix-vote's src/lib/paystack/device.ts.
  */

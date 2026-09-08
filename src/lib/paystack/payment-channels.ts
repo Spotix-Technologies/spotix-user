@@ -4,13 +4,15 @@
  * The ticket checkout's "How would you like to pay?" step shows a short
  * list of payment methods BEFORE the Paystack widget opens, and each
  * selection is passed straight to PayWithPaystack's open() as `channels`,
- * which forwards it to PaystackPop.setup()'s `channels` option so
- * Paystack's own checkout skips straight to that method instead of
- * showing every option again.
+ * which forwards it to PaystackPop's `newTransaction()` `channels` option
+ * so Paystack's own checkout skips straight to that method instead of
+ * showing every option again — except "apple_pay", which isn't a real
+ * `channels` restriction value; ticket/vote/merch-payment-utility.ts route
+ * that one through `.checkout()` instead (see their own doc comments).
  *
  * Mirrors spotix-vote's src/lib/paystack/payment-channels.ts. Apple Pay is
- * listed (on Apple devices only, see device.ts) but isn't wired to a real
- * Paystack channel yet — it's shown greyed out and is not selectable.
+ * listed (on Apple devices only, see device.ts) and now wired up — it
+ * requires Popup V2 (see paystack-shared.ts).
  *
  * A NOTE ON "MOBILE MONEY": Paystack's `mobile_money` channel is a Ghana/
  * Kenya-style wallet charge and isn't a real, restrictable channel for NGN
@@ -71,8 +73,11 @@ export const PAYMENT_METHOD_OPTIONS: PaymentMethodOption[] = [
     id: "apple_pay",
     label: "Apple Pay",
     description: "Pay instantly with Apple Pay",
-    channels: [],
-    available: false,
+    // Not a real Paystack `channels` restriction value — this is a sentinel
+    // that ticket/vote/merch-payment-utility.ts detect to route through
+    // `.checkout()` instead of `.newTransaction()`. See their doc comments.
+    channels: ["apple_pay"],
+    available: true,
   },
 ]
 
@@ -88,7 +93,7 @@ export function getPaymentMethodNotice(id: PaymentMethodId, amount: number): str
     return "You'll get a USSD code to dial from your registered phone number."
   }
   if (id === "apple_pay") {
-    return "Apple Pay is not available yet."
+    return "You'll be asked to confirm with Apple Pay."
   }
   return "Initializing secure checkout…"
 }

@@ -43,10 +43,16 @@ export function isPaystackReady(): boolean {
 }
 
 /**
- * Ensures https://js.paystack.co/v1/inline.js is present in the document,
+ * Ensures https://js.paystack.co/v2/inline.js is present in the document,
  * reusing an existing <script> tag if one is already loading elsewhere
  * (e.g. another payment component preloaded it). Resolves once
  * window.PaystackPop is available, or after `timeoutMs` elapses.
+ *
+ * V2, not V1 — Apple Pay only works on Popup V2 (Paystack's own docs:
+ * "Apple Pay works on version 2 of our InlineJS only"). V2 also swaps the
+ * API shape: `new window.PaystackPop()` + `.newTransaction()`/`.checkout()`
+ * instead of V1's static `PaystackPop.setup()` + `.openIframe()` — see
+ * ticket/vote/merch-payment-utility.ts.
  */
 export function ensurePaystackScriptLoaded(timeoutMs = 15000): Promise<boolean> {
   return new Promise((resolve) => {
@@ -56,7 +62,7 @@ export function ensurePaystackScriptLoaded(timeoutMs = 15000): Promise<boolean> 
     }
 
     const existing = document.querySelector<HTMLScriptElement>(
-      'script[src="https://js.paystack.co/v1/inline.js"]'
+      'script[src="https://js.paystack.co/v2/inline.js"]'
     )
 
     const start = Date.now()
@@ -78,7 +84,7 @@ export function ensurePaystackScriptLoaded(timeoutMs = 15000): Promise<boolean> 
     }
 
     const script = document.createElement("script")
-    script.src = "https://js.paystack.co/v1/inline.js"
+    script.src = "https://js.paystack.co/v2/inline.js"
     script.async = true
     script.onload = () => resolve(true)
     script.onerror = () => resolve(false)
@@ -101,7 +107,7 @@ export function exactAmountNotice(amount: number): string {
  *
  * Paystack's inline checkout only uses `email` to identify/attach a
  * Customer record — the first_name/last_name/phone keys passed into
- * PaystackPop.setup() are not what populates transaction.customer. Calling
+ * newTransaction()/checkout() are not what populates transaction.customer. Calling
  * this first is what actually gets Paystack to show and store the buyer's
  * real name against that email, instead of leaving customer.first_name /
  * customer.last_name blank on the resulting transaction.

@@ -230,6 +230,13 @@ const MAX_QTY_PER_TYPE = 10
   // resolved together against this event's Burden of Fee setting — the
   // single source of truth every checkout surface (this dialog, the
   // payment page, create-pay-ref) computes from. See computeOrderPricing.
+  //
+  // Only `showFeeBreakdown` is used here — this dialog shows the raw ticket
+  // subtotal and defers the actual fee-inclusive total to the payment page,
+  // matching the "VAT & Fees — Computed at checkout" copy below. Don't wire
+  // orderPricing.totalPayable into the footer total here; that's what
+  // caused it to show a fee-inclusive number while still claiming fees are
+  // "computed at checkout".
   const orderPricing: OrderPricingBreakdown = useMemo(
     () =>
       computeOrderPricing({
@@ -241,7 +248,6 @@ const MAX_QTY_PER_TYPE = 10
       }),
     [subtotal, totalTickets, totalVat, eventData.feeBurden, eventData.addons]
   )
-  const grandTotal = orderPricing.totalPayable
   // Whenever the organizer covers less than everything, show a breakdown
   // so it's always clear what the buyer is actually paying for.
   const showFeeBreakdown = orderPricing.buyerOwesSpotixFee || orderPricing.buyerOwesPaystackFee || orderPricing.addonFeeTotal > 0
@@ -689,11 +695,11 @@ const MAX_QTY_PER_TYPE = 10
                     Total of {totalTickets} ticket{totalTickets !== 1 ? "s" : ""}
                   </span>
                 </div>
-                {grandTotal === 0 ? (
+                {subtotal === 0 ? (
                   <span className="text-xl font-bold text-emerald-600">Free</span>
                 ) : (
                   <span className="text-xl font-bold text-[#6b2fa5]">
-                    ₦{formatNumber(Math.round(grandTotal))}
+                    ₦{formatNumber(Math.round(subtotal))}
                   </span>
                 )}
               </div>
@@ -710,7 +716,7 @@ const MAX_QTY_PER_TYPE = 10
                   One moment..
                 </>
               ) : (
-                grandTotal === 0 ? "Proceed to Register" : "Proceed to Payment"
+                subtotal === 0 ? "Proceed to Register" : "Proceed to Payment"
               )}
             </button>
           </div>

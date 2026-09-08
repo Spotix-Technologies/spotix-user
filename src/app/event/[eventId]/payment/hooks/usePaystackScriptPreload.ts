@@ -12,10 +12,10 @@ export function usePaystackScriptPreload(paymentData: PaymentData | null): void 
   useEffect(() => {
     if (!paymentData || paymentData.ticketPrice === 0) return
     if (typeof window === "undefined" || window.PaystackPop) return
-    if (document.querySelector('script[src="https://js.paystack.co/v1/inline.js"]')) return
+    if (document.querySelector('script[src="https://js.paystack.co/v2/inline.js"]')) return
 
     const script = document.createElement("script")
-    script.src = "https://js.paystack.co/v1/inline.js"
+    script.src = "https://js.paystack.co/v2/inline.js"
     script.async = true
     document.body.appendChild(script)
     // Deliberately not removed on unmount — once loaded, window.PaystackPop

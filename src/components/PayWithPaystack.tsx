@@ -228,8 +228,8 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
 
         // Fire-and-forget: gets the buyer's actual name attached to their
         // Paystack Customer record (see upsertPaystackCustomer's own docs
-        // for why PaystackPop.setup()'s first_name/last_name alone don't
-        // do this). Never awaited — must not delay opening the widget.
+        // for why PaystackPop's first_name/last_name alone don't do this).
+        // Never awaited — must not delay opening the widget.
         const { firstName, lastName } = splitFullName(effectiveFullName)
         upsertPaystackCustomer(email, firstName, lastName, effectivePhone ?? undefined)
 
@@ -254,25 +254,18 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
         }
 
         try {
-          const handler =
+          // Popup V2's newTransaction()/checkout() open the widget as part
+          // of the call itself — unlike V1's setup() + separate
+          // handler.openIframe(), there's no follow-up "open" step here.
+          const transaction =
             type === "vote"
               ? voteWithPaystack({ ...shared, metadata: metadata as VotePaystackMetadata })
               : type === "merch"
               ? merchWithPaystack({ ...shared, metadata: metadata as MerchPaystackMetadata })
               : ticketWithPaystack({ ...shared, metadata: metadata as TicketPaystackMetadata })
 
-          if (!handler) {
+          if (!transaction) {
             setError("Failed to initialize Paystack. Please refresh and try again.")
-            setStage("error")
-            return
-          }
-
-          if (typeof handler.openIframe === "function") {
-            handler.openIframe()
-          } else if (typeof handler.pay === "function") {
-            handler.pay()
-          } else {
-            setError("Failed to open payment modal. Please try again.")
             setStage("error")
           }
         } catch (err) {
@@ -461,7 +454,7 @@ const PayWithPaystack = forwardRef<PayWithPaystackHandle, PayWithPaystackProps>(
     }
 
     // "confirm" (showing the exact-amount notice, about to auto-open) or
-    // "connecting" (Paystack handler.openIframe()/pay() just fired).
+    // "connecting" (Paystack newTransaction()/checkout() just fired).
     // checkingProfile can only still be true here in the rare case open()
     // was called before background profile preloading finished.
     return (

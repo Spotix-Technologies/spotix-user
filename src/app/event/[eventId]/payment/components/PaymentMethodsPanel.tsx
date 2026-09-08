@@ -29,9 +29,9 @@ interface PaymentMethodsPanelProps {
  * Replaces the old helpers/payment-methods.tsx card list (Wallet + a
  * single generic "Paystack" button) with Wallet plus a real spread of
  * Paystack channels — Card, Bank Transfer, USSD, Mobile Money, and (on
- * Apple devices, greyed out) Apple Pay — mirroring spotix-vote's
- * payment-channels pattern. Each channel selection is forwarded straight
- * to PayWithPaystack's `channels` option so Paystack's checkout skips
+ * Apple devices) Apple Pay — mirroring spotix-vote's payment-channels
+ * pattern. Each channel selection is forwarded straight to
+ * PayWithPaystack's `channels` option so Paystack's checkout skips
  * directly to that method.
  */
 export default function PaymentMethodsPanel({

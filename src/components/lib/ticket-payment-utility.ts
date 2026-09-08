@@ -6,6 +6,15 @@
  * split from the full name, phone, custom_fields) and opens it. Imported
  * into PayWithPaystack.tsx, which owns all the UI/lifecycle state
  * (script loading, phone prompt, abandonment dialog, errors).
+ *
+ * Popup V2 (see paystack-shared.ts): `new PaystackPop()` + `.newTransaction()`
+ * instead of V1's static `.setup()`. V2's `channels` array doesn't support
+ * "apple_pay" — per Paystack's own docs, Apple Pay only works through
+ * `.paymentRequest()` (a mounted button) or `.checkout()` (an auto
+ * pre-checkout modal on Apple devices). We use `.checkout()` since it needs
+ * no extra DOM container and mirrors the existing "confirm, then open a
+ * widget" flow — PaymentMethodPicker only ever offers Apple Pay on Apple
+ * devices to begin with (see device.ts), so this is never reached elsewhere.
  */
 
 import { splitFullName } from "./paystack-shared"
@@ -42,22 +51,29 @@ export interface TicketWithPaystackParams {
 
 /**
  * Builds and opens the Paystack inline checkout for a ticket purchase.
- * Returns the Paystack handler instance, or null if window.PaystackPop
- * isn't ready yet.
+ * Returns the Paystack PopupTransaction instance, or null if
+ * window.PaystackPop isn't ready yet.
  */
 export function ticketWithPaystack(params: TicketWithPaystackParams) {
   const PS = (window as any).PaystackPop
   if (!PS) return null
 
   const { firstName, lastName } = splitFullName(params.fullName)
+  const isApplePay = !!params.channels?.includes("apple_pay")
 
-  const handler = PS.setup({
+  const instance = new PS()
+
+  const config = {
     key:      params.paystackKey,
     email:    params.email,
     amount:   Math.round(params.amount * 100), // kobo
     currency: "NGN",
     ref:      params.reference,
-    ...(params.channels && params.channels.length > 0 ? { channels: params.channels } : {}),
+    // "apple_pay" isn't a valid `channels` restriction value in V2 — it's
+    // handled separately below via .checkout() instead.
+    ...(!isApplePay && params.channels && params.channels.length > 0
+      ? { channels: params.channels }
+      : {}),
 
     first_name: firstName,
     last_name:  lastName,
@@ -84,9 +100,21 @@ export function ticketWithPaystack(params: TicketWithPaystackParams) {
       ],
     },
 
-    callback: (response: any) => params.onSuccess(response.reference),
-    onClose:  () => params.onClose(),
-  })
+    onSuccess: (transaction: any) => params.onSuccess(transaction.reference),
+    onCancel:  () => params.onClose(),
+  }
 
-  return handler
+  // .checkout() returns a Promise (unlike the synchronous .newTransaction()),
+  // which resolves/rejects well after this function has returned — a
+  // rejection here can't be caught by PayWithPaystack's try/catch around
+  // this call, so it's handled here instead to avoid an unhandled rejection.
+  if (isApplePay) {
+    const result = instance.checkout(config)
+    result?.catch?.((err: unknown) => {
+      console.error("[ticketWithPaystack] Apple Pay checkout error:", err)
+    })
+    return result
+  }
+
+  return instance.newTransaction(config)
 }

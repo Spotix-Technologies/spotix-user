@@ -3,7 +3,7 @@
  *
  * Authentication and route protection for the Spotix user-facing app.
  *
- * ── How it differs from the booker proxy ─────────────────────────────────
+ *  How it differs from the booker proxy 
  *
  *   Cookie read : spotix_u_at  (not spotix_at)
  *   JWT audience: "spotix-user" (not "spotix-booker")
@@ -11,7 +11,7 @@
  *                 regardless of isBooker. The booker check only lives in the
  *                 booker dashboard proxy.
  *
- * ── Route classification ──────────────────────────────────────────────────────
+ *  Route classification 
  *
  *   Public       /auth/login, /auth/signup, /auth/forgot-password
  *                Always accessible. Authenticated users visiting login/signup
@@ -25,7 +25,7 @@
  *   Open         Everything else (home, event listings, etc.)
  *                No auth required — accessible to everyone.
  *
- * ── Identity headers injected for downstream use ──────────────────────────────
+ *  Identity headers injected for downstream use ─
  *
  *   x-user-id          ← uid from verified JWT
  *   x-user-email       ← email
@@ -35,7 +35,7 @@
  *   import { headers } from "next/headers"
  *   const uid = (await headers()).get("x-user-id")
  *
- * ── Domain intercept ─────────────────────────────────────────────────────────
+ *  Domain intercept ─
  *
  *   env INTERCEPT      "true" (case-insensitive) turns interception on.
  *                      Missing or anything else (including "false") is treated
@@ -53,7 +53,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { verifyAccessTokenEdge } from "@/app/lib/auth-edge";
 
-// ── Route sets ─────────────────────────────────────────────────────────────────
+//  Route sets ─
 
 /**
  * Static and framework paths that should always pass through immediately
@@ -64,6 +64,7 @@ const BYPASS_PREFIXES = [
   "/_next/static",
   "/_next/image",
   "/favicon.ico",
+  "/.well-known",
 ];
 
 const PUBLIC_AUTH_ROUTES = new Set([
@@ -90,11 +91,11 @@ const PROTECTED_PREFIXES = [
   "/vote",
 ];
 
-// ── Cookie / audience ──────────────────────────────────────────────────────────
+//  Cookie / audience 
 const ACCESS_TOKEN_COOKIE = "spotix_u_at";
 const AUDIENCE = "spotix-user" as const;
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
+//  Helpers 
 
 function isBypassPath(pathname: string): boolean {
   return BYPASS_PREFIXES.some((p) => pathname.startsWith(p));
@@ -125,12 +126,21 @@ function getInterceptHost(): string | null {
   return interceptUrl.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
 }
 
-// ── proxy ──────────────────────────────────────────────────────────────────────
+//  proxy 
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // ── -1. Domain intercept ─────────────────────────────────────────────────────
+  //  0. Fast exit for static / API / well-known paths 
+  // No token work, no domain intercept — let Next.js/the platform serve these
+  // directly. .well-known must never be redirected (e.g. Apple Pay domain
+  // verification expects a direct 200 on the exact registered domain, not a
+  // redirect through the domain-intercept below).
+  if (isBypassPath(pathname)) {
+    return NextResponse.next();
+  }
+
+  //  -1. Domain intercept 
   // If INTERCEPT is on, send the visitor to INTERCEPT_URL, preserving the
   // route (path + querystring). Skipped once already on the target host so
   // we never redirect-loop.
@@ -143,16 +153,10 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(target);
   }
 
-  // ── 0. Fast exit for static / API paths ─────────────────────────────────────
-  // No token work needed — let Next.js handle these normally.
-  if (isBypassPath(pathname)) {
-    return NextResponse.next();
-  }
-
   const token = request.cookies.get(ACCESS_TOKEN_COOKIE)?.value;
   const payload = await verifyAccessTokenEdge(token, AUDIENCE);
 
-  // ── 1. Public auth routes (/auth/login, /auth/signup, etc.) ─────────────────
+  //  1. Public auth routes (/auth/login, /auth/signup, etc.) ─
   if (isPublicAuthRoute(pathname)) {
     if (payload) {
       return NextResponse.redirect(new URL("/home", request.url));
@@ -160,7 +164,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // ── 2. Protected routes ──────────────────────────────────────────────────────
+  //  2. Protected routes 
   if (isProtectedRoute(pathname)) {
     if (!payload) {
       const loginUrl = new URL("/auth/login", request.url);
@@ -177,7 +181,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
-  // ── 3. Open routes — no auth required ───────────────────────────────────────
+  //  3. Open routes — no auth required 
   // Inject identity headers if the user happens to be logged in,
   // so server components can personalise content without an extra auth check.
   if (payload) {
@@ -191,10 +195,10 @@ export async function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
-// ── Matcher ────────────────────────────────────────────────────────────────────
+//  Matcher 
 
 export const config = {
   matcher: [
-    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|woff2?|ttf|otf)).*)",
+    "/((?!api|_next/static|_next/image|favicon.ico|\\.well-known|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|woff2?|ttf|otf)).*)",
   ],
 };

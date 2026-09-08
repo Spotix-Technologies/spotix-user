@@ -5,6 +5,11 @@
  * state. Mirrors ticket-payment-utility.ts but for voting_purchase
  * references (poll/contestant/category fields instead of event fields).
  * Imported into PayWithPaystack.tsx.
+ *
+ * Popup V2 (see paystack-shared.ts / ticket-payment-utility.ts for the full
+ * rationale): `new PaystackPop()` + `.newTransaction()`, with Apple Pay
+ * routed through `.checkout()` instead since "apple_pay" isn't a valid
+ * `channels` value.
  */
 
 import { splitFullName } from "./paystack-shared"
@@ -30,6 +35,8 @@ export interface VoteWithPaystackParams {
   fullName:    string
   phone:       string
   metadata:    VotePaystackMetadata
+  /** Paystack channels to restrict checkout to, e.g. ["card"]. Empty/omitted = Paystack's default full picker. */
+  channels?:   string[]
   onSuccess:   (reference: string) => void
   /** Fires when the buyer closes the Paystack widget without completing payment. */
   onClose:     () => void
@@ -37,21 +44,27 @@ export interface VoteWithPaystackParams {
 
 /**
  * Builds and opens the Paystack inline checkout for a voting purchase.
- * Returns the Paystack handler instance, or null if window.PaystackPop
- * isn't ready yet.
+ * Returns the Paystack PopupTransaction instance, or null if
+ * window.PaystackPop isn't ready yet.
  */
 export function voteWithPaystack(params: VoteWithPaystackParams) {
   const PS = (window as any).PaystackPop
   if (!PS) return null
 
   const { firstName, lastName } = splitFullName(params.fullName)
+  const isApplePay = !!params.channels?.includes("apple_pay")
 
-  const handler = PS.setup({
+  const instance = new PS()
+
+  const config = {
     key:      params.paystackKey,
     email:    params.email,
     amount:   Math.round(params.amount * 100), // kobo
     currency: "NGN",
     ref:      params.reference,
+    ...(!isApplePay && params.channels && params.channels.length > 0
+      ? { channels: params.channels }
+      : {}),
 
     first_name: firstName,
     last_name:  lastName,
@@ -74,9 +87,20 @@ export function voteWithPaystack(params: VoteWithPaystackParams) {
       ],
     },
 
-    callback: (response: any) => params.onSuccess(response.reference),
-    onClose:  () => params.onClose(),
-  })
+    onSuccess: (transaction: any) => params.onSuccess(transaction.reference),
+    onCancel:  () => params.onClose(),
+  }
 
-  return handler
+  // .checkout() returns a Promise (unlike the synchronous .newTransaction()),
+  // handled here rather than in PayWithPaystack's try/catch — see
+  // ticket-payment-utility.ts for the full explanation.
+  if (isApplePay) {
+    const result = instance.checkout(config)
+    result?.catch?.((err: unknown) => {
+      console.error("[voteWithPaystack] Apple Pay checkout error:", err)
+    })
+    return result
+  }
+
+  return instance.newTransaction(config)
 }

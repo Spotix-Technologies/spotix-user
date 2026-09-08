@@ -7,6 +7,11 @@
  * is what spotix-backend's webhook uses to dispatch to v1/merch.js
  * instead of v1/ticket.js. Imported into PayWithPaystack.tsx alongside
  * ticketWithPaystack/voteWithPaystack.
+ *
+ * Popup V2 (see paystack-shared.ts / ticket-payment-utility.ts for the full
+ * rationale): `new PaystackPop()` + `.newTransaction()`, with Apple Pay
+ * routed through `.checkout()` instead since "apple_pay" isn't a valid
+ * `channels` value.
  */
 
 import { splitFullName } from "./paystack-shared"
@@ -39,22 +44,27 @@ export interface MerchWithPaystackParams {
 
 /**
  * Builds and opens the Paystack inline checkout for a merch purchase.
- * Returns the Paystack handler instance, or null if window.PaystackPop
- * isn't ready yet.
+ * Returns the Paystack PopupTransaction instance, or null if
+ * window.PaystackPop isn't ready yet.
  */
 export function merchWithPaystack(params: MerchWithPaystackParams) {
   const PS = (window as any).PaystackPop
   if (!PS) return null
 
   const { firstName, lastName } = splitFullName(params.fullName)
+  const isApplePay = !!params.channels?.includes("apple_pay")
 
-  const handler = PS.setup({
+  const instance = new PS()
+
+  const config = {
     key: params.paystackKey,
     email: params.email,
     amount: Math.round(params.amount * 100), // kobo
     currency: "NGN",
     ref: params.reference,
-    ...(params.channels && params.channels.length > 0 ? { channels: params.channels } : {}),
+    ...(!isApplePay && params.channels && params.channels.length > 0
+      ? { channels: params.channels }
+      : {}),
 
     first_name: firstName,
     last_name: lastName,
@@ -72,9 +82,20 @@ export function merchWithPaystack(params: MerchWithPaystackParams) {
       ],
     },
 
-    callback: (response: any) => params.onSuccess(response.reference),
-    onClose: () => params.onClose(),
-  })
+    onSuccess: (transaction: any) => params.onSuccess(transaction.reference),
+    onCancel: () => params.onClose(),
+  }
 
-  return handler
+  // .checkout() returns a Promise (unlike the synchronous .newTransaction()),
+  // handled here rather than in PayWithPaystack's try/catch — see
+  // ticket-payment-utility.ts for the full explanation.
+  if (isApplePay) {
+    const result = instance.checkout(config)
+    result?.catch?.((err: unknown) => {
+      console.error("[merchWithPaystack] Apple Pay checkout error:", err)
+    })
+    return result
+  }
+
+  return instance.newTransaction(config)
 }
