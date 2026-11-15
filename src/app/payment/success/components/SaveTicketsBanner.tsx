@@ -24,7 +24,7 @@ export default function SaveTicketsBanner({
   return (
     <div className="rounded-2xl overflow-hidden shadow-md mb-6">
       {/* Screenshot nudge */}
-      <div className="bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200 px-6 py-4 flex items-start gap-3">
+      <div className="bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200 px-4 sm:px-6 py-4 flex items-start gap-3">
         <Camera className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
         <div>
           <p className="text-sm font-bold text-amber-800">
@@ -38,7 +38,7 @@ export default function SaveTicketsBanner({
       </div>
 
       {/* Download button */}
-      <div className="bg-white border-x border-b border-amber-200 px-6 py-4 flex flex-col sm:flex-row items-center gap-3">
+      <div className="bg-white border-x border-b border-amber-200 px-4 sm:px-6 py-4 flex flex-col sm:flex-row items-center gap-3">
         <button
           onClick={onDownload}
           disabled={downloading}
@@ -60,7 +60,7 @@ export default function SaveTicketsBanner({
 
       {/* Guest account nudge — only shown for guest purchases */}
       {isGuest && (
-        <div className="bg-purple-50 border-x border-b border-purple-200 px-6 py-4 flex items-start gap-3">
+        <div className="bg-purple-50 border-x border-b border-purple-200 px-4 sm:px-6 py-4 flex items-start gap-3">
           <span className="text-lg">💡</span>
           <p className="text-sm text-purple-800">
             <span className="font-bold">Want to access your {ticketWord} anytime?</span>{" "}

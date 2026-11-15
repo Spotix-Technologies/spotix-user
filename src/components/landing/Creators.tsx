@@ -2,9 +2,10 @@
 
 import { useEffect, useRef } from "react"
 import Image from "next/image"
-import { Linkedin, Twitter, Mail, Sparkles } from "lucide-react"
+import { Linkedin, Twitter, Mail } from "lucide-react"
 import { gsap } from "gsap"
 import { ScrollTrigger } from "gsap/ScrollTrigger"
+import { UI } from "./theme"
 
 if (typeof window !== "undefined") {
   gsap.registerPlugin(ScrollTrigger)
@@ -50,13 +51,13 @@ const Creators = () => {
 
       cardRefs.current.forEach((card, i) => {
         if (!card) return
-        const fromX = i === 0 ? -60 : 60
+        // Vertical reveal only — sideways offsets pushed the page wider than the viewport
         gsap.fromTo(
           card,
-          { opacity: 0, x: fromX },
+          { opacity: 0, y: 40 },
           {
             opacity: 1,
-            x: 0,
+            y: 0,
             duration: 0.8,
             ease: "power3.out",
             delay: i * 0.1,
@@ -76,15 +77,12 @@ const Creators = () => {
   }, [])
 
   return (
-    <section ref={sectionRef} id="creators" className="relative py-20 sm:py-24 px-4 sm:px-6 lg:px-8 bg-white">
-      <div className="max-w-6xl mx-auto">
-        <div ref={headerRef} className="text-center mb-16">
-          <span className="header-el inline-flex items-center gap-2 px-3 py-1.5 bg-[#f5f0fb] text-[#6b2fa5] text-xs font-bold uppercase tracking-widest rounded-full mb-5">
-            <Sparkles className="w-3.5 h-3.5" />
-            The Visionaries
-          </span>
-          <h2 className="header-el text-3xl sm:text-4xl lg:text-5xl font-bold text-[#171123] mb-4">Meet The Founders</h2>
-          <p className="header-el text-lg text-[#7c7389] max-w-xl mx-auto">
+    <section ref={sectionRef} id="creators" className={`relative overflow-x-clip py-20 sm:py-24 ${UI.bandGrey}`}>
+      <div className={UI.container}>
+        <div ref={headerRef} className="text-center mb-14">
+          <p className={`header-el ${UI.eyebrow} mb-3`}>The visionaries</p>
+          <h2 className={`header-el ${UI.h2} mb-4`}>Meet the founders</h2>
+          <p className={`header-el ${UI.lead} max-w-xl mx-auto`}>
             The passionate minds behind Spotix, dedicated to revolutionizing the event experience.
           </p>
         </div>
@@ -96,16 +94,14 @@ const Creators = () => {
               ref={(el) => {
                 cardRefs.current[index] = el
               }}
-              className="group relative bg-white rounded-2xl border border-[#ece7f1] hover:border-[#6b2fa5]/25 hover:shadow-lg transition-all duration-300 overflow-hidden"
+              className="group relative overflow-hidden rounded-2xl border border-[#ece7f1] bg-white transition-all duration-300 hover:border-[#171123]/25"
             >
-              <div className="h-1.5 w-full bg-[#6b2fa5]" />
-
               <div className="flex flex-col items-center text-center px-6 pt-8 pb-7">
                 <div className="relative mb-5">
                   <div className="relative w-32 h-32 rounded-full overflow-hidden ring-4 ring-[#f5f0fb]">
                     <Image src={creator.image} alt={creator.name} fill className="object-cover" sizes="128px" />
                   </div>
-                  <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 px-3.5 py-1 bg-[#6b2fa5] text-white text-xs font-bold rounded-full whitespace-nowrap">
+                  <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 px-3.5 py-1 bg-[#171123] text-white text-xs font-bold rounded-full whitespace-nowrap">
                     {creator.title}
                   </div>
                 </div>
@@ -121,7 +117,7 @@ const Creators = () => {
                     <a
                       key={label}
                       href={href}
-                      className="w-10 h-10 rounded-full bg-[#f5f0fb] hover:bg-[#6b2fa5] text-[#6b2fa5] hover:text-white flex items-center justify-center transition-colors duration-300"
+                      className="w-10 h-10 rounded-full bg-[#f7f6f9] hover:bg-[#171123] text-[#4b4257] hover:text-white flex items-center justify-center transition-colors duration-200"
                       aria-label={label}
                     >
                       <Icon className="w-4 h-4" />

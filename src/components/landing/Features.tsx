@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react"
 import { Wallet, Users, ShieldCheck, Zap, Star, TrendingUp, ScanLine } from "lucide-react"
+import { UI } from "./theme"
 
 const features = [
   { icon: Wallet, title: "Secure Payments", description: "Fast and reliable transactions with industry-leading encryption and payment protection. Every naira is secured." },
@@ -39,14 +40,16 @@ function FeatureCard({ feature, index }: { feature: (typeof features)[number]; i
   return (
     <div
       ref={ref}
-      className="feat-card group bg-white rounded-2xl p-6 border border-[#ece7f1] hover:border-[#6b2fa5]/30 hover:shadow-lg transition-all duration-300"
-      style={{ transitionDelay: `${(index % 4) * 70}ms` }}
+      className="feat-card group flex items-start gap-5 border-t border-[#e8e4ee] py-6 first:border-t-0 first:pt-0"
+      style={{ transitionDelay: `${(index % 3) * 70}ms` }}
     >
-      <div className="w-12 h-12 rounded-xl bg-[#f5f0fb] flex items-center justify-center mb-5 transition-colors duration-300 group-hover:bg-[#6b2fa5]">
-        <Icon className="w-6 h-6 text-[#6b2fa5] transition-colors duration-300 group-hover:text-white" />
+      <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-[#f7f6f9] transition-colors duration-300 group-hover:bg-[#171123]">
+        <Icon className="h-5 w-5 text-[#6b2fa5] transition-colors duration-300 group-hover:text-white" />
       </div>
-      <h3 className="text-lg font-bold text-[#171123] mb-2">{feature.title}</h3>
-      <p className="text-[#7c7389] text-sm leading-relaxed">{feature.description}</p>
+      <div className="min-w-0">
+        <h3 className="mb-1 text-lg font-bold text-[#171123]">{feature.title}</h3>
+        <p className="text-sm leading-relaxed text-[#6b6478] sm:text-base">{feature.description}</p>
+      </div>
     </div>
   )
 }
@@ -55,19 +58,17 @@ export default function Features() {
   const headingRef = useReveal<HTMLDivElement>(0.3)
 
   return (
-    <section id="features" className="py-20 sm:py-24 px-4 sm:px-6 lg:px-8 bg-[#faf9fb]">
-      <div className="max-w-7xl mx-auto">
-        <div ref={headingRef} className="feat-heading text-center max-w-2xl mx-auto mb-14">
-          <span className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#f5f0fb] text-[#6b2fa5] text-xs font-bold uppercase tracking-widest rounded-full mb-5">
-            Platform Features
-          </span>
-          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-[#171123] mb-4">Why Choose Spotix?</h2>
-          <p className="text-lg text-[#7c7389]">
+    <section id="features" className={`scroll-mt-20 py-20 sm:py-24 ${UI.bandWhite}`}>
+      <div className={`${UI.container} grid gap-12 lg:grid-cols-[5fr_7fr] lg:gap-20`}>
+        <div ref={headingRef} className="feat-heading lg:sticky lg:top-32 lg:self-start">
+          <p className={`${UI.eyebrow} mb-3`}>Platform features</p>
+          <h2 className={`${UI.h2} mb-5`}>Why choose Spotix?</h2>
+          {/* <p className={UI.lead}>
             Everything you need to discover, book, and manage events across Nigeria — all in one place.
-          </p>
+          </p> */}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 sm:gap-6">
+        <div>
           {features.map((f, i) => (
             <FeatureCard key={f.title} feature={f} index={i} />
           ))}

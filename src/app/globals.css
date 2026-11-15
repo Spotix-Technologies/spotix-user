@@ -60,3 +60,12 @@ body {
 *::-webkit-scrollbar-thumb:hover {
   background-color: #58248a !important;
 }
+
+/* Hide the scrollbar on horizontally-scrolling strips (tabs, collections).
+   !important is needed to beat the global branded scrollbar rules above. */
+.no-scrollbar {
+  scrollbar-width: none !important;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none !important;
+}

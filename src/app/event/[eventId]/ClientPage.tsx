@@ -18,20 +18,29 @@ import {
 } from "@/app/lib/auth-client-user"
 import UserHeader from "@/components/UserHeader"
 import Footer from "@/components/footer"
-import { ArrowLeft, X, Wallet, AlertCircle, Flag, Ticket } from "lucide-react"
-import LoginButton from "@/components/LoginButton"
-import { formatNumber } from "@/utils/formatter"
-import { EventImageSection } from "./components/event-image-section"
-import { TicketSummaryCard } from "./components/ticket-summary-card"
+import { X, AlertCircle } from "lucide-react"
+import Preloader from "@/components/Preloader"
+import { EventHero } from "./components/event-hero"
+import { EventTopBar } from "./components/event-top-bar"
+import { SectionNav, type SectionNavItem } from "./components/section-nav"
+import { TicketPicker } from "./components/ticket-picker"
+import { CrewSection } from "./components/crew-section"
+import { CtaButton } from "./components/cta-button"
+import { MobileCtaBar } from "./components/mobile-cta-bar"
+import { getStartingPrice } from "./lib/pricing"
 import EventDetailsSection from "./event-details-section"
 import LocationSection from "./location-section"
 // import ReviewsSection from "./reviews-section"
 import BookerDetailsSection from "./booker-details-section"
-import BuyTicketDialog from "./buy-ticket-dialog"
+import BuyTicketDrawer from "./buy-ticket-dialog"
 import MerchSection from "./merch-section"
 import { ReportModal } from "./report-modal"
 import VotingSection from "./voting"
-import { CheckTicketPaymentModal } from "./CheckTicketPaymentModal"
+import { CheckTicketPaymentSheet } from "./CheckTicketPaymentModal"
+import { useNumeroxTrack } from "@/app/lib/numerox-track-client"
+import { cleanupExpiredEventCache } from "@/app/lib/eventCacheCleanup"
+import { useEventLocationSignal } from "./hooks/useEventLocationSignal"
+import { LocationPermissionPopup } from "./components/location-permission-popup"
 
 import type { EventType } from "./page"
 
@@ -47,47 +56,13 @@ interface ClientPageProps {
   referralCode?: string
 }
 
-// ── Skeleton / Preloader ──────────────────────────────────────────────────────
+//  Skeleton / Preloader 
+//
+// The event page's loading state is now the same branded "Spotix" preloader
+// (components/Preloader.tsx) used on booker-confirm, iwss, and the landing
+// page, instead of a bespoke gif/skeleton — see the render guards below.
 
-const EventSkeleton = () => (
-  <div className="max-w-7xl mx-auto p-4">
-    <div className="animate-pulse">
-      <div className="flex items-center justify-between mb-6">
-        <div className="h-10 w-10 bg-gray-200 rounded-full" />
-        <div className="h-8 w-32 bg-gray-200 rounded-md" />
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-6">
-          <div className="h-96 w-full bg-gray-200 rounded-lg" />
-          <div className="h-64 w-full bg-gray-200 rounded-lg" />
-        </div>
-        <div className="space-y-6">
-          <div className="h-64 w-full bg-gray-200 rounded-lg" />
-          <div className="h-48 w-full bg-gray-200 rounded-lg" />
-        </div>
-      </div>
-    </div>
-  </div>
-)
-
-const Preloader = () => (
-  <div className="fixed inset-0 bg-white z-50 flex items-center justify-center">
-    <div className="text-center">
-      <img src="/preloader.gif" alt="Loading..." className="w-24 h-24 mx-auto mb-4" />
-      <p className="text-[#6b2fa5] font-medium">Loading event details...</p>
-    </div>
-  </div>
-)
-
-// Thin placeholder so the header auth area doesn't flicker/jump while the
-// JWT check resolves. Matches the approximate width of the wallet badge.
-const AuthSkeleton = () => (
-  <div className="flex items-center gap-3">
-    <div className="h-9 w-28 bg-gray-200 animate-pulse rounded-lg" />
-  </div>
-)
-
-// ── ClientPage ────────────────────────────────────────────────────────────────
+//  ClientPage 
 
 export default function ClientPage({ params, initialEventData, referralCode }: ClientPageProps) {
   const { createdBy, eventId } = params
@@ -97,12 +72,30 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
   const [eventData, setEventData] = useState<EventType | null>(initialEventData || null)
   const [loading, setLoading] = useState(!initialEventData)
 
-  // Page-wide blurred backdrop image. Starts as the event's main image and
-  // updates as the user pages through the image carousel, so the backdrop
-  // always matches whichever flyer is currently on screen.
-  const [backgroundImage, setBackgroundImage] = useState<string>(initialEventData?.eventImage || "")
+  // ── Location + device signal for Numerox ──
+  // See useEventLocationSignal.ts: resolves a best-effort state via the
+  // no-permission edge/IP fallback immediately, and upgrades to a
+  // precise GPS fix if the visitor already granted (or now grants via
+  // the on-page popup) location access. getClientLocationDevice is
+  // awaited by useNumeroxTrack below (bounded — never blocks the ping
+  // indefinitely) so this pageview carries it when available.
+  const { showLocationPopup, onAllowLocation, onDismissLocationPopup, getClientLocationDevice } =
+    useEventLocationSignal()
 
-  // ── Auth state ────────────────────────────────────────────────────────────
+  //  Numerox funnel tracking ─
+  // "Someone opened this event's page." `params.eventId` is whatever the
+  // URL segment was — the real Firestore doc id OR a booker-chosen
+  // shareable slug (see page.tsx's fetchEventData comment) — so we track
+  // against `eventData.id`, the resolved real doc id, instead. Numerox
+  // stores/reads everything keyed by the real eventId (spotix-booker's
+  // Observability tab queries `events/{eventId}` doc ids, never slugs),
+  // so tracking under the slug silently orphaned the event's funnel data.
+  // `initialEventData` is already resolved server-side before this
+  // component mounts, so this fires on first render same as before,
+  // just against the correct id.
+  useNumeroxTrack(eventData?.id, "EVENT_PAGE_VIEW", true, getClientLocationDevice)
+
+  //  Auth state 
   // Two-step resolution mirroring the payment client:
   //   1. getSessionUser() validates the Spotix JWT (fast, cookie-based)
   //   2. onAuthStateChanged confirms Firebase session (needed for Firestore reads)
@@ -139,7 +132,7 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
   // UI
   const [eventUrl, setEventUrl] = useState("")
   const [showPassedDialog, setShowPassedDialog] = useState(false)
-  const [showBuyTicketDialog, setShowBuyTicketDialog] = useState(false)
+  const [showBuyTicketDrawer, setShowBuyTicketDrawer] = useState(false)
   const [isPageLoaded, setIsPageLoaded] = useState(false)
   const [showReportModal, setShowReportModal] = useState(false)
   const [showCheckPaymentModal, setShowCheckPaymentModal] = useState(false)
@@ -150,13 +143,7 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
   const cacheKey = `event_${eventId}_${createdBy}`
   const CACHE_TTL = 5 * 60 * 1000
 
-  // Keep the backdrop in sync with whichever event doc is loaded (e.g. once
-  // the async fetch resolves, if this page didn't get initialEventData).
-  useEffect(() => {
-    if (eventData?.eventImage) setBackgroundImage(eventData.eventImage)
-  }, [eventData?.eventImage])
-
-  // ── Step 1: Spotix JWT check ──────────────────────────────────────────────
+  //  Step 1: Spotix JWT check 
   // Identical to the original — this is the primary auth signal.
 
   useEffect(() => {
@@ -174,7 +161,7 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
     return () => { cancelled = true }
   }, [])
 
-  // ── Step 2: Firebase auth state ──────────────────────────────────────────
+  //  Step 2: Firebase auth state 
   // Mirrors the payment client's onAuthStateChanged pattern.
   // Only used to confirm Firebase session is ready before Firestore reads.
   // Does NOT override the JWT-based isAuthenticated flag.
@@ -187,7 +174,7 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
     return () => unsubscribe()
   }, [])
 
-  // ── Referral link capture ─────────────────────────────────────────────────
+  //  Referral link capture ─
   // A referral link looks like /event/{eventId}?referral={referralName}.
   // Stash it under the same sessionStorage key the payment page's manual
   // referral dropdown uses ("selected_referral_code"), so it's automatically
@@ -204,7 +191,7 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
     }
   }, [referralCode])
 
-  // ── Fetch user display data ───────────────────────────────────────────────
+  //  Fetch user display data ─
   // Wait for both JWT check AND Firebase session before reading Firestore,
   // matching how the payment client waits for onAuthStateChanged before
   // calling fetchUserData / fetchWalletData.
@@ -228,7 +215,7 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
     fetchUserDisplay()
   }, [authChecked, firebaseReady, sessionUser?.uid])
 
-  // ── Fetch like status ────────────────────────────────────────────────────
+  //  Fetch like status 
 
   useEffect(() => {
     if (!authChecked || !sessionUser?.uid || !eventId) return
@@ -250,7 +237,7 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
     checkLikeStatus()
   }, [authChecked, sessionUser?.uid, eventId])
 
-  // ── Fetch event data ──────────────────────────────────────────────────────
+  //  Fetch event data 
 
   useEffect(() => {
     if (initialEventData) {
@@ -292,14 +279,21 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
     fetchEventData()
   }, [eventId, router, cacheKey, CACHE_TTL, initialEventData])
 
-  // ── Fetch booker details ──────────────────────────────────────────────────
+  //  Fetch booker details 
 
   useEffect(() => {
     if (!eventData?.createdBy) return
 
     const fetchBookerDetails = async () => {
       try {
-        const response = await fetch(`/api/v1/event/creator?eventId=${eventId}`)
+        // eventId here is whatever the URL segment was — could be the real
+        // Firestore doc id OR a booker-chosen shareable slug (see page.tsx's
+        // fetchEventData comment). /api/v1/event/creator doesn't do slug
+        // resolution the way /api/v1/event does, so this has to use
+        // eventData.id — the already-resolved real doc id — not the raw
+        // eventId param, or a slugged event 404s here even though the page
+        // itself loaded fine.
+        const response = await fetch(`/api/v1/event/creator?eventId=${eventData.id}`)
         if (!response.ok) return
         const result = await response.json()
         if (result.success) {
@@ -322,22 +316,60 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
     }
 
     fetchBookerDetails()
-  }, [eventData?.createdBy, eventId])
+  }, [eventData?.createdBy, eventData?.id])
 
-  // ── Body scroll lock ──────────────────────────────────────────────────────
+  //  Body scroll lock 
+
+  // Hiding the body's overflow also removes a classic (non-overlay) scrollbar, which widens
+  // the page by the scrollbar's width and makes everything — sticky header included — jump
+  // sideways as the drawer opens. `scrollbar-gutter: stable` keeps that space reserved so
+  // nothing shifts; browsers without it get the same effect via body padding. Overlay
+  // scrollbars (most phones) have no width, so neither is applied there.
+
+  const sheetOpen = showBuyTicketDrawer || showCheckPaymentModal
 
   useEffect(() => {
-    document.body.style.overflow = showBuyTicketDialog ? "hidden" : "unset"
-    return () => { document.body.style.overflow = "unset" }
-  }, [showBuyTicketDialog])
+    if (!sheetOpen) return
 
-  // ── Event URL ─────────────────────────────────────────────────────────────
+    const body = document.body
+    const root = document.documentElement
+    const prevOverflow = body.style.overflow
+    const prevPaddingRight = body.style.paddingRight
+    const prevGutter = root.style.scrollbarGutter
+
+    const scrollbarWidth = window.innerWidth - root.clientWidth
+    if (scrollbarWidth > 0) {
+      if (typeof CSS !== "undefined" && CSS.supports("scrollbar-gutter", "stable")) {
+        root.style.scrollbarGutter = "stable"
+      } else {
+        body.style.paddingRight = `${scrollbarWidth}px`
+      }
+    }
+    body.style.overflow = "hidden"
+
+    return () => {
+      body.style.overflow = prevOverflow
+      body.style.paddingRight = prevPaddingRight
+      root.style.scrollbarGutter = prevGutter
+    }
+  }, [sheetOpen])
+
+  //  Event URL ─
 
   useEffect(() => {
     if (typeof window !== "undefined") setEventUrl(window.location.href)
   }, [])
 
-  // ── Event status flags ────────────────────────────────────────────────────
+  //  Background cleanup of expired event caches ─
+  // Runs once per page load, off the critical rendering path — sweeps
+  // sessionStorage for any stored event (this one or any other previously
+  // viewed in this tab) whose eventEndDate has already passed.
+
+  useEffect(() => {
+    cleanupExpiredEventCache()
+  }, [])
+
+  //  Event status flags 
 
   useEffect(() => {
     if (!eventData) return
@@ -359,14 +391,75 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
       setIsSaleEnded(now > new Date(eventData.stopDate))
   }, [eventData])
 
-  // ── Page loaded ───────────────────────────────────────────────────────────
+  //  Live ticket availability (never cached) ─
+  // The rest of eventData can be serving a cached snapshot up to 30s old
+  // (see lib/eventCache.ts — a purchase no longer busts that cache). This
+  // fills in real-time stock/sale-window numbers from the one endpoint
+  // that's always live, so the buy dialog and CTA never show stale
+  // "tickets left" counts even while the general event data does lag.
+
+  useEffect(() => {
+    if (!eventData?.id) return
+    let cancelled = false
+
+    const fetchAvailability = async () => {
+      try {
+        const response = await fetch(`/api/v1/event/availability?eventId=${eventData.id}`, {
+          cache: "no-store",
+        })
+        if (!response.ok) return
+        const result = await response.json()
+        if (cancelled || !result.success) return
+
+        const live = result.data as {
+          ticketsSold: number
+          isEventPassed: boolean
+          isSoldOut: boolean
+          isSaleEnded: boolean
+          tickets: { policy: string; ticketsSold: number; availableTickets: number | null }[]
+        }
+
+        const byPolicy = new Map(live.tickets.map((t) => [t.policy, t]))
+        setEventData((prev) =>
+          prev
+            ? {
+                ...prev,
+                ticketsSold: live.ticketsSold,
+                ticketPrices: prev.ticketPrices.map((t) => {
+                  const liveTicket = byPolicy.get(t.policy)
+                  if (!liveTicket) return t
+                  return {
+                    ...t,
+                    ticketsSold: liveTicket.ticketsSold,
+                    availableTickets: liveTicket.availableTickets ?? undefined,
+                  }
+                }),
+              }
+            : prev
+        )
+        setIsEventPassed(live.isEventPassed)
+        setIsSoldOut(live.isSoldOut)
+        setIsSaleEnded(live.isSaleEnded)
+      } catch (error) {
+        console.error("Error fetching live ticket availability:", error)
+      }
+    }
+
+    fetchAvailability()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventData?.id])
+
+  //  Page loaded ─
 
   useEffect(() => {
     const t = setTimeout(() => setIsPageLoaded(true), 100)
     return () => clearTimeout(t)
   }, [])
 
-  // ── hasEventEnded ─────────────────────────────────────────────────────────
+  //  hasEventEnded ─
 
   const hasEventEnded = useCallback(() => {
     if (!eventData?.eventEndDate) return false
@@ -379,7 +472,7 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
     return now > endDate
   }, [eventData])
 
-  // ── Toggle like ───────────────────────────────────────────────────────────
+  //  Toggle like ─
 
   const handleToggleLike = async () => {
     if (!isAuthenticated) {
@@ -417,7 +510,7 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
     }
   }
 
-  // ── Buy ticket ────────────────────────────────────────────────────────────
+  //  Buy ticket 
 
   const handleBuyTicket = (cart: any[]) => {
     if (!eventData || cart.length === 0) return
@@ -451,7 +544,7 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
       }
       sessionStorage.setItem("spotix_payment_data", JSON.stringify(paymentData))
     }
-    // Keep the dialog mounted so its "One moment.." loading state stays visible
+    // Keep the drawer mounted so its "One moment.." loading state stays visible
     // while the payment/queue page loads; it unmounts naturally once we navigate away.
     const guestSuffix = !isAuthenticated ? "?mode=guest" : ""
     const destination = eventData.virtualQueueEnabled
@@ -460,10 +553,10 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
     router.push(destination)
   }
 
-  // ── Render guards ───────────────────────────────────────���─────────────────
+  //  Render guards ─���─
 
   if (!isPageLoaded) return <Preloader />
-  if (loading) return <EventSkeleton />
+  if (loading) return <Preloader />
   if (!eventData) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -484,7 +577,7 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
     )
   }
 
-  // ── CTA state ─────────────────────────────────────────────────────────────
+  //  CTA state ─
 
   const ctaDisabled = isEventPassed || isSoldOut || isSaleEnded
   const ctaLabel = isEventPassed
@@ -493,201 +586,144 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
       ? "Sold Out"
       : isSaleEnded
         ? "Sales Ended"
-        : eventData.isFree
-          ? "Register Now"
-          : "Buy Tickets"
+        : ""
+  const ticketsUnavailableLabel = isEventPassed
+    ? "Event has passed"
+    : isSoldOut
+      ? "Sold out"
+      : isSaleEnded
+        ? "Sales ended"
+        : null
 
-  const CtaButton = ({ mobile = false }: { mobile?: boolean }) =>
-    ctaDisabled ? (
-      <button
-        disabled
-        onClick={isEventPassed ? () => setShowPassedDialog(true) : undefined}
-        className={`w-full bg-gray-400 text-white rounded-lg font-semibold text-lg cursor-not-allowed shadow-md ${mobile ? "py-3" : "py-3.5 px-6"}`}
-      >
-        {ctaLabel}
-      </button>
-    ) : (
-      <button
-        onClick={() => setShowBuyTicketDialog(true)}
-        className={`w-full bg-gradient-to-r from-[#6b2fa5] to-purple-700 text-white rounded-lg font-semibold text-lg hover:from-purple-700 hover:to-purple-800 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 ${mobile ? "py-3" : "py-3.5 px-6"}`}
-      >
-        <div className="flex items-center justify-center gap-2">
-          <Ticket size={mobile ? 20 : 22} />
-          {eventData.isFree ? (mobile ? "Register" : "Register Now") : "Buy Tickets"}
-          {isEventToday && <span className="animate-pulse">🔥</span>}
-        </div>
-      </button>
-    )
+  const openBuyDrawer = () => setShowBuyTicketDrawer(true)
+  const startingPrice = getStartingPrice(eventData)
 
-  // ── Main render ───────────────────────────────────────────────────────────
+  const navItems: SectionNavItem[] = [
+    { id: "about", label: "About" },
+    ...(eventData.isFree || eventData.ticketPrices?.length ? [{ id: "tickets", label: "Tickets" }] : []),
+    ...(eventData.eventVenue ? [{ id: "location", label: "Location" }] : []),
+    { id: "crew", label: "Invite" },
+  ]
+
+  const renderCta = (variant: "light" | "brand", size: "md" | "lg", fullWidth = false) => (
+    <CtaButton
+      disabled={ctaDisabled}
+      disabledLabel={ctaLabel}
+      isFree={eventData.isFree}
+      isToday={isEventToday}
+      onClick={openBuyDrawer}
+      onDisabledClick={isEventPassed ? () => setShowPassedDialog(true) : undefined}
+      variant={variant}
+      size={size}
+      fullWidth={fullWidth}
+    />
+  )
+
+  //  Main render ─
 
   return (
     <>
       <UserHeader />
 
-      <div className="relative min-h-screen pb-24 lg:pb-0">
-        {/* Page-wide blurred backdrop — the event's own main image, blurred
-            and scaled up, IS the background for the whole page (not a
-            gradient with the image faintly tinted in). Fixed so it stays
-            put while the page content scrolls over it. */}
-        <div className="fixed inset-0 -z-10 overflow-hidden bg-gray-900">
-          <img
-            src={backgroundImage || eventData.eventImage || "/placeholder.svg"}
-            alt=""
-            aria-hidden="true"
-            className="w-full h-full object-cover scale-110 blur-3xl"
+      <div className="relative min-h-screen bg-white pb-24 lg:pb-0">
+        <EventHero
+          eventData={eventData}
+          isEventToday={isEventToday}
+          isSoldOut={isSoldOut}
+          isSaleEnded={isSaleEnded}
+          topBar={
+            <EventTopBar
+              eventName={eventData.eventName}
+              authChecked={authChecked}
+              isAuthenticated={isAuthenticated}
+              walletBalance={walletBalance}
+              onReport={() => setShowReportModal(true)}
+            />
+          }
+          cta={renderCta("light", "lg")}
+        />
+
+        <SectionNav items={navItems} />
+
+        <main className="mx-auto max-w-7xl space-y-20 px-4 pb-16 pt-6 lg:space-y-28 lg:pb-28 lg:pt-10">
+          {/* Voting banner sits right under the hero — it's easy to miss once it's buried further down. */}
+          {eventData.votingId && (
+            <div className="mx-auto max-w-3xl">
+              <VotingSection votingId={eventData.votingId} votingPollName={eventData.votingPollName ?? null} />
+            </div>
+          )}
+
+          <EventDetailsSection
+            eventData={eventData}
+            eventUrl={eventUrl}
+            isLiked={isLiked}
+            likeCount={likeCount}
+            isLiking={isLiking}
+            isSoldOut={isSoldOut}
+            onToggleLike={handleToggleLike}
           />
-          {/* Light wash — just enough for text/card contrast, doesn't hide the image */}
-          <div className="absolute inset-0 bg-white/20" />
-        </div>
 
-        <div className="max-w-7xl mx-auto px-4 pt-3 pb-6 lg:pb-8">
+          <TicketPicker
+            eventData={eventData}
+            eventUnavailableLabel={ticketsUnavailableLabel}
+            onSelect={openBuyDrawer}
+            onCheckPayment={() => setShowCheckPaymentModal(true)}
+          />
 
-          {/* Header row */}
-          <div className="flex items-center justify-between mb-6">
-            <button
-              onClick={() => router.back()}
-              className="flex items-center gap-2 text-gray-600 hover:text-[#6b2fa5] transition-colors group"
-            >
-              <div className="p-2 rounded-full group-hover:bg-purple-100 transition-colors">
-                <ArrowLeft size={20} />
-              </div>
-              <span className="font-medium hidden sm:inline">Back</span>
-            </button>
+          <LocationSection eventVenue={eventData.eventVenue} eventName={eventData.eventName} />
 
-            {/* Auth-aware right section.
-                While authChecked is false we show a skeleton so there is no
-                flash of "not logged in" state — same principle as the payment
-                client holding the loading spinner until onAuthStateChanged
-                resolves. */}
-            <div className="flex items-center gap-3">
-              {!authChecked ? (
-                <AuthSkeleton />
-              ) : isAuthenticated ? (
-                <>
-                  <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-sm border border-gray-200">
-                    <Wallet size={18} className="text-[#6b2fa5]" />
-                    <span className="font-semibold text-gray-900">
-                      ₦{formatNumber(walletBalance)}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => setShowReportModal(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-sm border border-gray-200 hover:bg-red-50 hover:border-red-200 transition-colors group"
-                  >
-                    <Flag size={18} className="text-gray-600 group-hover:text-red-600" />
-                    <span className="font-medium text-gray-700 group-hover:text-red-600 hidden sm:inline">
-                      Report
-                    </span>
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    onClick={() => setShowReportModal(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-sm border border-gray-200 hover:bg-red-50 hover:border-red-200 transition-colors group"
-                  >
-                    <Flag size={18} className="text-gray-600 group-hover:text-red-600" />
-                    <span className="font-medium text-gray-700 group-hover:text-red-600 hidden sm:inline">
-                      Report
-                    </span>
-                  </button>
-                  <LoginButton />
-                </>
-              )}
-            </div>
+          <MerchSection
+            eventId={eventId}
+            apiEventId={eventData.id}
+            createdBy={createdBy}
+            eventName={eventData.eventName}
+          />
+
+          {/* <ReviewsSection
+            eventId={eventId}
+            eventName={eventData.eventName}
+            eventEndDate={eventData.eventEndDate}
+            eventEnd={eventData.eventEnd}
+            hasEventEnded={hasEventEnded()}
+            isAuthenticated={isAuthenticated}
+          /> */}
+
+          <CrewSection
+            eventData={eventData}
+            eventUrl={eventUrl}
+            likeCount={likeCount}
+            onGetTickets={ctaDisabled ? null : openBuyDrawer}
+          />
+
+          <div ref={bookerDetailsRef} className="mx-auto max-w-3xl">
+            <BookerDetailsSection
+              bookerDetails={bookerDetails}
+              bookerName={eventData.bookerName}
+              createdBy={eventData.createdBy}
+            />
           </div>
-
-          {/* Main Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
-            {/* Left column */}
-            <div className="lg:col-span-2 space-y-6">
-              <EventImageSection
-                eventImages={eventData.eventImages}
-                eventName={eventData.eventName}
-                eventImage={eventData.eventImage}
-                showFullscreenIcon
-                onActiveImageChange={setBackgroundImage}
-              />
-              <EventDetailsSection
-                eventData={eventData}
-                eventUrl={eventUrl}
-                isLiked={isLiked}
-                likeCount={likeCount}
-                isLiking={isLiking}
-                isSoldOut={isSoldOut}
-                onToggleLike={handleToggleLike}
-              />
-              <LocationSection eventVenue={eventData.eventVenue} eventName={""} />
-              <MerchSection eventId={eventId} createdBy={createdBy} eventName={eventData.eventName} />
-              {/* <ReviewsSection
-                eventId={eventId}
-                eventName={eventData.eventName}
-                eventEndDate={eventData.eventEndDate}
-                eventEnd={eventData.eventEnd}
-                hasEventEnded={hasEventEnded()}
-                isAuthenticated={isAuthenticated}
-              /> */}
-            </div>
-
-            {/* Right column */}
-            <div className="space-y-6 lg:relative lg:z-0">
-              {/* Voting banner sits at the very top of this column — right
-                  where buyers land — since it's easy to miss once it's
-                  buried below the ticket/booker info. */}
-              {eventData.votingId && (
-                <VotingSection
-                  votingId={eventData.votingId}
-                  votingPollName={eventData.votingPollName ?? null}
-                />
-              )}
-              <div>
-                <TicketSummaryCard eventData={eventData} />
-                <div className="mt-6">
-                  <CtaButton />
-                </div>
-                <button
-                  onClick={() => setShowCheckPaymentModal(true)}
-                  className="w-full mt-3 text-center text-xs text-gray-500 hover:text-[#6b2fa5] font-medium underline underline-offset-2 transition-colors"
-                >
-                  Already paid? Check your payment status
-                </button>
-              </div>
-              <div ref={bookerDetailsRef}>
-                <BookerDetailsSection
-                  bookerDetails={bookerDetails}
-                  bookerName={eventData.bookerName}
-                  createdBy={eventData.createdBy}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
+        </main>
 
         {/* Mobile fixed CTA bar */}
-        <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-lg z-50">
-          <div className="max-w-4xl mx-auto">
-            <CtaButton mobile />
-          </div>
-        </div>
+        <MobileCtaBar startingPrice={startingPrice} cta={renderCta("brand", "md", true)} />
 
-        {/* Buy Ticket Dialog */}
-        {showBuyTicketDialog && (
-          <BuyTicketDialog
+        {/* Buy Ticket Drawer */}
+        {showBuyTicketDrawer && (
+          <BuyTicketDrawer
             eventData={eventData}
             isEventToday={isEventToday}
             isEventPassed={isEventPassed}
             isSoldOut={isSoldOut}
             isSaleEnded={isSaleEnded}
             onBuyTicket={handleBuyTicket}
-            onClose={() => setShowBuyTicketDialog(false)}
+            onClose={() => setShowBuyTicketDrawer(false)}
             onShowPassedDialog={() => setShowPassedDialog(true)}
           />
         )}
 
         {/* Passed Dialog */}
         {showPassedDialog && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[1200] p-4">
             <div className="bg-white rounded-lg p-6 max-w-md w-full">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-lg font-semibold text-gray-800">Event Has Passed</h3>
@@ -722,9 +758,10 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
           />
         )}
 
-        {/* Check Payment Status Modal */}
+        {/* Check Payment Status Sheet */}
         {showCheckPaymentModal && (
-          <CheckTicketPaymentModal
+          <CheckTicketPaymentSheet
+            eventId={eventData.id}
             eventName={eventData.eventName}
             onClose={() => setShowCheckPaymentModal(false)}
           />
@@ -734,6 +771,11 @@ export default function ClientPage({ params, initialEventData, referralCode }: C
       <div ref={footerRef}>
         <Footer />
       </div>
+
+      {/* Location permission popup — see useEventLocationSignal.ts */}
+      {showLocationPopup && (
+        <LocationPermissionPopup onAllow={onAllowLocation} onDismiss={onDismissLocationPopup} />
+      )}
 
       <style jsx>{`
         @keyframes marquee-smooth {

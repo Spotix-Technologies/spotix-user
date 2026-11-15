@@ -7,6 +7,7 @@ import { Calendar, MapPin, Tag, ChevronLeft, ChevronRight, ArrowRight } from "lu
 import { collection, getDocs, query, orderBy, limit } from "firebase/firestore"
 import { db } from "@/app/lib/firebase"
 import useSWR from "swr"
+import { UI } from "./theme"
 
 interface FeaturedEvent {
   id: string
@@ -179,18 +180,14 @@ const Events = () => {
     }
   }
 
-  const currentEvent = featuredEvents[activeIndex]
-
   return (
-    <section id="events" className="py-16 sm:py-20 lg:py-24 px-4 sm:px-6 lg:px-8 bg-white relative">
-      <div className="max-w-6xl mx-auto relative z-10">
+    <section id="events" className={`relative scroll-mt-20 py-20 sm:py-24 ${UI.bandWhite}`}>
+      <div className={`${UI.container} relative z-10`}>
         {/* ── Featured Events ── */}
         <div className="mb-16 sm:mb-20">
-          <div ref={headingRef} className="text-center mb-10 sm:mb-12">
-            <span className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#f5f0fb] text-[#6b2fa5] text-xs font-semibold uppercase tracking-widest rounded-full mb-4">
-              Happening now
-            </span>
-            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-[#171123]">Featured Events</h2>
+          <div ref={headingRef} className="mb-10 sm:mb-12">
+            <p className={`${UI.eyebrow} mb-3`}>Happening now</p>
+            <h2 className={UI.h2}>Featured events</h2>
           </div>
 
           <div
@@ -203,7 +200,7 @@ const Events = () => {
               <FeaturedEventSkeleton />
             ) : featuredEvents.length > 0 ? (
               <>
-                <div className="relative h-64 sm:h-80 lg:h-96 rounded-2xl overflow-hidden shadow-lg">
+                <div className="relative h-72 sm:h-80 lg:h-[26rem] rounded-3xl overflow-hidden">
                   {featuredEvents.map((event, index) => (
                     <div
                       key={event.id}
@@ -251,15 +248,13 @@ const Events = () => {
                               {!event.freeOrPaid ? "Free Entry" : "Paid Event"}
                             </span>
                           </div>
-                          {currentEvent && (
-                            <Link
-                              href={`/event/${currentEvent.creatorID}/${currentEvent.eventId}`}
-                              className="inline-flex items-center gap-2 px-6 py-2.5 sm:px-8 sm:py-3 bg-white text-[#6b2fa5] rounded-full font-semibold text-sm sm:text-base transition-all duration-300 hover:bg-[#f5f0fb]"
-                            >
-                              View Details
-                              <ArrowRight className="w-4 h-4" />
-                            </Link>
-                          )}
+                          <Link
+                            href={`/event/${event.eventId}`}
+                            className="inline-flex items-center gap-2 px-6 py-2.5 sm:px-8 sm:py-3 bg-white text-[#171123] rounded-full font-semibold text-sm sm:text-base transition-colors duration-200 hover:bg-[#f7f6f9]"
+                          >
+                            View Details
+                            <ArrowRight className="w-4 h-4" />
+                          </Link>
                         </div>
                       </div>
                     </div>
@@ -310,8 +305,8 @@ const Events = () => {
 
         {/* ── Themed Events ── */}
         <div>
-          <h3 ref={themedHeadingRef} className="text-2xl sm:text-3xl font-bold text-center mb-10 text-[#171123]">
-            Themed Events
+          <h3 ref={themedHeadingRef} className="mb-8 text-2xl sm:text-3xl font-bold tracking-tight text-[#171123]">
+            Themed events
           </h3>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 sm:gap-6 mb-10">
@@ -322,9 +317,9 @@ const Events = () => {
               : themedEvents.length > 0
               ? themedEvents.map((event) => (
                   <Link
-                    href={`/event/${event.creatorID}/${event.eventId}`}
+                    href={`/event/${event.eventId}`}
                     key={event.id}
-                    className="group rounded-2xl overflow-hidden bg-white border border-[#ece7f1] hover:border-[#6b2fa5]/40 hover:shadow-lg transition-all duration-300"
+                    className="group rounded-2xl overflow-hidden bg-white border border-[#ece7f1] hover:border-[#171123]/25 hover:shadow-[0_12px_32px_-16px_rgba(23,17,35,0.25)] transition-all duration-300"
                   >
                     <div className="relative h-36 sm:h-40 overflow-hidden">
                       <Image
@@ -375,7 +370,7 @@ const Events = () => {
           <div className="text-center">
             <Link
               href="/home"
-              className="inline-flex items-center gap-2 px-8 py-3.5 sm:py-4 bg-[#6b2fa5] text-white rounded-full font-semibold text-sm sm:text-base transition-all duration-300 hover:bg-[#4c2178]"
+              className={UI.btnPrimary}
             >
               View All Events
               <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5" />

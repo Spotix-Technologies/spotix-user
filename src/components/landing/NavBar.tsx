@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation"
 import { Menu, X, Search, Loader2 } from "lucide-react"
 import { collection, getDocs, query, orderBy, limit } from "firebase/firestore"
 import { db } from "@/app/lib/firebase"
+import { useHeroStarted } from "./hero-scroll/hero-progress"
 
 interface SearchResult {
   eventId: string
@@ -18,7 +19,16 @@ interface SearchResult {
   eventGroup: boolean
 }
 
-const Navbar = () => {
+interface NavbarProps {
+  /**
+   * Landing page only: keep the bar see-through (white text, image visible behind it)
+   * until the user's first scroll, then turn it white. Other pages leave this off and
+   * get the normal white bar.
+   */
+  transparentAtTop?: boolean
+}
+
+const Navbar = ({ transparentAtTop = false }: NavbarProps) => {
   const router = useRouter()
   const [menuOpen, setMenuOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
@@ -32,11 +42,19 @@ const Navbar = () => {
   const searchRef = useRef<HTMLDivElement>(null)
   const desktopSearchRef = useRef<HTMLDivElement>(null)
 
+  // The hero locks page scroll while it expands, so scrollY stays 0 for the user's first scroll.
+  // heroStarted flips on that first input; scrolled covers everything after (and non-hero pages).
+  const heroStarted = useHeroStarted()
+
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20)
-    window.addEventListener("scroll", handleScroll)
+    handleScroll() // correct state if the page loads already scrolled (refresh, #hash)
+    window.addEventListener("scroll", handleScroll, { passive: true })
     return () => window.removeEventListener("scroll", handleScroll)
   }, [])
+
+  const transparent = transparentAtTop && !scrolled && !heroStarted
+  const showShadow = scrolled || (transparentAtTop && heroStarted)
 
   useEffect(() => {
     document.body.style.overflow = menuOpen ? "hidden" : "unset"
@@ -128,10 +146,10 @@ const Navbar = () => {
     setDesktopSearchExpanded(false)
     setMenuOpen(false)
 
-    if (result.creatorID && result.eventId) {
-      router.push(`/event/${result.creatorID}/${result.eventId}`)
+    if (result.eventId) {
+      router.push(`/event/${result.eventId}`)
     } else {
-      console.error("Missing creatorID or eventId:", result)
+      console.error("Missing eventId:", result)
     }
   }
 
@@ -149,7 +167,9 @@ const Navbar = () => {
   }
 
   const navLinks = [
-    { href: "/", label: "Home" },
+    { href: "/home", label: "Discover Events" },
+    { href: "#features", label: "Features" },
+    { href: "#how-it-works", label: "How it Works" },
     { href: "/pricing", label: "Pricing" },
   ]
 
@@ -191,9 +211,11 @@ const Navbar = () => {
   return (
     <>
       <nav
-        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-          scrolled ? "bg-white/90 backdrop-blur-lg shadow-sm border-b border-[#ece7f1]" : "bg-transparent"
-        }`}
+        className={`fixed top-0 left-0 right-0 z-50 border-b transition-[background-color,border-color,box-shadow,backdrop-filter] duration-300 ${
+          transparent
+            ? "border-transparent bg-transparent backdrop-blur-none"
+            : "border-[#efedf3] bg-white/95 backdrop-blur-md"
+        } ${showShadow ? "shadow-[0_4px_24px_-12px_rgba(23,17,35,0.18)]" : "shadow-none"}`}
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-20">
@@ -204,9 +226,8 @@ const Navbar = () => {
               </div>
               <span
                 className={`text-xl font-bold tracking-tight transition-colors duration-300 ${
-                  scrolled ? "text-[#6b2fa5]" : "text-white"
+                  transparent ? "text-white" : "text-[#171123]"
                 }`}
-                style={{ textShadow: scrolled ? "none" : "0 1px 6px rgba(0,0,0,0.35)" }}
               >
                 Spotix
               </span>
@@ -218,8 +239,10 @@ const Navbar = () => {
                 <a
                   key={link.href}
                   href={link.href}
-                  className={`relative px-4 py-2 transition-colors duration-300 font-medium ${
-                    scrolled ? "text-[#4b4257] hover:text-[#6b2fa5]" : "text-white/90 hover:text-white"
+                  className={`relative px-4 py-2 font-medium transition-colors duration-300 ${
+                    transparent
+                      ? "text-white/90 hover:text-white"
+                      : "text-[#4b4257] hover:text-[#171123]"
                   }`}
                 >
                   {link.label}
@@ -241,7 +264,7 @@ const Navbar = () => {
                     <Search
                       size={18}
                       className={`absolute left-3 top-1/2 -translate-y-1/2 transition-colors duration-300 ${
-                        scrolled ? "text-[#6b2fa5]" : "text-white"
+                        transparent && !desktopSearchExpanded ? "text-white" : "text-[#4b4257]"
                       }`}
                     />
                     {desktopSearchExpanded && (
@@ -269,17 +292,21 @@ const Navbar = () => {
               <div className="flex items-center space-x-3 ml-3">
                 <Link
                   href="/auth/login"
-                  className={`px-5 py-2.5 font-semibold rounded-full transition-all duration-300 border ${
-                    scrolled
-                      ? "text-[#6b2fa5] border-[#6b2fa5] hover:bg-[#f5f0fb]"
-                      : "text-white border-white/60 hover:bg-white/10"
+                  className={`rounded-full px-5 py-2.5 font-semibold transition-colors duration-300 ${
+                    transparent
+                      ? "text-white hover:bg-white/15"
+                      : "text-[#171123] hover:bg-[#f7f6f9]"
                   }`}
                 >
                   Login
                 </Link>
                 <Link
                   href="/auth/signup"
-                  className="px-5 py-2.5 bg-[#6b2fa5] text-white font-semibold rounded-full hover:bg-[#4c2178] transition-all duration-300"
+                  className={`rounded-full px-5 py-2.5 font-semibold transition-colors duration-300 ${
+                    transparent
+                      ? "bg-white text-[#171123] hover:bg-[#f5f0fb]"
+                      : "bg-[#171123] text-white hover:bg-[#6b2fa5]"
+                  }`}
                 >
                   Sign Up
                 </Link>
@@ -289,12 +316,15 @@ const Navbar = () => {
             {/* Mobile Menu Button */}
             <button
               onClick={() => setMenuOpen(true)}
-              className={`lg:hidden p-2 rounded-lg transition-all duration-300 ${
-                scrolled ? "hover:bg-[#f5f0fb]" : "hover:bg-white/10"
+              className={`lg:hidden rounded-lg p-2 transition-colors duration-300 ${
+                transparent ? "hover:bg-white/15" : "hover:bg-[#f7f6f9]"
               }`}
               aria-label="Open menu"
             >
-              <Menu size={24} className={scrolled ? "text-[#171123]" : "text-white"} />
+              <Menu
+                size={24}
+                className={`transition-colors duration-300 ${transparent ? "text-white" : "text-[#171123]"}`}
+              />
             </button>
           </div>
         </div>
@@ -319,7 +349,7 @@ const Navbar = () => {
             <div className="relative w-10 h-10">
               <Image src="/logo.png" alt="Spotix Logo" fill className="object-contain" />
             </div>
-            <span className="text-lg font-bold text-[#6b2fa5]">Spotix</span>
+            <span className="text-lg font-bold text-[#171123]">Spotix</span>
           </div>
           <button
             onClick={() => setMenuOpen(false)}
@@ -367,14 +397,14 @@ const Navbar = () => {
             <Link
               href="/auth/login"
               onClick={() => setMenuOpen(false)}
-              className="block w-full px-4 py-3 text-center text-[#6b2fa5] font-semibold border border-[#6b2fa5] rounded-full hover:bg-[#f5f0fb] transition-all duration-300"
+              className="block w-full rounded-full border border-[#d9d4e0] px-4 py-3 text-center font-semibold text-[#171123] transition-colors duration-200 hover:border-[#171123]"
             >
               Login
             </Link>
             <Link
               href="/auth/signup"
               onClick={() => setMenuOpen(false)}
-              className="block w-full px-4 py-3 text-center bg-[#6b2fa5] text-white font-semibold rounded-full hover:bg-[#4c2178] transition-all duration-300"
+              className="block w-full rounded-full bg-[#171123] px-4 py-3 text-center font-semibold text-white transition-colors duration-200 hover:bg-[#6b2fa5]"
             >
               Sign Up
             </Link>

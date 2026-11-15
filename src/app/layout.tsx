@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/app/hooks/useAuth";
 import TawkToChat from "./Tawktochat";
+import { AppStatusShell } from "@/components/status/AppStatusShell";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -274,10 +275,12 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <AuthProvider>
-          {children}
-        <TawkToChat />
-        </AuthProvider>
+        <AppStatusShell variant="user">
+          <AuthProvider>
+            {children}
+          <TawkToChat />
+          </AuthProvider>
+        </AppStatusShell>
       </body>
     </html>
   );

@@ -25,7 +25,10 @@ export default function Preloader({ onLoadingComplete, minDisplayTime = 5000 }: 
   if (!isVisible) return null
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-gradient-to-br from-[#6b2fa5] via-purple-600 to-[#5a2589] animate-in fade-in duration-300">
+    <div
+      data-hero-hold
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-gradient-to-br from-[#6b2fa5] via-purple-600 to-[#5a2589] animate-in fade-in duration-300"
+    >
       <div className="relative">
         {/* Main SPOTIX Logo using PATH instead of TEXT */}
         <svg

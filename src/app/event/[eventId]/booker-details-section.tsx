@@ -1,5 +1,8 @@
-import React from "react"
+"use client"
+
+import React, { useState } from "react"
 import { Mail, Phone, CheckCircle2, User } from "lucide-react"
+import { dicebearAvatarUrl } from "@/app/lib/dicebear"
 
 interface BookerDetailsSectionProps {
   bookerDetails?: {
@@ -23,8 +26,13 @@ const BookerDetailsSection: React.FC<BookerDetailsSectionProps> = ({
   const displayPhone = bookerDetails?.phone || ""
   const isVerified = bookerDetails?.isVerified || false
 
+  // Avatar is seeded by email so it stays stable per organizer; falls back
+  // to the account id / name when no email is available.
+  const avatarSeed = displayEmail || createdBy || displayName
+  const [avatarFailed, setAvatarFailed] = useState(false)
+
   return (
-    <div className="bg-white rounded-2xl shadow-lg p-6 lg:p-8 border-2 border-purple-100">
+    <div className="bg-white rounded-3xl shadow-sm p-6 lg:p-8 border border-gray-200">
       {/* Header */}
       <div className="flex items-start justify-between mb-6">
         <h3 className="text-xl font-bold text-gray-900">Event Organizer</h3>
@@ -40,9 +48,22 @@ const BookerDetailsSection: React.FC<BookerDetailsSectionProps> = ({
       <div className="space-y-4">
         {/* Name */}
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-gradient-to-br from-[#6b2fa5] to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
-            <User size={24} className="text-white" />
-          </div>
+          {avatarFailed ? (
+            <div className="w-12 h-12 bg-[#6b2fa5] rounded-full flex items-center justify-center flex-shrink-0">
+              <User size={24} className="text-white" />
+            </div>
+          ) : (
+            <img
+              src={dicebearAvatarUrl(avatarSeed, { size: 96 })}
+              alt={`${displayName} avatar`}
+              width={48}
+              height={48}
+              loading="lazy"
+              decoding="async"
+              onError={() => setAvatarFailed(true)}
+              className="w-12 h-12 rounded-full bg-gray-100 object-cover flex-shrink-0"
+            />
+          )}
           <div>
             <p className="text-sm text-gray-600">Organizer</p>
             <p className="font-semibold text-gray-900">{displayName}</p>

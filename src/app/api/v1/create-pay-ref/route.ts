@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { adminDb } from "@/app/lib/firebase-admin"
 import { auth } from "firebase-admin"
 import { buildTicketReference } from "@/app/lib/reference-id"
+import { numerox } from "@/app/lib/numerox"
 import { calculateVATFee, resolvePlatformFeeRates, resolveFeeBurden, computeOrderPricing, type AddonInput } from "@/utils/priceUtility"
 import { getTicketSaleStatus, describeSaleStatus } from "@/utils/ticketSaleWindow"
 
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest) {
       // forge a discounted/zeroed platform fee.
     } = body
 
-    // ── Auth — optional for guests ─────────────────────────────────────────────
+    //  Auth — optional for guests 
     const authHeader = request.headers.get("Authorization")
     let userId: string | null = null
     let userEmail: string | null = null
@@ -76,7 +77,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // ── Validate presence of core fields ────────────────────────────────────
+    //  Validate presence of core fields 
     if (!eventId || !eventCreatorId) {
       console.error("[create-pay-ref] Missing required fields", { eventId, eventCreatorId })
       return NextResponse.json(
@@ -85,7 +86,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // ── Normalise the ticket types the client asked to buy ─────────────────────
+    //  Normalise the ticket types the client asked to buy ─
     // ticketTypes is the canonical field: [{ type, quantity, price }]
     // If only the legacy ticketType string was sent, promote it to the array shape.
     // `price` here is what the CLIENT thinks it is — it's only used as a hint
@@ -128,7 +129,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ── Load the event doc — source of truth for pricing ────────────────────
+    //  Load the event doc — source of truth for pricing 
     const eventRef = adminDb.collection("events").doc(eventId)
     const eventSnap = await eventRef.get()
     if (!eventSnap.exists) {
@@ -162,7 +163,7 @@ export async function POST(request: NextRequest) {
     // saleEndDate when that's set instead — see resolveTicketSaleWindow.
     const eventWideStop = { enabled: !!eventDoc.stopDate, stopDate: eventDoc.stopDate ?? null }
 
-    // ── Recompute pricing server-side ───────────────────────────────────────
+    //  Recompute pricing server-side ─
     // Admin-configured (or default) platform fee for THIS event — see
     // resolvePlatformFeeRates() for the exact fallback rules (missing
     // percentage → 5% default, missing flat fee → ₦0, not the ₦100 default).
@@ -213,7 +214,7 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      // ── Per-ticket-type sale window (item 6 follow-up) ──────────────────
+      //  Per-ticket-type sale window (item 6 follow-up) 
       // Re-checked here, server-side, right before a reference is ever
       // created — the buy-ticket-dialog already hides/disables a tier
       // that's outside its window, but that's a UI courtesy, not
@@ -273,7 +274,7 @@ export async function POST(request: NextRequest) {
       feeBurden
     )
 
-    // ── Generate reference ────────────────────────────────────────────────────
+    //  Generate reference ─
     // 2 random letters appended after the timestamp so two requests landing
     // in the same millisecond (concurrent checkout traffic) can't collide
     // on the same Reference doc ID — see src/app/lib/reference-id.ts.
@@ -281,7 +282,7 @@ export async function POST(request: NextRequest) {
     const reference = buildTicketReference(timestamp)
     console.log(`[create-pay-ref] Generated reference: ${reference}`)
 
-    // ── Build Firestore document ───────────────────────────────────────────────
+    //  Build Firestore document 
     // Use finalUserEmail/userFullName/userPhone already defined above
     const finalUserFullName = userFullName || guestFullName || null
     const finalUserPhone = userPhone || guestPhone || null
@@ -295,6 +296,12 @@ export async function POST(request: NextRequest) {
       eventId,
       eventCreatorId,
       eventName: eventName || "",
+      // Never trusted from the client — read straight off the event doc
+      // fetched above, same as ticket prices/fee config. Frozen here so
+      // the ticket confirmation email (v1/lib/mail/ticket-confirmation-
+      // template.js) can show the event's cover image without the
+      // backend needing to fetch the event doc itself.
+      eventImage: eventDoc.eventImage || "",
       eventVenue: eventVenue || "",
       eventType: eventType || "",
       eventDate: eventDate || "",
@@ -368,6 +375,25 @@ export async function POST(request: NextRequest) {
     await referenceDocRef.set(paymentReference)
 
     console.log(`[create-pay-ref] Reference stored successfully: ${reference}`)
+
+    //  Numerox funnel tracking 
+    // "A payment reference was created for this event." idempotencyKey is
+    // the reference itself — the same reference can never be created
+    // twice (it's the Firestore doc ID), so this can never double-count.
+    // Isolated in its own try/catch and never awaited into the response
+    // path's failure mode: a tracking hiccup must not turn a successful
+    // payment-reference creation into a 500 for the buyer.
+    try {
+      numerox.track({
+        eventId,
+        type: "PAYMENT_CREATED",
+        idempotencyKey: reference,
+        payment: { paymentId: reference, amount: totalAmount, currency: "NGN" },
+      })
+      await numerox.flush()
+    } catch (numeroxErr) {
+      console.error("[create-pay-ref] Numerox tracking failed (non-blocking):", numeroxErr)
+    }
 
     return NextResponse.json(
       {

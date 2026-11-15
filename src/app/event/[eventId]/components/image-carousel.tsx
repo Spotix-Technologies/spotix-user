@@ -1,147 +1,88 @@
 'use client'
 
 import type React from 'react'
-import { useState, useEffect, useCallback } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { NotchedArrows } from '@/components/NotchedArrows'
 
 interface ImageCarouselProps {
   eventImages: string[]
   eventName: string
-  /** Fires with the URL of whichever image is currently on screen, so a
-   *  parent (e.g. the page-wide blurred backdrop) can track it as the
-   *  user pages through the carousel. */
+  /** Fires with the URL of whichever image is on screen (optional). */
   onActiveImageChange?: (url: string) => void
+  /** Tailwind aspect-ratio classes for the frame */
+  aspectClass?: string
 }
 
-export const ImageCarousel: React.FC<ImageCarouselProps> = ({ eventImages, eventName, onActiveImageChange }) => {
-  const [currentIndex, setCurrentIndex] = useState(0)
-  const [displayIndex, setDisplayIndex] = useState(0)
+const FADE_MS = 300
+
+/**
+ * Flyer gallery. Images are shown whole (object-contain) on a neutral
+ * surface; the two arrows sit in a notch cut into the bottom of the frame.
+ * Only the current image is loaded at a time.
+ */
+export const ImageCarousel: React.FC<ImageCarouselProps> = ({
+  eventImages,
+  eventName,
+  onActiveImageChange,
+  aspectClass = 'aspect-[4/5] sm:aspect-[4/3]',
+}) => {
+  const [index, setIndex] = useState(0)
   const [fading, setFading] = useState(false)
+  const touchStartX = useRef<number | null>(null)
+  const count = eventImages?.length ?? 0
 
-  // Let the parent know whenever the visible slide changes (including the
-  // initial one on mount).
   useEffect(() => {
-    if (eventImages?.[displayIndex]) {
-      onActiveImageChange?.(eventImages[displayIndex])
-    }
+    if (eventImages?.[index]) onActiveImageChange?.(eventImages[index])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displayIndex, eventImages])
+  }, [index, eventImages])
 
-  if (!eventImages || eventImages.length === 0) return null
-
-  const FADE_DURATION = 350 // ms — must match the CSS transition below
-
-  // Cross-fade: hide current → swap src → show next
-  const transitionTo = useCallback(
-    (nextIndex: number) => {
-      if (fading || nextIndex === currentIndex) return
+  // Cross-fade: fade out → swap → fade in.
+  const goTo = useCallback(
+    (next: number) => {
+      if (fading || next === index || count < 2) return
       setFading(true)
-      setTimeout(() => {
-        setDisplayIndex(nextIndex)
-        setCurrentIndex(nextIndex)
+      window.setTimeout(() => {
+        setIndex(next)
         setFading(false)
-      }, FADE_DURATION)
+      }, FADE_MS)
     },
-    [fading, currentIndex]
+    [fading, index, count]
   )
 
-  const goToPrevious = () =>
-    transitionTo(currentIndex === 0 ? eventImages.length - 1 : currentIndex - 1)
+  const prev = () => goTo(index === 0 ? count - 1 : index - 1)
+  const next = () => goTo(index === count - 1 ? 0 : index + 1)
 
-  const goToNext = () =>
-    transitionTo(currentIndex === eventImages.length - 1 ? 0 : currentIndex + 1)
-
-  const goToSlide = (index: number) => transitionTo(index)
+  if (count === 0) return null
 
   return (
     <div
-      // aspect-[4/3] gives a consistent 4:3 box on all screens.
-      // Images use object-contain so nothing is cropped — the letterbox
-      // bars are filled by a blurred, scaled-up copy of the same image
-      // instead of a plain background.
-      className="relative w-full aspect-[4/3] bg-gray-900 rounded-lg overflow-hidden group"
+      className={`relative w-full overflow-hidden rounded-3xl bg-neutral-100 ${aspectClass}`}
+      onTouchStart={(e) => {
+        touchStartX.current = e.touches[0].clientX
+      }}
+      onTouchEnd={(e) => {
+        if (touchStartX.current === null) return
+        const dx = e.changedTouches[0].clientX - touchStartX.current
+        touchStartX.current = null
+        if (Math.abs(dx) > 48) (dx < 0 ? next : prev)()
+      }}
     >
-      {/* Blurred fill behind the contained image */}
       <img
-        key={`blur-${displayIndex}`}
-        src={eventImages[displayIndex] || '/placeholder.svg'}
-        alt=""
-        aria-hidden="true"
-        className="absolute inset-0 w-full h-full object-cover scale-110 blur-2xl opacity-70 transition-opacity"
-        style={{
-          opacity: fading ? 0 : 0.7,
-          transitionDuration: `${FADE_DURATION}ms`,
-          transitionTimingFunction: 'ease-in-out',
-        }}
+        key={index}
+        src={eventImages[index] || '/placeholder.svg'}
+        alt={`${eventName} — image ${index + 1} of ${count}`}
+        decoding="async"
+        className="absolute inset-0 h-full w-full object-contain pb-14 transition-opacity"
+        style={{ opacity: fading ? 0 : 1, transitionDuration: `${FADE_MS}ms` }}
       />
-      <div className="absolute inset-0 bg-black/10" />
-
-      {/* Image — fades on transition */}
-      <img
-        key={displayIndex}
-        src={eventImages[displayIndex] || '/placeholder.svg'}
-        alt={`${eventName} — image ${displayIndex + 1}`}
-        className="absolute inset-0 w-full h-full object-contain transition-opacity"
-        style={{
-          opacity: fading ? 0 : 1,
-          transitionDuration: `${FADE_DURATION}ms`,
-          transitionTimingFunction: 'ease-in-out',
-        }}
-      />
-
-      {/* Navigation — only when multiple images */}
-      {eventImages.length > 1 && (
-        <>
-          {/* Prev arrow */}
-          <button
-            onClick={goToPrevious}
-            disabled={fading}
-            className="absolute left-3 top-1/2 -translate-y-1/2 z-10
-              transition-all duration-200
-              bg-[#6b2fa5] hover:bg-purple-700 disabled:opacity-40
-              text-white p-2.5 rounded-full shadow-lg"
-            aria-label="Previous image"
-          >
-            <ChevronLeft size={22} strokeWidth={2.5} />
-          </button>
-
-          {/* Next arrow */}
-          <button
-            onClick={goToNext}
-            disabled={fading}
-            className="absolute right-3 top-1/2 -translate-y-1/2 z-10
-              transition-all duration-200
-              bg-[#6b2fa5] hover:bg-purple-700 disabled:opacity-40
-              text-white p-2.5 rounded-full shadow-lg"
-            aria-label="Next image"
-          >
-            <ChevronRight size={22} strokeWidth={2.5} />
-          </button>
-
-          {/* Counter badge */}
-          <div className="absolute top-3 right-3 z-10 bg-[#6b2fa5] bg-opacity-80 text-white px-3 py-1 rounded-full text-xs font-semibold tracking-wide">
-            {currentIndex + 1} / {eventImages.length}
-          </div>
-
-          {/* Dot indicators */}
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2">
-            {eventImages.map((_, index) => (
-              <button
-                key={index}
-                onClick={() => goToSlide(index)}
-                disabled={fading}
-                aria-label={`Go to image ${index + 1}`}
-                className="h-2 rounded-full transition-all duration-300 disabled:cursor-default"
-                style={{
-                  width: index === currentIndex ? '24px' : '8px',
-                  background: index === currentIndex
-                    ? '#6b2fa5'
-                    : 'rgba(107, 47, 165, 0.35)',
-                }}
-              />
-            ))}
-          </div>
-        </>
+      {count > 1 && (
+        <NotchedArrows
+          onPrev={prev}
+          onNext={next}
+          disabled={fading}
+          prevLabel="Previous image"
+          nextLabel="Next image"
+        />
       )}
     </div>
   )

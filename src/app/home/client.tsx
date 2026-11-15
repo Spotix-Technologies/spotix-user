@@ -1,335 +1,122 @@
 "use client"
 
 import type React from "react"
-import { useEffect, useState, useCallback } from "react"
-import { useRouter } from "next/navigation"
+import { useEffect, useState } from "react"
 import UserHeader from "../../components/UserHeader"
 import Footer from "../../components/footer"
-import ImageCarousels from "../../components/carousel"
 import Preloader from "@/components/Preloader"
 import Header from "./components/Header"
-import SearchBar from "./components/SearchBar"
-import Today from "./components/Today"
-import TodayEvents from "./components/Todayevents"
-import UpcomingEvents from "./components/UpcomingEvents"
-import EventCollections from "./components/EventCollections"
-import PastEvents from "./components/PastEvents"
-import { SessionUser } from "../lib/auth-client-user"
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface HomeEvent {
-  eventId: string
-  eventName: string
-  venue: string
-  eventType: string
-  eventStartDate: string
-  freeOrPaid: boolean
-  eventImage: string
-}
-
-interface EventCollection {
-  collectionId: string
-  collectionName: string
-  creatorId: string
-  eventImage: string
-}
+import FeaturedBanner from "./components/FeaturedBanner"
+import FilterBar from "./components/FilterBar"
+import EventList from "./components/EventList"
+import CollectionsRow from "./components/CollectionsRow"
+import EventCalendar from "./components/EventCalendar"
+import ViewSettings from "./components/ViewSettings"
+import { useHomeEvents } from "./hooks/useHomeEvents"
+import { useFeaturedEvents } from "./hooks/useFeaturedEvents"
+import { useEventFilters } from "./hooks/useEventFilters"
+import { useHomeSettings } from "./hooks/useHomeSettings"
+import { PAGE_SIZE } from "./constants"
+import type { SessionUser } from "../lib/auth-client-user"
 
 interface HomeProps {
   user?: SessionUser | null
 }
 
-interface HomeData {
-  events: {
-    today: HomeEvent[]
-    upcoming: HomeEvent[]
-    past: HomeEvent[]
-  }
-  collections: EventCollection[]
-}
-
-interface SearchSuggestion {
-  eventName: string
-  eventId: string
-}
-
-// ─── Component ────────────────────────────────────────────────────────────────
-
 const Home: React.FC<HomeProps> = ({ user }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [username, setUsername] = useState("")
-  const [loading, setLoading] = useState(true)
   const [showPreloader, setShowPreloader] = useState(true)
+  const [username, setUsername] = useState("")
 
-  // Home data
-  const [homeData, setHomeData] = useState<HomeData>({
-    events: { today: [], upcoming: [], past: [] },
-    collections: [],
-  })
+  // Auth comes from the session `user` prop (already resolved by useAuth) —
+  // no second /api/v1/auth round-trip.
+  const isAuthenticated = Boolean(user)
 
-  // Search & filter
-  const [searchQuery, setSearchQuery] = useState("")
-  const [filterType, setFilterType] = useState<string | null>(null)
-  const [priceFilter, setPriceFilter] = useState<string | null>(null)
-  const [searchSuggestions, setSearchSuggestions] = useState<SearchSuggestion[]>([])
-  const [showSuggestions, setShowSuggestions] = useState(false)
-
-  const router = useRouter()
-  const hasActiveFilters = Boolean(searchQuery || filterType || priceFilter)
-
-  // ── Auth check (only once on mount) ─────────────────────────────────────────
   useEffect(() => {
-    let cancelled = false
-
-    const checkAuth = async () => {
-      try {
-        const response = await fetch("/api/v1/auth", {
-          method: "GET",
-          credentials: "include",
-        })
-        const data = await response.json()
-
-        if (!cancelled) {
-          if (data.authenticated) {
-            setIsAuthenticated(true)
-            const storedUser = localStorage.getItem("spotix_user")
-            if (storedUser) {
-              const userData = JSON.parse(storedUser)
-              setUsername(userData.username || userData.fullName || "")
-            }
-          } else {
-            setIsAuthenticated(false)
-          }
-        }
-      } catch (error) {
-        console.error("  Error checking auth:", error)
-        if (!cancelled) {
-          setIsAuthenticated(false)
-        }
+    if (!user) {
+      setUsername("")
+      return
+    }
+    try {
+      const stored = localStorage.getItem("spotix_user")
+      if (stored) {
+        const u = JSON.parse(stored)
+        setUsername(u.username || u.fullName || "")
       }
+    } catch {
+      /* ignore malformed cache */
     }
+  }, [user])
 
-    checkAuth()
-    return () => { cancelled = true }
-  }, [])
+  const { events, collections, loading } = useHomeEvents()
+  const { featured, loading: featuredLoading } = useFeaturedEvents()
+  const filters = useEventFilters(events)
+  const { calendarView, setCalendarView } = useHomeSettings()
 
-  // ── Fetch home data from API ─────────────────────────────────────────────────
-  useEffect(() => {
-    const fetchHomeData = async () => {
-      setLoading(true)
-      try {
-        const response = await fetch("/api/v1/home", {
-          method: "GET",
-          credentials: "include",
-        })
-        const json = await response.json()
-
-        if (json.success && json.data) {
-          const now = Date.now()
-
-          // Helper: parse any date value the API might return
-          const toMs = (v: string | undefined): number => {
-            if (!v) return 0
-            const ms = new Date(v).getTime()
-            return isNaN(ms) ? 0 : ms
-          }
-
-          // Sort helper (ascending by start date)
-          const byDate = (a: HomeEvent, b: HomeEvent) =>
-            toMs(a.eventStartDate) - toMs(b.eventStartDate)
-
-          const rawData: HomeData = json.data
-          const buckets = { today: [...rawData.events.today], upcoming: [...rawData.events.upcoming], past: [...rawData.events.past] }
-
-          // Re-categorise: move any "today/upcoming" event that has already
-          // ended into "past", and mark it via the API (fire-and-forget).
-          const misplacedIds: string[] = []
-
-          const recheck = (list: HomeEvent[]) => {
-            const stillActive: HomeEvent[] = []
-            for (const ev of list) {
-              const startMs = toMs(ev.eventStartDate)
-              if (startMs > 0 && startMs < now) {
-                buckets.past.push(ev)
-                misplacedIds.push(ev.eventId)
-              } else {
-                stillActive.push(ev)
-              }
-            }
-            return stillActive
-          }
-
-          buckets.today    = recheck(buckets.today)
-          buckets.upcoming = recheck(buckets.upcoming)
-
-          // Sort each bucket by date
-          buckets.today.sort(byDate)
-          buckets.upcoming.sort(byDate)
-          buckets.past.sort((a, b) => toMs(b.eventStartDate) - toMs(a.eventStartDate)) // most recent past first
-
-          setHomeData({ events: buckets, collections: rawData.collections })
-
-          // Fire-and-forget: let the server know these have passed
-          if (misplacedIds.length > 0) {
-            misplacedIds.forEach((eventId) => {
-              fetch("/api/v1/home/mark-past", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ eventId }),
-              }).catch(() => {/* silent */})
-            })
-          }
-        } else {
-          console.error("[Home] API returned error:", json.error)
-        }
-      } catch (error) {
-        console.error("[Home] Failed to fetch home data:", error)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchHomeData()
-  }, [])
-
-  // ── Search suggestions ───────────────────────────────────────────────────────
-  useEffect(() => {
-    if (searchQuery.trim().length >= 2) {
-      const allEvents = [
-        ...homeData.events.today,
-        ...homeData.events.upcoming,
-        ...homeData.events.past,
-      ]
-
-      const suggestions = allEvents
-        .filter((event) =>
-          event.eventName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          event.eventId.toLowerCase().includes(searchQuery.toLowerCase())
-        )
-        .slice(0, 5)
-        .map((event) => ({
-          eventName: event.eventName,
-          eventId: event.eventId,
-        }))
-
-      setSearchSuggestions(suggestions)
-      setShowSuggestions(suggestions.length > 0)
-    } else {
-      setSearchSuggestions([])
-      setShowSuggestions(false)
-    }
-  }, [searchQuery, homeData.events])
-
-  // ── Filter helper ────────────────────────────────────────────────────────────
-  const filterEvents = useCallback(
-    (events: HomeEvent[]) => {
-      return events.filter((event) => {
-        if (searchQuery) {
-          const matchesSearch =
-            event.eventName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            event.eventId.toLowerCase().includes(searchQuery.toLowerCase())
-          if (!matchesSearch) return false
-        }
-
-        if (filterType && event.eventType !== filterType) return false
-
-        if (priceFilter) {
-          if (priceFilter === "free" && event.freeOrPaid) return false
-          if (priceFilter === "paid" && !event.freeOrPaid) return false
-        }
-
-        return true
-      })
-    },
-    [searchQuery, filterType, priceFilter]
-  )
-
-  const filteredTodayEvents    = filterEvents(homeData.events.today)
-  const filteredUpcomingEvents = filterEvents(homeData.events.upcoming)
-  const filteredPastEvents     = filterEvents(homeData.events.past)
-
-  // ── Navigation ───────────────────────────────────────────────────────────────
-  const navigateToEvent = (eventId: string) => {
-    router.push(`/event/${eventId}`)
-  }
-
-  const navigateToCollection = (collectionId: string) => {
-    router.push(`/event-group/${collectionId}`)
-  }
-
-  const handleSuggestionClick = (suggestion: SearchSuggestion) => {
-    setSearchQuery(suggestion.eventName)
-    setShowSuggestions(false)
-    navigateToEvent(suggestion.eventId)
-  }
-
-  // ── Helpers ──────────────────────────────────────────────────────────────────
-  const formatTodayDate = () => {
-    return new Date().toLocaleDateString("en-US", {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    })
-  }
-
-  const handlePreloaderComplete = () => setShowPreloader(false)
-
-  // ── Render ───────────────────────────────────────────────────────────────────
   if (showPreloader) {
-    return <Preloader onLoadingComplete={handlePreloaderComplete} minDisplayTime={3000} />
+    return <Preloader onLoadingComplete={() => setShowPreloader(false)} minDisplayTime={3000} />
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-purple-50">
+    <div className="min-h-screen bg-white">
       <UserHeader />
 
-      <main className="w-full">
+      <main>
         <Header isAuthenticated={isAuthenticated} username={username} />
 
-        <SearchBar
-          searchQuery={searchQuery}
-          setSearchQuery={setSearchQuery}
-          searchSuggestions={searchSuggestions}
-          showSuggestions={showSuggestions}
-          setShowSuggestions={setShowSuggestions}
-          filterType={filterType}
-          setFilterType={setFilterType}
-          priceFilter={priceFilter}
-          setPriceFilter={setPriceFilter}
-          hasActiveFilters={hasActiveFilters}
-          onSuggestionClick={handleSuggestionClick}
-        />
+        <div className="mx-auto max-w-5xl space-y-10 px-4 py-8 sm:px-6 sm:py-10">
+          <FeaturedBanner events={featured} loading={featuredLoading} />
 
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8">
-          <ImageCarousels />
+          <div className="space-y-3">
+            <ViewSettings calendarView={calendarView} onCalendarViewChange={setCalendarView} />
+            <FilterBar
+              searchQuery={filters.searchQuery}
+              onSearchChange={filters.setSearchQuery}
+              suggestions={filters.suggestions}
+              categories={filters.categories}
+              category={filters.category}
+              onCategoryChange={filters.setCategory}
+              price={filters.price}
+              onPriceChange={filters.setPrice}
+            />
+          </div>
+
+          {calendarView ? (
+            <>
+              <EventCalendar applyFilters={filters.apply} />
+              <CollectionsRow collections={collections} loading={loading} />
+            </>
+          ) : (
+            <>
+              {/* `key` resets each list's page whenever a filter changes */}
+              <EventList
+                key={`today-${filters.signature}`}
+                title="Today"
+                events={filters.filtered.today}
+                loading={loading}
+                pageSize={PAGE_SIZE.today}
+                hideWhenEmpty
+              />
+              <EventList
+                key={`upcoming-${filters.signature}`}
+                title="Upcoming"
+                events={filters.filtered.upcoming}
+                loading={loading}
+                pageSize={PAGE_SIZE.upcoming}
+                emptyText="No upcoming events found."
+              />
+              <CollectionsRow collections={collections} loading={loading} />
+              <EventList
+                key={`past-${filters.signature}`}
+                title="Past events"
+                events={filters.filtered.past}
+                loading={loading}
+                pageSize={PAGE_SIZE.past}
+                past
+                hideWhenEmpty
+              />
+            </>
+          )}
         </div>
-
-        <Today todayDate={formatTodayDate()} />
-
-        <TodayEvents
-          events={filteredTodayEvents}
-          loading={loading}
-          onEventClick={navigateToEvent}
-        />
-
-        <UpcomingEvents
-          events={filteredUpcomingEvents}
-          loading={loading}
-          onEventClick={navigateToEvent}
-        />
-
-        <EventCollections
-          collections={homeData.collections}
-          loading={loading}
-          onCollectionClick={navigateToCollection}
-        />
-
-        <PastEvents
-          events={filteredPastEvents}
-          loading={loading}
-          onEventClick={navigateToEvent}
-        />
       </main>
 
       <Footer />

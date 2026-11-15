@@ -10,92 +10,71 @@ interface EventImageSectionProps {
   eventName: string
   eventImage: string
   showFullscreenIcon?: boolean
-  /** Fires with the URL of whichever image is currently showing (only
-   *  relevant when there's more than one, i.e. the carousel case) — lets a
-   *  parent mirror it, e.g. as the page-wide blurred background. */
+  /** Optional: fires with the URL of the image currently showing (carousel case). */
   onActiveImageChange?: (url: string) => void
+  /** Tailwind aspect-ratio classes for the frame (default: portrait on mobile, 4:3 from sm). */
+  aspectClass?: string
 }
 
-const LazyImage: React.FC<{
-  src: string
-  alt: string
-  showFullscreenIcon?: boolean
-}> = ({ src, alt, showFullscreenIcon = false }) => {
+const DEFAULT_ASPECT = "aspect-[4/5] sm:aspect-[4/3]"
+
+const SingleImage: React.FC<{ src: string; alt: string; showFullscreenIcon?: boolean; aspectClass?: string }> = ({
+  src,
+  alt,
+  showFullscreenIcon = false,
+  aspectClass = DEFAULT_ASPECT,
+}) => {
   const [isLoaded, setIsLoaded] = useState(false)
   const [hasError, setHasError] = useState(false)
   const [showFullscreen, setShowFullscreen] = useState(false)
-  const imgSrc = src || "/placeholder.svg"
 
   return (
     <>
-      {/* aspect-[4/3] keeps single images in the same box as the carousel */}
-      <div className="relative w-full aspect-[4/3] bg-gray-900 rounded-lg overflow-hidden group">
-        {/* Blurred fill — same image, scaled up + blurred, so letterbox
-            bars behind the object-contain image are never plain white. */}
-        {isLoaded && !hasError && (
-          <img
-            src={imgSrc}
-            alt=""
-            aria-hidden="true"
-            className="absolute inset-0 w-full h-full object-cover scale-110 blur-2xl opacity-70"
-          />
-        )}
-        <div className="absolute inset-0 bg-black/10" />
-
-        {/* Skeleton */}
-        {!isLoaded && !hasError && (
-          <div className="absolute inset-0 bg-gray-200 animate-pulse flex items-center justify-center">
-            <div className="w-16 h-16 bg-gray-300 rounded-full animate-pulse" />
-          </div>
-        )}
+      <div className={`relative w-full overflow-hidden rounded-3xl bg-neutral-100 ${aspectClass}`}>
+        {!isLoaded && !hasError && <div className="absolute inset-0 animate-pulse bg-neutral-200" />}
 
         <img
-          src={imgSrc}
+          src={src}
           alt={alt}
+          decoding="async"
           onLoad={() => setIsLoaded(true)}
-          onError={() => { setHasError(true); setIsLoaded(true) }}
-          className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-300 ${
-            isLoaded ? "opacity-100" : "opacity-0"
+          onError={() => {
+            setHasError(true)
+            setIsLoaded(true)
+          }}
+          className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-300 ${
+            isLoaded && !hasError ? "opacity-100" : "opacity-0"
           }`}
         />
 
-        {/* Fullscreen button */}
         {showFullscreenIcon && isLoaded && !hasError && (
           <button
             onClick={() => setShowFullscreen(true)}
-            className="absolute top-3 right-3 z-10
-              opacity-0 group-hover:opacity-100 transition-all duration-200
-              bg-[#6b2fa5] hover:bg-purple-700 text-white p-2 rounded-full shadow-lg"
+            className="absolute right-3 top-3 z-10 grid h-9 w-9 place-items-center rounded-full border border-gray-200 bg-white text-gray-800 transition hover:bg-gray-50"
             aria-label="View fullscreen"
           >
-            <Maximize2 size={18} />
+            <Maximize2 size={16} />
           </button>
         )}
 
-        {/* Error state */}
         {hasError && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
-            <span className="text-gray-500 text-sm">Failed to load image</span>
-          </div>
+          <div className="absolute inset-0 grid place-items-center text-sm text-gray-500">Failed to load image</div>
         )}
       </div>
 
-      {/* Fullscreen overlay */}
       {showFullscreen && (
-        <div className="fixed inset-0 bg-black bg-opacity-95 z-50 flex items-center justify-center p-4 sm:p-8">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-4 sm:p-8"
+          onClick={() => setShowFullscreen(false)}
+        >
           <button
             onClick={() => setShowFullscreen(false)}
-            className="absolute top-4 right-4 bg-white hover:bg-gray-100 text-gray-900 p-3 rounded-full transition-all duration-200 shadow-2xl border border-gray-200"
-            style={{ zIndex: 9999 }}
+            className="absolute right-4 top-4 z-[9999] grid h-11 w-11 place-items-center rounded-full bg-white text-gray-900 transition hover:bg-gray-100"
             aria-label="Close fullscreen"
           >
-            <X size={24} />
+            <X size={22} />
           </button>
-          <img
-            src={imgSrc}
-            alt={alt}
-            className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg"
-          />
+          <img src={src} alt={alt} className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain" />
         </div>
       )}
     </>
@@ -108,26 +87,20 @@ export const EventImageSection: React.FC<EventImageSectionProps> = ({
   eventImage,
   showFullscreenIcon = true,
   onActiveImageChange,
+  aspectClass = DEFAULT_ASPECT,
 }) => {
   const primaryImage = eventImage || "/placeholder.svg"
   const extraImages = (eventImages ?? []).filter((url) => url && url !== primaryImage)
   const allImages = [primaryImage, ...extraImages]
 
-  return (
-    <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
-      {allImages.length > 1 ? (
-        <ImageCarousel
-          eventImages={allImages}
-          eventName={eventName}
-          onActiveImageChange={onActiveImageChange}
-        />
-      ) : (
-        <LazyImage
-          src={primaryImage}
-          alt={eventName}
-          showFullscreenIcon={showFullscreenIcon}
-        />
-      )}
-    </div>
+  return allImages.length > 1 ? (
+    <ImageCarousel
+      eventImages={allImages}
+      eventName={eventName}
+      onActiveImageChange={onActiveImageChange}
+      aspectClass={aspectClass}
+    />
+  ) : (
+    <SingleImage src={primaryImage} alt={eventName} showFullscreenIcon={showFullscreenIcon} aspectClass={aspectClass} />
   )
 }

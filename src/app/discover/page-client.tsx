@@ -6,15 +6,7 @@ import Image from "next/image"
 import { MapPin, Music, Filter, Loader2, Calendar, ChevronDown, RefreshCw, ExternalLink } from "lucide-react"
 import UserHeader from "@/components/UserHeader"
 import Footer from "@/components/footer"
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-const NIGERIAN_STATES = [
-  "Abia","Adamawa","Akwa Ibom","Anambra","Bauchi","Bayelsa","Benue","Borno",
-  "Cross River","Delta","Ebonyi","Edo","Ekiti","Enugu","FCT","Gombe","Imo",
-  "Jigawa","Kaduna","Kano","Katsina","Kebbi","Kogi","Kwara","Lagos",
-  "Nasarawa","Niger","Ogun","Ondo","Osun","Oyo","Plateau","Rivers",
-  "Sokoto","Taraba","Yobe","Zamfara",
-]
+import { NIGERIAN_STATES, fetchStateFromServer, resolvePreciseState, type GeoSource } from "@/app/lib/geo-client"
 
 const GENRES = ["All","Music","Arts & Culture","Technology","Food & Drinks","Sports","Business","Fashion","Comedy","Education","Religious","Social","Other"]
 
@@ -43,55 +35,16 @@ function lowestTierPrice(tiers: TicketTier[] | null): number | null {
 }
 
 // ── Geolocation helpers ───────────────────────────────────────────────────────
-// State detection now goes through our own server route (/api/v1/geo/state),
-// which does the reverse-geocoding / IP-lookup server-side — this avoids
-// browsers silently stripping the User-Agent header Nominatim expects, and
-// gives us an IP-based fallback for the (common) case where the user denies
-// the browser's location permission prompt.
+// State detection goes through our own server route (/api/v1/geo/state) via
+// the shared helpers in @/app/lib/geo-client — see that module's doc comment
+// for why (avoids browsers stripping the User-Agent Nominatim expects, and
+// gives an IP-based fallback when the user denies the location prompt).
 //
-// The route also reports back *how* it resolved the state ("coordinates" /
-// "edge-coordinates" from real lat/lon vs. "edge-region" / "ip" from a coarse
-// network-level guess). We surface that distinction in the UI below, since a
-// coarse guess can land in the wrong state entirely (e.g. Nigerian mobile
-// gateways for South-East traffic are frequently geolocated to Rivers).
-type GeoSource = "coordinates" | "edge-coordinates" | "edge-region" | "ip" | null
+// The route also reports back *how* it resolved the state (see `GeoSource`).
+// We surface that distinction in the UI below, since a coarse guess can land
+// in the wrong state entirely (e.g. Nigerian mobile gateways for South-East
+// traffic are frequently geolocated to Rivers).
 const PRECISE_SOURCES: GeoSource[] = ["coordinates", "edge-coordinates"]
-
-async function fetchStateFromServer(coords?: { lat: number; lon: number }): Promise<{ state: string | null; source: GeoSource }> {
-  try {
-    const params = coords ? `?lat=${coords.lat}&lon=${coords.lon}` : ""
-    const res = await fetch(`/api/v1/geo/state${params}`)
-    if (!res.ok) return { state: null, source: null }
-    const data = await res.json()
-    const state = data?.state && NIGERIAN_STATES.includes(data.state) ? data.state : null
-    return { state, source: state ? (data?.source ?? null) : null }
-  } catch {
-    return { state: null, source: null }
-  }
-}
-
-// Wraps navigator.geolocation.getCurrentPosition in a promise that always
-// resolves (never rejects) so callers can await a single outcome regardless
-// of whether the browser grants, denies, or times out on the permission.
-function resolvePreciseState(): Promise<{ state: string | null; source: GeoSource }> {
-  return new Promise((resolve) => {
-    if (!navigator.geolocation) {
-      resolve({ state: null, source: null })
-      return
-    }
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const result = await fetchStateFromServer({ lat: pos.coords.latitude, lon: pos.coords.longitude })
-        resolve(result)
-      },
-      () => resolve({ state: null, source: null }),
-      // maximumAge: 0 forces a fresh fix rather than reusing a cached one —
-      // important here since this same call path is used for "Retry", where
-      // a stale cached position would just reproduce the wrong result.
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-    )
-  })
-}
 
 // ── Event card ────────────────────────────────────────────────────────────────
 function DiscoverCard({ event, onClick }: { event: DiscoverEvent; onClick: () => void }) {

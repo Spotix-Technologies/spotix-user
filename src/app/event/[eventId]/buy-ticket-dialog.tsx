@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useMemo } from "react"
+import React, { useState, useMemo, useEffect, useRef, useCallback } from "react"
 import { X, Plus, Minus, ShoppingCart, Clock, AlertTriangle, Loader2 } from "lucide-react"
 import { formatNumber } from "@/utils/formatter"
 import { calculateVATFee, resolvePlatformFeeRates, computeOrderPricing, type OrderPricingBreakdown } from "@/utils/priceUtility"
@@ -23,7 +23,7 @@ interface TicketPrice extends TicketSaleWindowFields {
   ticketsSold?: number
 }
 
-interface BuyTicketDialogProps {
+interface BuyTicketDrawerProps {
   eventData: EventType
   isEventToday: boolean
   isEventPassed: boolean
@@ -98,9 +98,83 @@ function getFreeEventMaxQty(eventData: EventType): number {
   return Math.min(FREE_EVENT_MAX_QTY, Math.max(0, remaining))
 }
 
+// ── Drawer / card helpers ─────────────────────────────────────────────────────
+
+/** Slide duration — keep in sync with the `duration-300` classes in the render below */
+const DRAWER_ANIM_MS = 300
+
+/**
+ * Small, cacheable version of the event image for use as a card backdrop.
+ * Cloudinary URLs get a resized/auto-format transform (same pattern as the navbar search
+ * thumbnails); anything else is used as-is.
+ */
+function getCardBackdrop(url: string): string {
+  if (!url) return ""
+  if (url.includes("cloudinary.com")) {
+    const uploadIndex = url.indexOf("/upload/")
+    if (uploadIndex !== -1) {
+      const beforeUpload = url.substring(0, uploadIndex + 8)
+      const afterUpload = url.substring(uploadIndex + 8)
+      return `${beforeUpload}c_fill,w_700,q_auto,f_auto/${afterUpload}`
+    }
+  }
+  return url
+}
+
+/**
+ * A ticket card: the event's main image as the background, softly blurred, with a dark
+ * overlay so the white text on top always has contrast. The solid dark base underneath
+ * means the card still reads correctly if the image is missing or fails to load.
+ */
+function TicketCardShell({
+  image,
+  state,
+  children,
+}: {
+  image: string
+  state: "default" | "selected" | "disabled"
+  children: React.ReactNode
+}) {
+  const disabled = state === "disabled"
+  return (
+    <div
+      className={`relative isolate overflow-hidden rounded-2xl border bg-[#171123] transition-all ${
+        state === "selected"
+          ? "border-[#c4a0ee] ring-2 ring-[#6b2fa5]/70 shadow-lg shadow-purple-900/30"
+          : "border-white/10"
+      }`}
+    >
+      {image ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={image}
+          alt=""
+          aria-hidden="true"
+          loading="lazy"
+          decoding="async"
+          className={`absolute inset-0 -z-20 h-full w-full scale-110 object-cover blur-[3px] ${
+            disabled ? "grayscale" : ""
+          }`}
+        />
+      ) : (
+        <div className="absolute inset-0 -z-20 bg-gradient-to-br from-[#2e1449] to-[#171123]" />
+      )}
+      {/* Dark overlay for text legibility */}
+      <div
+        className={`absolute inset-0 -z-10 bg-gradient-to-br ${
+          disabled
+            ? "from-[#0d0818]/90 via-[#0d0818]/85 to-[#0d0818]/90"
+            : "from-[#0d0818]/72 via-[#0d0818]/58 to-[#0d0818]/74"
+        }`}
+      />
+      <div className={`relative ${disabled ? "opacity-75" : ""}`}>{children}</div>
+    </div>
+  )
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
-const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
+const BuyTicketDrawer: React.FC<BuyTicketDrawerProps> = ({
   eventData,
   isEventToday,
   isEventPassed,
@@ -114,6 +188,52 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
   const [freeQty, setFreeQty] = useState(1)
   // True while we've handed off to onBuyTicket and the payment/registration page is loading
   const [isProceeding, setIsProceeding] = useState(false)
+
+  // ── Drawer open/close animation ───────────────────────────────────────────
+  // The parent mounts this component to open it and unmounts it on `onClose`, so the slide-out
+  // is handled here: flip `open` off, let the transition play, then tell the parent.
+  const [open, setOpen] = useState(false)
+  const closingRef = useRef(false)
+  const closeTimerRef = useRef<number | null>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  // Slide in on the frame after mount so the closed → open transition actually plays
+  useEffect(() => {
+    let raf2 = 0
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        setOpen(true)
+        panelRef.current?.focus({ preventScroll: true })
+      })
+    })
+    return () => {
+      cancelAnimationFrame(raf1)
+      cancelAnimationFrame(raf2)
+    }
+  }, [])
+
+  const handleClose = useCallback(() => {
+    if (closingRef.current) return
+    closingRef.current = true
+    setOpen(false)
+    closeTimerRef.current = window.setTimeout(onClose, DRAWER_ANIM_MS)
+  }, [onClose])
+
+  useEffect(
+    () => () => {
+      if (closeTimerRef.current !== null) clearTimeout(closeTimerRef.current)
+    },
+    []
+  )
+
+  // Escape closes the drawer
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") handleClose()
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => document.removeEventListener("keydown", onKeyDown)
+  }, [handleClose])
 
   // ── Sale status (computed once on mount) ─────────────────────────────────
 
@@ -129,6 +249,9 @@ const BuyTicketDialog: React.FC<BuyTicketDialogProps> = ({
   // Per-ticket-type sale window fallback target — passed into
   // getTicketSaleStatus for every tier below.
   const eventWideStop = { enabled: !!eventData.enableStopDate, stopDate: eventData.stopDate }
+
+  // Main event image → backdrop for every ticket card (falls back to the first gallery image)
+  const cardImage = getCardBackdrop(eventData.eventImage || eventData.eventImages?.[0] || "")
 
   const stopDatePassed = useMemo(
     () => hasSaleStopped(activeStopDate),
@@ -289,339 +412,358 @@ const MAX_QTY_PER_TYPE = 10
   
   // Closed button label
   const closedLabel =
-  isEventPassed || eventStarted ? "Event Ended" : "Sales Closed"
-  
-  
-  // ── Render ────────────────────────────────────────────────────────────────
-  
-  return (
-    
-    
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-start justify-center z-50 px-4 pt-20 pb-4 overflow-y-auto">
-   
-    <style>{`
-    .spotix-scroll::-webkit-scrollbar { width: 6px; }
-    .spotix-scroll::-webkit-scrollbar-track { background: transparent; }
-    .spotix-scroll::-webkit-scrollbar-thumb { background: #6b2fa5; border-radius: 999px; }
-    .spotix-scroll::-webkit-scrollbar-thumb:hover { background: #5a2590; }
-  `}</style>
-  
-  <div className="spotix-scroll bg-white rounded-2xl max-w-2xl w-full max-h-[calc(100vh-6rem)] overflow-y-auto shadow-2xl">
+    isEventPassed || eventStarted ? "Event Ended" : "Sales Closed"
 
+  // ── Render ────────────────────────────────────────────────────────────────
+  //
+  // z-[1100]: the site header is sticky at z-index 1000 (components/header.styled.tsx), so the
+  // drawer has to sit above it or the header covers the top of the panel.
+  //
+  // Bottom sheet on mobile, right-hand side drawer from `md` up. Header and footer stay
+  // pinned; only the middle (banners + ticket cards) scrolls.
+
+  return (
+    <div className="fixed inset-0 z-[1100]">
+      <style>{`
+        .spotix-scroll::-webkit-scrollbar { width: 6px; }
+        .spotix-scroll::-webkit-scrollbar-track { background: transparent; }
+        .spotix-scroll::-webkit-scrollbar-thumb { background: #6b2fa5; border-radius: 999px; }
+        .spotix-scroll::-webkit-scrollbar-thumb:hover { background: #5a2590; }
+      `}</style>
+
+      {/* Backdrop */}
+      <div
+        className={`absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity duration-300 motion-reduce:transition-none ${
+          open ? "opacity-100" : "opacity-0"
+        }`}
+        onClick={handleClose}
+        aria-hidden="true"
+      />
+
+      {/* Drawer panel */}
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Select tickets for ${eventData.eventName}`}
+        tabIndex={-1}
+        className={`absolute bottom-0 left-0 right-0 flex max-h-[92dvh] flex-col rounded-t-3xl bg-white shadow-2xl outline-none transition-transform duration-300 ease-out motion-reduce:transition-none md:bottom-0 md:left-auto md:right-0 md:top-0 md:max-h-none md:w-[460px] md:rounded-l-3xl md:rounded-tr-none ${
+          open
+            ? "translate-y-0 md:translate-x-0"
+            : "translate-y-full md:translate-y-0 md:translate-x-full"
+        }`}
+      >
         {/* ── Header ── */}
-        <div className="sticky top-0 bg-white border-b border-gray-200 p-5 flex items-center justify-between z-10">
-          <div>
+        <div className="flex shrink-0 items-center justify-between rounded-t-3xl border-b border-gray-200 bg-white p-5 md:rounded-tr-none md:rounded-tl-3xl">
+          <div className="min-w-0">
             <h2 className="text-xl font-bold text-gray-900">Select Tickets</h2>
-            <p className="text-gray-500 text-sm mt-0.5">{eventData.eventName}</p>
+            <p className="mt-0.5 truncate text-sm text-gray-500">{eventData.eventName}</p>
           </div>
           <button
-            onClick={onClose}
-            className="p-2 rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-800 transition-colors"
-            aria-label="Close dialog"
+            onClick={handleClose}
+            className="ml-3 shrink-0 rounded-full p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800"
+            aria-label="Close drawer"
           >
             <X size={22} />
           </button>
         </div>
 
-        {/* ── Status banners ── */}
-        <div className="px-5 pt-4 space-y-2">
+        {/* ── Scrollable body ── */}
+        <div className="spotix-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain">
 
-          {/* Event started / passed */}
-          {(isEventPassed || eventStarted) && (
-            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-medium">
-              <AlertTriangle size={15} className="flex-shrink-0" />
-              {isEventPassed
-                ? "This event has already occurred. Ticket sales are closed."
-                : "This event has already started. Ticket sales are closed."}
-            </div>
-          )}
+          {/* ── Status banners ── */}
+          <div className="space-y-2 px-5 pt-4">
 
-          {/* Sold out (whole event) */}
-          {isSoldOut && !isEventPassed && !eventStarted && (
-            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-medium">
-              <AlertTriangle size={15} className="flex-shrink-0" />
-              This event is sold out.
-            </div>
-          )}
-
-          {/* Free event sold out */}
-          {eventData.isFree && freeEventSoldOut && !isSoldOut && !isEventPassed && !eventStarted && (
-            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-medium">
-              <AlertTriangle size={15} className="flex-shrink-0" />
-              This event is sold out.
-            </div>
-          )}
-
-          {/* Stop date has passed */}
-          {stopDatePassed && !isEventPassed && !eventStarted && (
-            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-medium">
-              <AlertTriangle size={15} className="flex-shrink-0" />
-              Ticket sales for this event have ended.
-            </div>
-          )}
-
-          {/* Legacy isSaleEnded fallback */}
-          {isSaleEnded && !stopDatePassed && !isEventPassed && !eventStarted && (
-            <div className="flex items-center gap-2 p-3 bg-orange-50 border border-orange-200 text-orange-700 rounded-xl text-sm font-medium">
-              <AlertTriangle size={15} className="flex-shrink-0" />
-              Ticket sales for this event have ended.
-            </div>
-          )}
-
-          {/* Sale stopping TODAY */}
-          {stopDateIsToday && !effectivelyClosed && (
-            <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-300 text-amber-800 rounded-xl text-sm font-semibold">
-              <Clock size={15} className="flex-shrink-0 text-amber-600" />
-              Ticket sales stop <span className="text-amber-900 mx-1">Today!</span> Cop yours now!
-            </div>
-          )}
-
-          {/* Event is today, hasn't started yet */}
-          {isEventToday && !eventStarted && !effectivelyClosed && (
-            <div className="flex items-center gap-2 p-3 bg-purple-50 border border-purple-200 text-[#6b2fa5] rounded-xl text-sm font-semibold">
-              <span className="text-base leading-none">🔥</span>
-              Event is Today! Grab your ticket before it starts.
-            </div>
-          )}
-        </div>
-
-        {/* ── Ticket list ── */}
-        <div className="p-5 space-y-3">
-          {eventData.isFree ? (
-            /* ── Free event: quantity picker ── */
-            <div className={`border rounded-xl transition-all ${
-              freeEventEffectivelyClosed
-                ? "border-gray-200 bg-gray-50 opacity-60"
-                : "border-[#6b2fa5] bg-purple-50"
-            }`}>
-              <div className="flex items-start justify-between p-4 gap-4">
-                {/* Left: ticket info */}
-                <div className="flex-1 min-w-0 space-y-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-bold text-base leading-tight text-gray-900">
-                      Free Admission
-                    </p>
-                    <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-                      FREE
-                    </span>
-                  </div>
-                  <p className="font-bold text-lg leading-none text-emerald-600">
-                    ₦0.00
-                  </p>
-                  {!freeEventEffectivelyClosed && (
-                    <p className="text-xs text-gray-500 leading-relaxed pt-0.5">
-                      {/* Only show the per-order cap when it's the standard
-                          10 — once remaining stock has pulled it lower,
-                          showing the reduced number would leak how many
-                          are left, the same signal we hide via the "Sold
-                          out" (not "Only N left") badge above. */}
-                      {freeEventMaxQty === FREE_EVENT_MAX_QTY
-                        ? `Max ${FREE_EVENT_MAX_QTY} tickets per order`
-                        : "Limited availability"}
-                    </p>
-                  )}
-                </div>
-
-                {/* Right: quantity control */}
-                <div className="flex-shrink-0 self-center">
-                  {freeEventSoldOut ? (
-                    <span className="text-sm font-semibold text-red-500 px-3 py-2 border border-red-200 rounded-xl bg-white">
-                      Sold out
-                    </span>
-                  ) : freeEventEffectivelyClosed ? (
-                    <span className="text-sm font-semibold text-gray-400 px-3 py-2 border border-gray-200 rounded-xl bg-white">
-                      Unavailable
-                    </span>
-                  ) : (
-                    <div className="flex items-center border-2 border-[#6b2fa5] rounded-xl overflow-hidden">
-                      <button
-                        onClick={decrementFree}
-                        disabled={freeQty <= 1}
-                        className="w-9 h-9 flex items-center justify-center bg-white text-[#6b2fa5] hover:bg-purple-50 active:scale-95 transition-all disabled:opacity-40"
-                        aria-label="Remove one"
-                      >
-                        <Minus size={16} strokeWidth={2.5} />
-                      </button>
-                      <span className="w-9 h-9 flex items-center justify-center font-bold text-[#6b2fa5] text-sm select-none">
-                        {freeQty}
-                      </span>
-                      <button
-                        onClick={incrementFree}
-                        disabled={freeQty >= freeEventMaxQty}
-                        className="w-9 h-9 flex items-center justify-center bg-[#6b2fa5] text-white hover:bg-purple-700 active:scale-95 transition-all disabled:bg-purple-300"
-                        aria-label="Add one"
-                      >
-                        <Plus size={16} strokeWidth={2.5} />
-                      </button>
-                    </div>
-                  )}
-                </div>
+            {/* Event started / passed */}
+            {(isEventPassed || eventStarted) && (
+              <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-medium">
+                <AlertTriangle size={15} className="flex-shrink-0" />
+                {isEventPassed
+                  ? "This event has already occurred. Ticket sales are closed."
+                  : "This event has already started. Ticket sales are closed."}
               </div>
-            </div>
-          ) : eventData.ticketPrices && eventData.ticketPrices.length > 0 ? (
-            <>
-              {!effectivelyClosed && (
-                <p className="text-xs font-medium text-gray-400 pb-1">
-                  You can add multiple ticket types to your order.
-                </p>
-              )}
+            )}
 
-              {(eventData.ticketPrices as TicketPrice[]).map((ticket, index) => {
-                const qty = quantities[index] ?? 0
-                const remaining = getRemaining(ticket)
-                const tierSoldOut = remaining !== null && remaining === 0
-                const saleStatus = getTicketSaleStatus(ticket, eventWideStop)
-                const tierNotOnSale = !saleStatus.onSale
-                const tierDisabled = effectivelyClosed || tierSoldOut || tierNotOnSale
+            {/* Sold out (whole event) */}
+            {isSoldOut && !isEventPassed && !eventStarted && (
+              <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-medium">
+                <AlertTriangle size={15} className="flex-shrink-0" />
+                This event is sold out.
+              </div>
+            )}
 
+            {/* Free event sold out */}
+            {eventData.isFree && freeEventSoldOut && !isSoldOut && !isEventPassed && !eventStarted && (
+              <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-medium">
+                <AlertTriangle size={15} className="flex-shrink-0" />
+                This event is sold out.
+              </div>
+            )}
 
-                let availBadge: React.ReactNode = null
-                if (tierNotOnSale) {
-                  // Sale-window badge takes priority over the plain
-                  // availability badge — it's the more specific reason.
-                  availBadge = (
-                    <span
-                      className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${
-                        saleStatus.reason === "not-started"
-                          ? "text-amber-700 bg-amber-50 border-amber-200"
-                          : "text-red-600 bg-red-50 border-red-200"
-                      }`}
+            {/* Stop date has passed */}
+            {stopDatePassed && !isEventPassed && !eventStarted && (
+              <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm font-medium">
+                <AlertTriangle size={15} className="flex-shrink-0" />
+                Ticket sales for this event have ended.
+              </div>
+            )}
+
+            {/* Legacy isSaleEnded fallback */}
+            {isSaleEnded && !stopDatePassed && !isEventPassed && !eventStarted && (
+              <div className="flex items-center gap-2 p-3 bg-orange-50 border border-orange-200 text-orange-700 rounded-xl text-sm font-medium">
+                <AlertTriangle size={15} className="flex-shrink-0" />
+                Ticket sales for this event have ended.
+              </div>
+            )}
+
+            {/* Sale stopping TODAY */}
+            {stopDateIsToday && !effectivelyClosed && (
+              <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-300 text-amber-800 rounded-xl text-sm font-semibold">
+                <Clock size={15} className="flex-shrink-0 text-amber-600" />
+                Ticket sales stop <span className="text-amber-900 mx-1">Today!</span> Cop yours now!
+              </div>
+            )}
+
+            {/* Event is today, hasn't started yet */}
+            {isEventToday && !eventStarted && !effectivelyClosed && (
+              <div className="flex items-center gap-2 p-3 bg-purple-50 border border-purple-200 text-[#6b2fa5] rounded-xl text-sm font-semibold">
+                <span className="text-base leading-none">🔥</span>
+                Event is Today! Grab your ticket before it starts.
+              </div>
+            )}
+          </div>
+
+          {/* ── Ticket list ── */}
+          <div className="space-y-3 p-5">
+            {eventData.isFree ? (
+              /* ── Free event: quantity picker ── */
+              <TicketCardShell
+                image={cardImage}
+                state={freeEventEffectivelyClosed ? "disabled" : "selected"}
+              >
+                <div className="flex items-start justify-between gap-4 p-4">
+                  {/* Left: ticket info */}
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-base font-bold leading-tight text-white">
+                        Free Admission
+                      </p>
+                      <span className="rounded-full border border-emerald-300/40 bg-emerald-400/20 px-2 py-0.5 text-xs font-semibold text-emerald-200">
+                        FREE
+                      </span>
+                    </div>
+                    <p className="text-lg font-bold leading-none text-emerald-300">
+                      ₦0.00
+                    </p>
+                    {!freeEventEffectivelyClosed && (
+                      <p className="pt-0.5 text-xs leading-relaxed text-white/65">
+                        {/* Only show the per-order cap when it's the standard
+                            10 — once remaining stock has pulled it lower,
+                            showing the reduced number would leak how many
+                            are left, the same signal we hide via the "Sold
+                            out" (not "Only N left") badge above. */}
+                        {freeEventMaxQty === FREE_EVENT_MAX_QTY
+                          ? `Max ${FREE_EVENT_MAX_QTY} tickets per order`
+                          : "Limited availability"}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Right: quantity control */}
+                  <div className="flex-shrink-0 self-center">
+                    {freeEventSoldOut ? (
+                      <span className="rounded-xl border border-red-300/40 bg-red-500/20 px-3 py-2 text-sm font-semibold text-red-200">
+                        Sold out
+                      </span>
+                    ) : freeEventEffectivelyClosed ? (
+                      <span className="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-sm font-semibold text-white/70">
+                        Unavailable
+                      </span>
+                    ) : (
+                      <div className="flex items-center overflow-hidden rounded-xl border-2 border-white/80">
+                        <button
+                          onClick={decrementFree}
+                          disabled={freeQty <= 1}
+                          className="flex h-9 w-9 items-center justify-center bg-white/90 text-[#6b2fa5] transition-all hover:bg-white active:scale-95 disabled:opacity-40"
+                          aria-label="Remove one"
+                        >
+                          <Minus size={16} strokeWidth={2.5} />
+                        </button>
+                        <span className="flex h-9 w-9 select-none items-center justify-center bg-black/30 text-sm font-bold text-white">
+                          {freeQty}
+                        </span>
+                        <button
+                          onClick={incrementFree}
+                          disabled={freeQty >= freeEventMaxQty}
+                          className="flex h-9 w-9 items-center justify-center bg-[#6b2fa5] text-white transition-all hover:bg-purple-600 active:scale-95 disabled:bg-purple-400/60"
+                          aria-label="Add one"
+                        >
+                          <Plus size={16} strokeWidth={2.5} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </TicketCardShell>
+            ) : eventData.ticketPrices && eventData.ticketPrices.length > 0 ? (
+              <>
+                {!effectivelyClosed && (
+                  <p className="pb-1 text-xs font-medium text-gray-400">
+                    You can add multiple ticket types to your order.
+                  </p>
+                )}
+
+                {(eventData.ticketPrices as TicketPrice[]).map((ticket, index) => {
+                  const qty = quantities[index] ?? 0
+                  const remaining = getRemaining(ticket)
+                  const tierSoldOut = remaining !== null && remaining === 0
+                  const saleStatus = getTicketSaleStatus(ticket, eventWideStop)
+                  const tierNotOnSale = !saleStatus.onSale
+                  const tierDisabled = effectivelyClosed || tierSoldOut || tierNotOnSale
+
+                  let availBadge: React.ReactNode = null
+                  if (tierNotOnSale) {
+                    // Sale-window badge takes priority over the plain
+                    // availability badge — it's the more specific reason.
+                    availBadge = (
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                          saleStatus.reason === "not-started"
+                            ? "border-amber-300/40 bg-amber-400/20 text-amber-200"
+                            : "border-red-300/40 bg-red-500/20 text-red-200"
+                        }`}
+                      >
+                        {describeSaleStatus(saleStatus)}
+                      </span>
+                    )
+                  } else if (remaining !== null && tierSoldOut) {
+                    // Only the binary "sold out" state is shown — the exact
+                    // remaining count is intentionally never surfaced to
+                    // buyers once the booker has set a limit (item: hide
+                    // sold/remaining numbers).
+                    availBadge = (
+                      <span className="rounded-full border border-red-300/40 bg-red-500/20 px-2 py-0.5 text-xs font-semibold text-red-200">
+                        Sold out
+                      </span>
+                    )
+                  }
+
+                  return (
+                    <TicketCardShell
+                      key={index}
+                      image={cardImage}
+                      state={tierDisabled ? "disabled" : qty > 0 ? "selected" : "default"}
                     >
-                      {describeSaleStatus(saleStatus)}
-                    </span>
-                  )
-                } else if (remaining !== null && tierSoldOut) {
-                  // Only the binary "sold out" state is shown — the exact
-                  // remaining count is intentionally never surfaced to
-                  // buyers once the booker has set a limit (item: hide
-                  // sold/remaining numbers).
-                  availBadge = (
-                    <span className="text-xs font-semibold text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">
-                      Sold out
-                    </span>
-                  )
-                }
+                      <div className="flex items-start justify-between gap-4 p-4">
 
-                return (
-                  <div
-                    key={index}
-                    className={`border rounded-xl transition-all ${
-                      tierDisabled
-                        ? "border-gray-200 bg-gray-50 opacity-60"
-                        : qty > 0
-                          ? "border-[#6b2fa5] bg-purple-50"
-                          : "border-gray-200 bg-white hover:border-purple-300"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between p-4 gap-4">
+                        {/* Left: ticket info */}
+                        <div className="min-w-0 flex-1 space-y-1">
+                          {/* Name + availability badge */}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className={`text-base font-bold leading-tight ${tierSoldOut ? "text-white/60" : "text-white"}`}>
+                              {ticket.policy}
+                            </p>
+                            {availBadge}
+                          </div>
 
-                      {/* Left: ticket info */}
-                      <div className="flex-1 min-w-0 space-y-1">
-                        {/* Name + availability badge */}
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className={`font-bold text-base leading-tight ${tierSoldOut ? "text-gray-400" : "text-gray-900"}`}>
-                            {ticket.policy}
+                          {/* Price only — actual VAT/fee amount depends on cart
+                              total + Burden of Fee and isn't final until checkout */}
+                          <p className={`text-lg font-bold leading-none ${tierSoldOut ? "text-white/50" : "text-white"}`}>
+                            ₦{formatNumber(Number(ticket.price) || 0)}
                           </p>
-                          {availBadge}
+                          {(Number(ticket.price) || 0) > 0 && buyerOwesAnyFee && (
+                            <p className="text-[11px] leading-snug text-white/60">
+                              + VAT & Fees computed at checkout
+                            </p>
+                          )}
+
+                          {/* Per-type cap hint */}
+                          {!tierDisabled && (
+                            <p className="pt-0.5 text-xs leading-relaxed text-white/65">
+                              Max {MAX_QTY_PER_TYPE} per order
+                            </p>
+                          )}
+
+                          {/* Description */}
+                          {ticket.description && (
+                            <p className="pt-0.5 text-xs leading-relaxed text-white/75">
+                              {ticket.description}
+                            </p>
+                          )}
                         </div>
 
-                        {/* Price only — actual VAT/fee amount depends on cart
-                            total + Burden of Fee and isn't final until checkout */}
-                        <p className={`font-bold text-lg leading-none ${tierSoldOut ? "text-gray-400" : "text-[#6b2fa5]"}`}>
-                          ₦{formatNumber(Number(ticket.price) || 0)}
-                          {(Number(ticket.price) || 0) > 0 && buyerOwesAnyFee && (
-                            <span className="text-xs font-normal text-gray-400 ml-1.5">
-                              + VAT & Fees computed at checkout
+                        {/* Right: quantity control */}
+                        <div className="flex-shrink-0 self-center">
+                          {tierSoldOut ? (
+                            <span className="rounded-xl border border-red-300/40 bg-red-500/20 px-3 py-2 text-sm font-semibold text-red-200">
+                              Sold out
                             </span>
-                          )}
-                        </p>
-
-                        {/* Per-type cap hint */}
-                        {!tierDisabled && (
-                          <p className="text-xs text-gray-400 leading-relaxed pt-0.5">
-                            Max {MAX_QTY_PER_TYPE} per order
-                          </p>
-                        )}
-
-                        {/* Description */}
-                        {ticket.description && (
-                          <p className="text-xs text-gray-500 leading-relaxed pt-0.5">
-                            {ticket.description}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Right: quantity control */}
-                      <div className="flex-shrink-0 self-center">
-                        {tierSoldOut ? (
-                          <span className="text-sm font-semibold text-red-500 px-3 py-2 border border-red-200 rounded-xl bg-red-50">
-                            Sold out
-                          </span>
-                        ) : effectivelyClosed ? (
-                          <span className="text-sm font-semibold text-gray-400 px-3 py-2 border border-gray-200 rounded-xl bg-white">
-                            Unavailable
-                          </span>
-                        ) : tierNotOnSale ? (
-                          <span
-                            className={`text-sm font-semibold px-3 py-2 border rounded-xl ${
-                              saleStatus.reason === "not-started"
-                                ? "text-amber-600 border-amber-200 bg-amber-50"
-                                : "text-gray-400 border-gray-200 bg-white"
-                            }`}
-                          >
-                            {saleStatus.reason === "not-started" ? "Not yet on sale" : "Unavailable"}
-                          </span>
-                        ) : qty === 0 ? (
-                          <button
-                            onClick={() => increment(index)}
-                            className="flex items-center gap-1.5 px-4 py-2.5 bg-[#6b2fa5] text-white rounded-xl font-semibold text-sm hover:bg-purple-700 active:scale-95 transition-all"
-                          >
-                            <Plus size={15} strokeWidth={2.5} />
-                            Add
-                          </button>
-                        ) : (
-                          <div className="flex items-center border-2 border-[#6b2fa5] rounded-xl overflow-hidden">
-                            <button
-                              onClick={() => decrement(index)}
-                              className="w-9 h-9 flex items-center justify-center bg-white text-[#6b2fa5] hover:bg-purple-50 active:scale-95 transition-all"
-                              aria-label="Remove one"
+                          ) : effectivelyClosed ? (
+                            <span className="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-sm font-semibold text-white/70">
+                              Unavailable
+                            </span>
+                          ) : tierNotOnSale ? (
+                            <span
+                              className={`rounded-xl border px-3 py-2 text-sm font-semibold ${
+                                saleStatus.reason === "not-started"
+                                  ? "border-amber-300/40 bg-amber-400/20 text-amber-200"
+                                  : "border-white/25 bg-white/10 text-white/70"
+                              }`}
                             >
-                              <Minus size={16} strokeWidth={2.5} />
-                            </button>
-                            <span className="w-9 h-9 flex items-center justify-center font-bold text-[#6b2fa5] text-sm select-none">
-                              {qty}
+                              {saleStatus.reason === "not-started" ? "Not yet on sale" : "Unavailable"}
                             </span>
+                          ) : qty === 0 ? (
                             <button
                               onClick={() => increment(index)}
-                              disabled={
-                                qty >= MAX_QTY_PER_TYPE ||
-                                (remaining !== null && qty >= remaining)
-                              }
-                              className="w-9 h-9 flex items-center justify-center bg-[#6b2fa5] text-white hover:bg-purple-700 active:scale-95 transition-all disabled:bg-purple-300"
-                              aria-label="Add one"
+                              className="flex items-center gap-1.5 rounded-xl border border-white/20 bg-[#6b2fa5] px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:bg-purple-600 active:scale-95"
                             >
-                              <Plus size={16} strokeWidth={2.5} />
+                              <Plus size={15} strokeWidth={2.5} />
+                              Add
                             </button>
-                          </div>
-                        )}
+                          ) : (
+                            <div className="flex items-center overflow-hidden rounded-xl border-2 border-white/80">
+                              <button
+                                onClick={() => decrement(index)}
+                                className="flex h-9 w-9 items-center justify-center bg-white/90 text-[#6b2fa5] transition-all hover:bg-white active:scale-95"
+                                aria-label="Remove one"
+                              >
+                                <Minus size={16} strokeWidth={2.5} />
+                              </button>
+                              <span className="flex h-9 w-9 select-none items-center justify-center bg-black/30 text-sm font-bold text-white">
+                                {qty}
+                              </span>
+                              <button
+                                onClick={() => increment(index)}
+                                disabled={
+                                  qty >= MAX_QTY_PER_TYPE ||
+                                  (remaining !== null && qty >= remaining)
+                                }
+                                className="flex h-9 w-9 items-center justify-center bg-[#6b2fa5] text-white transition-all hover:bg-purple-600 active:scale-95 disabled:bg-purple-400/60"
+                                aria-label="Add one"
+                              >
+                                <Plus size={16} strokeWidth={2.5} />
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </>
-          ) : (
-            <div className="p-4 bg-yellow-50 border border-yellow-200 text-yellow-700 rounded-xl text-sm">
-              No ticket options available for this event.
-            </div>
-          )}
+                    </TicketCardShell>
+                  )
+                })}
+              </>
+            ) : (
+              <div className="p-4 bg-yellow-50 border border-yellow-200 text-yellow-700 rounded-xl text-sm">
+                No ticket options available for this event.
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* ── Sticky footer: cart summary + CTA ── */}
+        {/* ── Pinned footer: cart summary + CTA ── */}
         {eventData.isFree ? (
           /* Free event footer */
           freeEventEffectivelyClosed ? (
-            <div className="px-5 pb-5">
+            <div className="shrink-0 border-t border-gray-200 bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
               <button
                 disabled
                 className="w-full bg-gray-200 text-gray-500 py-3.5 px-4 rounded-xl font-semibold text-base cursor-not-allowed"
@@ -630,7 +772,7 @@ const MAX_QTY_PER_TYPE = 10
               </button>
             </div>
           ) : (
-            <div className="sticky bottom-0 bg-white border-t border-gray-200 p-5 space-y-3">
+            <div className="shrink-0 space-y-3 border-t border-gray-200 bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
               <div className="space-y-1.5">
                 <div className="flex justify-between text-sm text-gray-700">
                   <span className="font-medium">
@@ -667,21 +809,24 @@ const MAX_QTY_PER_TYPE = 10
           )
         ) : cartItems.length > 0 ? (
           /* Paid event footer */
-          <div className="sticky bottom-0 bg-white border-t border-gray-200 p-5 space-y-3">
+          <div className="shrink-0 space-y-3 border-t border-gray-200 bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
             <div className="space-y-1.5">
-              {cartItems.map((item, i) => (
-                <div key={i} className="flex justify-between text-sm text-gray-700">
-                  <span className="font-medium">
-                    {item.ticketType}{" "}
-                    <span className="text-gray-400 font-normal">× {item.quantity}</span>
-                  </span>
-                  {item.price === 0 ? (
-                    <span className="font-semibold text-emerald-600">Free</span>
-                  ) : (
-                    <span className="font-semibold">₦{formatNumber(item.price * item.quantity)}</span>
-                  )}
-                </div>
-              ))}
+              {/* Capped so a big cart can't push the CTA off-screen on short phones */}
+              <div className="spotix-scroll max-h-28 space-y-1.5 overflow-y-auto">
+                {cartItems.map((item, i) => (
+                  <div key={i} className="flex justify-between text-sm text-gray-700">
+                    <span className="font-medium">
+                      {item.ticketType}{" "}
+                      <span className="text-gray-400 font-normal">× {item.quantity}</span>
+                    </span>
+                    {item.price === 0 ? (
+                      <span className="font-semibold text-emerald-600">Free</span>
+                    ) : (
+                      <span className="font-semibold">₦{formatNumber(item.price * item.quantity)}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
               {showFeeBreakdown && (
                 <div className="flex justify-between text-xs text-gray-400 pt-1.5 border-t border-gray-100">
                   <span>VAT & Fees</span>
@@ -722,7 +867,7 @@ const MAX_QTY_PER_TYPE = 10
           </div>
         ) : effectivelyClosed ? (
           /* Closed state CTA at the bottom */
-          <div className="px-5 pb-5">
+          <div className="shrink-0 border-t border-gray-200 bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
             <button
               disabled
               className="w-full bg-gray-200 text-gray-500 py-3.5 px-4 rounded-xl font-semibold text-base cursor-not-allowed"
@@ -736,4 +881,4 @@ const MAX_QTY_PER_TYPE = 10
   )
 }
 
-export default BuyTicketDialog
+export default BuyTicketDrawer

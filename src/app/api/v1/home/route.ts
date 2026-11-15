@@ -9,6 +9,7 @@ interface HomeEvent {
   venue: string
   eventType: string
   eventStartDate: string
+  eventStart?: string
   freeOrPaid: boolean
   eventImage: string
 }
@@ -65,7 +66,7 @@ export async function GET() {
     // Only fetch the fields we actually need
     const eventsSnapshot = await adminDb
       .collection("events")
-      .select("eventName", "eventVenue", "eventType", "eventDate", "isFree", "eventImage", "status", "suspended", "eventGroup")
+      .select("eventName", "eventVenue", "eventType", "eventDate", "eventStart", "isFree", "eventImage", "status", "suspended", "eventGroup")
       .limit(15)
       .get()
 
@@ -100,6 +101,7 @@ export async function GET() {
         venue: data.eventVenue ?? "",
         eventType: data.eventType ?? "",
         eventStartDate: data.eventDate ?? "",
+        eventStart: data.eventStart ?? "",
         freeOrPaid: data.isFree === false,
         eventImage: data.eventImage ?? "",
       })

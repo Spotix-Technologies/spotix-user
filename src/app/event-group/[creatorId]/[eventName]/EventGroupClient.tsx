@@ -311,7 +311,7 @@ const EventGroupClient: React.FC<Props> = ({ params }) => {
   }
 
   const handleVariationClick = (variation: EventVariation) => {
-    router.push(`/event/${creatorId}/${variation.id}`)
+    router.push(`/event/${variation.id}`)
   }
 
   if (loading) {

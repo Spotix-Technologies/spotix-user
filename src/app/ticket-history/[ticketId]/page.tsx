@@ -231,20 +231,20 @@ export default function TicketHistoryInfo() {
   const isGiftedTicket = !!ticketDetails.giftedBy
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-dvh bg-white flex flex-col">
       <UserHeader />
 
-      <div className="flex-grow max-w-6xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 flex flex-col">
+      <div className="flex-grow max-w-6xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-5 sm:py-8 flex flex-col">
 
         <button
           onClick={() => router.back()}
-          className="inline-flex items-center gap-2 text-gray-500 hover:text-gray-800 mb-8 font-medium w-fit transition-colors text-sm"
+          className="inline-flex items-center gap-2 text-gray-500 hover:text-gray-800 mb-5 sm:mb-8 font-medium w-fit transition-colors text-sm -ml-1 px-1 py-1.5"
         >
           <ArrowLeft size={16} />
           Back to Tickets
         </button>
 
-        <div className="mb-8">
+        <div className="mb-5 sm:mb-8">
           <h1 className="text-2xl font-bold text-gray-900">Your Ticket</h1>
           <p className="text-gray-500 text-sm mt-1">Keep this safe — you'll need it at the event.</p>
         </div>
@@ -272,10 +272,10 @@ export default function TicketHistoryInfo() {
         <div className="flex-grow grid grid-cols-1 lg:grid-cols-3 gap-6">
 
           {/* Ticket Card */}
-          <div ref={ticketRef} className="lg:col-span-2">
+          <div ref={ticketRef} className="lg:col-span-2 order-2 lg:order-1">
             <div className="border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
 
-              <div className="bg-gradient-to-r from-purple-600 to-purple-800 px-8 py-10 text-white relative overflow-hidden">
+              <div className="bg-gradient-to-r from-purple-600 to-purple-800 px-5 py-7 sm:px-8 sm:py-10 text-white relative overflow-hidden">
                 <div
                   className="absolute inset-0 opacity-10"
                   style={{
@@ -287,7 +287,7 @@ export default function TicketHistoryInfo() {
                   <span className="inline-block text-xs font-semibold tracking-widest uppercase text-purple-200 mb-3">
                     {ticketDetails.eventType}
                   </span>
-                  <h2 className="text-3xl font-bold leading-tight">{ticketDetails.eventName}</h2>
+                  <h2 className="text-2xl sm:text-3xl font-bold leading-tight break-words">{ticketDetails.eventName}</h2>
                 </div>
               </div>
 
@@ -296,12 +296,12 @@ export default function TicketHistoryInfo() {
                 <div className="absolute -right-3 -top-3 w-6 h-6 rounded-full bg-white border border-gray-200" />
               </div>
 
-              <div className="p-8 bg-white">
+              <div className="p-5 sm:p-8 bg-white">
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8 pb-8 border-b border-dashed border-gray-200">
                   <div>
                     <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Date & Time</p>
-                    <p className="text-lg font-bold text-gray-900 mb-1">
+                    <p className="text-base sm:text-lg font-bold text-gray-900 mb-1">
                       {ticketDetails.eventDate ? formatDisplayDate(ticketDetails.eventDate) : "Not specified"}
                     </p>
                     {ticketDetails.eventStart && (
@@ -322,7 +322,7 @@ export default function TicketHistoryInfo() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-4 mb-8 pb-8 border-b border-dashed border-gray-200">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-8 pb-8 border-b border-dashed border-gray-200">
                   <div>
                     <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Ticket Type</p>
                     <p className="text-base font-bold text-gray-900">{ticketDetails.ticketType}</p>
@@ -333,7 +333,7 @@ export default function TicketHistoryInfo() {
                       {ticketDetails.ticketPrice === 0 ? "Free" : `₦${ticketDetails.ticketPrice.toLocaleString()}`}
                     </p>
                   </div>
-                  <div>
+                  <div className="col-span-2 sm:col-span-1">
                     <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Reference</p>
                     <p className="text-sm font-mono text-gray-700 break-all">{ticketDetails.ticketReference}</p>
                   </div>
@@ -341,7 +341,7 @@ export default function TicketHistoryInfo() {
 
                 <div className="mb-8 pb-8 border-b border-dashed border-gray-200">
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Ticket ID</p>
-                  <p className="text-2xl font-mono font-bold text-gray-900 tracking-widest">{ticketId}</p>
+                  <p className="text-lg sm:text-2xl font-mono font-bold text-gray-900 tracking-wider sm:tracking-widest break-all">{ticketId}</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 mb-6">
@@ -366,7 +366,7 @@ export default function TicketHistoryInfo() {
           </div>
 
           {/* Right Sidebar */}
-          <div className="lg:col-span-1 flex flex-col gap-4">
+          <div className="lg:col-span-1 flex flex-col gap-4 order-1 lg:order-2">
 
             {/* QR Code Card */}
             <div className="border border-gray-200 rounded-2xl p-6 flex flex-col items-center bg-white shadow-sm">

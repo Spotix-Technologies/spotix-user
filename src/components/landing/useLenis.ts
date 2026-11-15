@@ -10,11 +10,27 @@
 
 import { useEffect, useRef } from "react"
 import Lenis from "lenis"
+import { lockRootScroll } from "./hero-scroll/scroll-lock"
 
 let _lenis: Lenis | null = null
+let _locked = false
 
 export function getLenis(): Lenis | null {
   return _lenis
+}
+
+/**
+ * Pause / resume ALL page scrolling (e.g. while the hero is capturing the wheel):
+ * stops Lenis and locks native scroll on <html>.
+ * Safe to call before Lenis exists — child effects run before the parent's
+ * useLenisInit effect, so the desired state is remembered and applied on init.
+ */
+export function setLenisLocked(locked: boolean): void {
+  _locked = locked
+  lockRootScroll(locked) // Lenis.stop() alone does not block native scrolling
+  if (!_lenis) return
+  if (locked) _lenis.stop()
+  else _lenis.start()
 }
 
 export function useLenisInit(): void {
@@ -30,6 +46,7 @@ export function useLenisInit(): void {
 
     _lenis = lenis
     lenisRef.current = lenis
+    if (_locked) lenis.stop()
 
     let rafId: number
     function raf(time: number) {
@@ -44,4 +61,4 @@ export function useLenisInit(): void {
       _lenis = null
     }
   }, [])
-}
+}

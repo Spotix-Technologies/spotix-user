@@ -51,7 +51,7 @@ function ContestantPreview({ c, totalVotes }: { c: Contestant; totalVotes: numbe
         <div className="flex items-center gap-2 mt-1">
           <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
             <div
-              className="h-full bg-gradient-to-r from-[#6b2fa5] to-[#9333ea] rounded-full transition-all duration-700"
+              className="h-full bg-[#6b2fa5] rounded-full transition-all duration-700"
               style={{ width: `${pct}%` }}
             />
           </div>
@@ -86,7 +86,7 @@ export default function VotingSection({ votingId, votingPollName }: VotingProps)
 
   if (loading) {
     return (
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex items-center justify-center gap-2 text-slate-400">
+      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 flex items-center justify-center gap-2 text-slate-400">
         <Loader2 className="w-4 h-4 animate-spin" />
         <span className="text-sm">Loading poll…</span>
       </div>
@@ -109,9 +109,9 @@ export default function VotingSection({ votingId, votingPollName }: VotingProps)
     const categoryCount = categories.length
 
     return (
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
         {/* Header */}
-        <div className="bg-gradient-to-r from-[#6b2fa5] to-[#9333ea] px-5 py-4 flex items-center justify-between">
+        <div className="bg-[#6b2fa5] px-5 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center">
               <Vote className="w-4 h-4 text-white" />
@@ -158,7 +158,7 @@ export default function VotingSection({ votingId, votingPollName }: VotingProps)
 
           <Link
             href={pollPath}
-            className="flex items-center justify-center gap-2 w-full py-2.5 bg-gradient-to-r from-[#6b2fa5] to-[#9333ea] text-white rounded-xl text-sm font-semibold hover:shadow-lg transition-all group"
+            className="flex items-center justify-center gap-2 w-full py-2.5 bg-[#6b2fa5] text-white rounded-xl text-sm font-semibold hover:shadow-lg transition-all group"
           >
             {isPollEnded ? "View Final Results" : "Vote Now"}
             <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
@@ -174,9 +174,9 @@ export default function VotingSection({ votingId, votingPollName }: VotingProps)
   const preview    = sorted.slice(0, 3)
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+    <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
       {/* Header */}
-      <div className="bg-gradient-to-r from-[#6b2fa5] to-[#9333ea] px-5 py-4 flex items-center justify-between">
+      <div className="bg-[#6b2fa5] px-5 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center">
             <Vote className="w-4 h-4 text-white" />
@@ -239,7 +239,7 @@ export default function VotingSection({ votingId, votingPollName }: VotingProps)
         {/* CTA */}
         <Link
           href={pollPath}
-          className="flex items-center justify-center gap-2 w-full py-2.5 bg-gradient-to-r from-[#6b2fa5] to-[#9333ea] text-white rounded-xl text-sm font-semibold hover:shadow-lg transition-all group"
+          className="flex items-center justify-center gap-2 w-full py-2.5 bg-[#6b2fa5] text-white rounded-xl text-sm font-semibold hover:shadow-lg transition-all group"
         >
           {isPollEnded ? "View Final Results" : "Vote Now"}
           <ChevronRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />

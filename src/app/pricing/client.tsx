@@ -1,378 +1,527 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef } from "react"
+import type { ReactNode } from "react"
 import Link from "next/link"
-import Image from "next/image"
 import Navbar from "@/components/landing/NavBar"
 import { Footer } from "@/components/landing/footer"
-import { 
-  Ticket, 
-  Vote, 
-  ShoppingBag, 
-  Palette, 
-  Globe, 
-  Mail, 
+import { GRADIENTS, UI } from "@/components/landing/theme"
+import {
+  Ticket,
+  Vote,
+  ShoppingBag,
+  Palette,
+  Globe,
+  Mail,
   CreditCard,
   Check,
   MessageCircle,
-  ChevronRight
+  ChevronRight,
+  ArrowRight,
+  Wallet,
+  Users,
+  Info,
 } from "lucide-react"
 
-export default function PricingClient() {
-  const primaryPricing = {
-    title: "Event Tickets",
-    rate: "5% + ₦100",
-    subtitle: "per ticket sold",
-    description: "For every paid event ticket purchased on Spotix Web, Spotix Bot, Spotix App, or via the Spotix API system, we reserve a transparent service fee of 5% plus ₦100.",
-    icon: Ticket,
+/* ─── Content ─────────────────────────────────────────────────────────────── */
+
+const trustPoints = ["No hidden fees", "Only pay for what you use", "You choose who pays the fees"]
+
+const primaryPricing = {
+  title: "Event Tickets",
+  rate: "5% + ₦100",
+  subtitle: "per ticket sold",
+  description:
+    "For every paid event ticket purchased on Spotix Web, Spotix Bot, Spotix App, or via the Spotix API system, we reserve a transparent service fee of 5% plus ₦100.",
+  features: [
+    "Instant QR code ticket delivery",
+    "Real-time sales tracking",
+    "Secure payment processing",
+    "24/7 customer support",
+    "No hidden charges",
+  ],
+}
+
+/** Worked example used by both the fee breakdown and the two "who pays" options (₦10,000 ticket). */
+const EXAMPLE = {
+  price: "₦10,000",
+  percentage: "₦500",
+  flat: "₦100",
+  fee: "₦600",
+}
+
+const feeOptions = [
+  {
+    tag: "Option 1 · Default",
+    icon: Users,
+    title: "Buyers pay the fees",
+    description:
+      "The service fee is added on top of your ticket price at checkout. Your ticket price stays whole, so you receive every naira you priced.",
+    rows: [
+      { label: "Ticket price", value: EXAMPLE.price },
+      { label: "Service fee, added at checkout", value: `+ ${EXAMPLE.fee}` },
+    ],
+    buyerPays: "₦10,600",
+    youReceive: "₦10,000",
+    bestFor: "Best for keeping your full payout intact.",
+  },
+  {
+    tag: "Option 2",
+    icon: Wallet,
+    title: "You cover the fees",
+    description:
+      "Buyers pay just the ticket price, nothing extra at checkout. We take the service fee from your proceeds instead.",
+    rows: [
+      { label: "Ticket price", value: EXAMPLE.price },
+      { label: "Service fee, taken from your proceeds", value: `− ${EXAMPLE.fee}` },
+    ],
+    buyerPays: "₦10,000",
+    youReceive: "₦9,400",
+    bestFor: "Best for clean pricing: what buyers see is what they pay.",
+  },
+]
+
+const secondaryPricing = [
+  {
+    title: "Voting Rates",
+    rate: "10%",
+    subtitle: "per vote",
+    description:
+      "We collect 10% of every paid voting fee across Spotix Web and Spotix Bot, ensuring fair and transparent voting systems for your events.",
+    icon: Vote,
+  },
+  {
+    title: "Merchandise Rates",
+    rate: "10%",
+    subtitle: "per sale",
+    description:
+      "We collect 10% of every merchandise item sold across Spotix Web and Spotix Bot, helping you manage event merch seamlessly.",
+    icon: ShoppingBag,
+  },
+]
+
+const auxiliaryServices = [
+  {
+    title: "Graphics Design",
+    description:
+      "Need a stunning design flyer for your event? Our expert designers have you covered! Get professional, eye-catching graphics that make your event stand out.",
+    icon: Palette,
+    pricing: "Contact for quote",
+    features: ["Professional event flyers", "Social media graphics", "Promotional banners", "Fast turnaround time"],
+  },
+  {
+    title: "Custom Event Page",
+    description:
+      "Build on the Spotix Event API to create fully customized event pages tailored to your brand. Perfect for enterprises and large-scale events.",
+    icon: Globe,
+    pricing: "Contact for quote",
+    features: ["Full API access", "Custom branding", "Advanced analytics", "Priority support"],
+  },
+  {
+    title: "Branded Email",
+    description:
+      "Why create an entire Gmail account for your event when you can get one on Spotix? Rent or own a professional email address. The choice is yours!",
+    icon: Mail,
+    pricing: "Contact for quote",
     features: [
-      "Instant QR code ticket delivery",
-      "Real-time sales tracking",
-      "Secure payment processing",
-      "24/7 customer support",
-      "No hidden charges"
-    ]
-  }
+      "your-event@booker.spotix.com.ng",
+      "Professional appearance",
+      "Integrated with platform",
+      "Flexible rent or buy options",
+    ],
+    example: "your-event-name@booker.spotix.com.ng",
+  },
+  {
+    title: "Spotix Smart Card",
+    description:
+      "One card, any event. Pay for any event on Spotix and have it automatically linked to your card. The ultimate convenience for frequent event-goers.",
+    icon: CreditCard,
+    pricing: "Contact for quote",
+    features: ["Universal event access", "Contactless payments", "Auto-sync with account", "Exclusive cardholder perks"],
+  },
+]
 
-  const secondaryPricing = [
-    {
-      title: "Voting Rates",
-      rate: "10%",
-      subtitle: "per vote",
-      description: "We collect 10% of every paid voting fee across Spotix Web and Spotix Bot, ensuring fair and transparent voting systems for your events.",
-      icon: Vote,
-      color: "from-blue-500 to-blue-600"
-    },
-    {
-      title: "Merchandise Rates",
-      rate: "10%",
-      subtitle: "per sale",
-      description: "We collect 10% of every merchandise item sold across Spotix Web and Spotix Bot, helping you manage event merch seamlessly.",
-      icon: ShoppingBag,
-      color: "from-green-500 to-green-600"
-    }
-  ]
+/* ─── Small shared pieces ─────────────────────────────────────────────────── */
 
-  const auxiliaryServices = [
-    {
-      title: "Graphics Design",
-      description: "Need a stunning design flyer for your event? Our expert designers have you covered! Get professional, eye-catching graphics that make your event stand out.",
-      icon: Palette,
-      pricing: "Contact for quote",
-      features: ["Professional event flyers", "Social media graphics", "Promotional banners", "Fast turnaround time"]
-    },
-    {
-      title: "Custom Event Page",
-      description: "Build on the Spotix Event API to create fully customized event pages tailored to your brand. Perfect for enterprises and large-scale events.",
-      icon: Globe,
-      pricing: "Contact for quote",
-      features: ["Full API access", "Custom branding", "Advanced analytics", "Priority support"]
-    },
-    {
-      title: "Branded Email",
-      description: "Why create an entire Gmail account for your event when you can get one on Spotix? Rent or own a professional email address. The choice is yours!",
-      icon: Mail,
-      pricing: "Contact for quote",
-      features: ["your-event@booker.spotix.com.ng", "Professional appearance", "Integrated with platform", "Flexible rent or buy options"],
-      example: "your-event-name@booker.spotix.com.ng"
-    },
-    {
-      title: "Spotix Smart Card",
-      description: "One card, any event. Pay for any event on Spotix and have it automatically linked to your card. The ultimate convenience for frequent event-goers.",
-      icon: CreditCard,
-      pricing: "Contact for quote",
-      features: ["Universal event access", "Contactless payments", "Auto-sync with account", "Exclusive cardholder perks"]
-    }
-  ]
+/** Fades + lifts its children in once, the first time they scroll into view (same pattern as the landing sections). */
+function Reveal({ children, delay = 0, className = "" }: { children: ReactNode; delay?: number; className?: string }) {
+  const ref = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const obs = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          el.classList.add("pr-visible")
+          obs.disconnect()
+        }
+      },
+      { threshold: 0.12 },
+    )
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [])
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-purple-50">
+    <div ref={ref} className={`pr-reveal ${className}`} style={{ transitionDelay: `${delay}ms` }}>
+      {children}
+    </div>
+  )
+}
+
+function SectionHeading({
+  eyebrow,
+  title,
+  lead,
+  center = false,
+}: {
+  eyebrow: string
+  title: string
+  lead: string
+  center?: boolean
+}) {
+  return (
+    <Reveal className={`mb-12 max-w-2xl ${center ? "mx-auto text-center" : ""}`}>
+      <p className={`${UI.eyebrow} mb-3`}>{eyebrow}</p>
+      <h2 className={`${UI.h2} mb-4`}>{title}</h2>
+      <p className={UI.lead}>{lead}</p>
+    </Reveal>
+  )
+}
+
+function IconTile({ icon: Icon, dark = false }: { icon: typeof Ticket; dark?: boolean }) {
+  return (
+    <div
+      className={`flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl ${
+        dark ? "bg-white/15 text-white" : "bg-[#f5f0fb] text-[#6b2fa5]"
+      }`}
+    >
+      <Icon className="h-6 w-6" />
+    </div>
+  )
+}
+
+/* ─── Page ────────────────────────────────────────────────────────────────── */
+
+export default function PricingClient() {
+  return (
+    <div className="min-h-screen overflow-x-clip bg-white">
       <Navbar />
-      
-      {/* Hero Section */}
-      <section className="relative bg-gradient-to-br from-[#6b2fa5] via-purple-700 to-purple-600 text-white py-20 md:py-28 overflow-hidden">
-        {/* Background Image */}
-        <div className="absolute inset-0 opacity-10">
-          <Image
-            src="/spotix-placeholder.png"
-            alt="Spotix Background"
-            fill
-            className="object-cover"
-            priority
-          />
-        </div>
 
-        {/* Animated Background Elements */}
-        <div className="absolute inset-0 overflow-hidden">
-          <div className="absolute top-20 left-10 w-72 h-72 bg-purple-300 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob"></div>
-          <div className="absolute top-40 right-10 w-72 h-72 bg-purple-400 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-2000"></div>
-          <div className="absolute -bottom-8 left-1/2 w-72 h-72 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-4000"></div>
-        </div>
+      {/* ── Hero ── */}
+      <section className={`relative overflow-hidden pb-16 pt-32 sm:pb-20 sm:pt-40 ${UI.bandWhite}`}>
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0"
+          style={{ backgroundImage: "radial-gradient(ellipse 60% 70% at 50% 0%, rgba(107,47,165,0.10) 0%, transparent 70%)" }}
+        />
 
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-          {/* Breadcrumb */}
-          <div className="flex items-center gap-2 text-purple-100 mb-6 text-sm md:text-base">
-            <Link href="/" className="hover:text-white transition-colors">
+        <div className={`${UI.container} relative`}>
+          <nav aria-label="Breadcrumb" className="mb-8 flex items-center justify-center gap-2 text-sm text-[#7c7389]">
+            <Link href="/" className="transition-colors hover:text-[#6b2fa5]">
               Home
             </Link>
-            <ChevronRight size={16} />
-            <span className="relative inline-flex items-center justify-center px-2">
-              <span className="relative z-10 px-1">Pricing</span>
-              {/* Animated Dotted Circle */}
-              <svg className="absolute inset-0 w-full h-full animate-spin-slow" style={{ animationDuration: '8s' }} viewBox="0 0 100 100">
-                <circle
-                  cx="50"
-                  cy="50"
-                  r="45"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                  strokeDasharray="4 6"
-                  className="text-purple-200 opacity-60"
-                />
-              </svg>
+            <ChevronRight className="h-4 w-4" />
+            <span className="font-medium text-[#171123]" aria-current="page">
+              Pricing
             </span>
-          </div>
+          </nav>
 
-          {/* Hero Content */}
-          <div className="text-center max-w-4xl mx-auto">
-            <h1 className="text-4xl md:text-6xl font-bold mb-6 leading-tight">
-              Transparent Pricing,
-              <br />
-              <span className="bg-gradient-to-r from-yellow-300 via-yellow-200 to-yellow-100 bg-clip-text text-transparent">
-                No Hidden Fees
-              </span>
+          <div className="mx-auto max-w-3xl text-center">
+            <p className={`${UI.eyebrow} mb-4`}>Pricing</p>
+            <h1 className="text-balance text-4xl font-bold leading-[1.05] tracking-tight text-[#171123] sm:text-5xl lg:text-6xl">
+              Transparent pricing, <span className="text-[#6b2fa5]">no hidden fees</span>
             </h1>
-            <p className="text-lg md:text-xl text-purple-100 mb-8 leading-relaxed max-w-2xl mx-auto">
-              Simple, straightforward pricing that grows with your events. Only pay for what you use, with complete transparency every step of the way.
+            <p className={`${UI.lead} mx-auto mt-6 max-w-2xl`}>
+              Simple, straightforward pricing that grows with your events. Only pay for what you use, with complete
+              transparency every step of the way.
             </p>
+
+            <ul className="mt-10 flex flex-col items-center justify-center gap-x-8 gap-y-3 text-sm text-[#4b4257] sm:flex-row">
+              {trustPoints.map((point) => (
+                <li key={point} className="flex items-center gap-2">
+                  <Check className="h-4 w-4 text-[#6b2fa5]" />
+                  {point}
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
       </section>
 
-      {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 md:py-24">
-        
-        {/* Primary Pricing - Event Tickets */}
-        <div className="mb-16">
-          <div className="text-center mb-12">
-            <span className="inline-block px-4 py-2 bg-[#6b2fa5]/10 text-[#6b2fa5] rounded-full text-sm font-semibold mb-4">
-              Primary Pricing
-            </span>
-            <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-3">Core Event Ticketing</h2>
-            <p className="text-gray-600 text-lg">Our main service with the best rates in Nigeria</p>
-          </div>
+      {/* ── Event tickets (primary) ── */}
+      <section className={`py-20 sm:py-24 ${UI.bandGrey}`}>
+        <div className={UI.container}>
+          <SectionHeading
+            eyebrow="Core ticketing"
+            title="Our main service, at the best rates in Nigeria"
+            lead="One simple fee on every paid ticket, and you decide who pays it."
+          />
 
-          <div className="bg-gradient-to-br from-[#6b2fa5] to-purple-700 rounded-3xl shadow-2xl overflow-hidden transform hover:scale-[1.02] transition-all duration-300">
-            <div className="p-8 md:p-12">
-              <div className="grid md:grid-cols-2 gap-8 items-center">
-                <div className="text-white">
-                  <div className="inline-flex items-center justify-center w-16 h-16 bg-white/20 rounded-2xl mb-6">
-                    <Ticket size={32} className="text-white" />
+          {/* Rate card */}
+          <Reveal>
+            <div className="relative overflow-hidden rounded-[2rem] p-8 sm:p-12" style={{ background: GRADIENTS.brand }}>
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0"
+                style={{ backgroundImage: "radial-gradient(ellipse 70% 80% at 50% 0%, rgba(255,255,255,0.16) 0%, transparent 70%)" }}
+              />
+              <div className="relative grid items-center gap-10 lg:grid-cols-2 lg:gap-14">
+                <div>
+                  <IconTile icon={Ticket} dark />
+                  <h3 className="mb-3 mt-6 text-2xl font-bold tracking-tight text-white sm:text-3xl">
+                    {primaryPricing.title}
+                  </h3>
+                  <div className="mb-5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <span className="text-5xl font-bold tracking-tight text-white sm:text-6xl">{primaryPricing.rate}</span>
+                    <span className="text-lg text-white/85">{primaryPricing.subtitle}</span>
                   </div>
-                  <h3 className="text-3xl md:text-4xl font-bold mb-3">{primaryPricing.title}</h3>
-                  <div className="flex items-baseline gap-2 mb-4">
-                    <span className="text-5xl md:text-6xl font-bold text-yellow-300">{primaryPricing.rate}</span>
-                    <span className="text-xl text-purple-100">{primaryPricing.subtitle}</span>
-                  </div>
-                  <p className="text-purple-100 text-lg leading-relaxed mb-6">
-                    {primaryPricing.description}
-                  </p>
-                  
-                  {/* Features */}
-                  <div className="space-y-3">
-                    {primaryPricing.features.map((feature, index) => (
-                      <div key={index} className="flex items-center gap-3">
-                        <div className="flex-shrink-0 w-6 h-6 bg-green-400 rounded-full flex items-center justify-center">
-                          <Check size={16} className="text-white" />
-                        </div>
-                        <span className="text-white">{feature}</span>
-                      </div>
+                  <p className="mb-7 text-base leading-relaxed text-white/85 sm:text-lg">{primaryPricing.description}</p>
+
+                  <ul className="space-y-3">
+                    {primaryPricing.features.map((feature) => (
+                      <li key={feature} className="flex items-center gap-3 text-white">
+                        <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-white/10">
+                          <Check className="h-3.5 w-3.5 text-white" />
+                        </span>
+                        {feature}
+                      </li>
                     ))}
-                  </div>
+                  </ul>
                 </div>
 
-                {/* Visual Element */}
-                <div className="hidden md:block">
-                  <div className="relative">
-                    <div className="absolute inset-0 bg-gradient-to-br from-yellow-300 to-pink-300 rounded-3xl blur-2xl opacity-30 animate-pulse"></div>
-                    <div className="relative bg-white/10 backdrop-blur-lg rounded-3xl p-8 border border-white/20">
-                      <div className="text-center">
-                        <div className="text-6xl font-bold text-white mb-2">5%</div>
-                        <div className="text-2xl text-yellow-300 font-semibold mb-4">+ ₦100</div>
-                        <div className="text-purple-100 text-sm">Per Ticket Fee</div>
-                      </div>
-                      <div className="mt-6 pt-6 border-t border-white/20">
-                        <div className="text-sm text-purple-100 mb-2">Example calculation:</div>
-                        <div className="bg-white/10 rounded-lg p-3 text-white text-sm">
-                          <div className="flex justify-between mb-1">
-                            <span>Ticket Price:</span>
-                            <span className="font-semibold">₦10,000</span>
-                          </div>
-                          <div className="flex justify-between mb-1">
-                            <span>Spotix Fee:</span>
-                            <span className="font-semibold">₦600</span>
-                          </div>
-                          <div className="border-t border-white/20 my-2"></div>
-                          <div className="flex justify-between font-bold">
-                            <span>You Receive:</span>
-                            <span className="text-yellow-300">₦9,400</span>
-                          </div>
-                        </div>
-                      </div>
+                {/* How the fee adds up */}
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-6 sm:p-8">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/80">
+                    How the fee adds up
+                  </p>
+                  <p className="mt-2 text-sm text-white/70">On a {EXAMPLE.price} ticket:</p>
+
+                  <dl className="mt-5 space-y-3 text-sm sm:text-base">
+                    <div className="flex items-center justify-between text-white/80">
+                      <dt>5% of ticket price</dt>
+                      <dd className="font-semibold text-white">{EXAMPLE.percentage}</dd>
                     </div>
-                  </div>
+                    <div className="flex items-center justify-between text-white/80">
+                      <dt>Flat fee</dt>
+                      <dd className="font-semibold text-white">{EXAMPLE.flat}</dd>
+                    </div>
+                    <div className="flex items-center justify-between border-t border-white/10 pt-3 text-white">
+                      <dt className="font-semibold">Spotix service fee</dt>
+                      <dd className="text-xl font-bold text-white">
+                        {EXAMPLE.fee}
+                      </dd>
+                    </div>
+                  </dl>
+
+                  <p className="mt-6 text-sm leading-relaxed text-white/80">
+                    Who pays this fee is up to you. See the two options below.
+                  </p>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
+          </Reveal>
 
-        {/* Secondary Pricing */}
-        <div className="mb-16">
-          <div className="text-center mb-12">
-            <span className="inline-block px-4 py-2 bg-blue-100 text-blue-700 rounded-full text-sm font-semibold mb-4">
-              Secondary Pricing
-            </span>
-            <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-3">Additional Revenue Streams</h2>
-            <p className="text-gray-600 text-lg">Maximize your event monetization with voting and merchandise</p>
-          </div>
+          {/* Who pays the fees */}
+          <div className="mt-20">
+            <SectionHeading
+              eyebrow="You're in control"
+              title="Event bookers decide who pays the fees"
+              lead="Choose how the fees are handled for each event. Either way, the numbers are clear before a single ticket is sold."
+            />
 
-          <div className="grid md:grid-cols-2 gap-8">
-            {secondaryPricing.map((service, index) => {
-              const Icon = service.icon
-              return (
-                <div
-                  key={index}
-                  className="bg-white rounded-2xl shadow-xl overflow-hidden hover:shadow-2xl transform hover:-translate-y-1 transition-all duration-300 border border-gray-100"
-                >
-                  <div className={`h-2 bg-gradient-to-r ${service.color}`}></div>
-                  <div className="p-8">
-                    <div className={`inline-flex items-center justify-center w-14 h-14 bg-gradient-to-r ${service.color} rounded-xl mb-6 shadow-lg`}>
-                      <Icon size={28} className="text-white" />
-                    </div>
-                    <h3 className="text-2xl font-bold text-gray-900 mb-3">{service.title}</h3>
-                    <div className="flex items-baseline gap-2 mb-4">
-                      <span className="text-5xl font-bold text-gray-900">{service.rate}</span>
-                      <span className="text-lg text-gray-600">{service.subtitle}</span>
-                    </div>
-                    <p className="text-gray-600 leading-relaxed">{service.description}</p>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
-        {/* Auxiliary Pricing */}
-        <div>
-          <div className="text-center mb-12">
-            <span className="inline-block px-4 py-2 bg-purple-100 text-purple-700 rounded-full text-sm font-semibold mb-4">
-              Auxiliary Services
-            </span>
-            <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-3">Premium Add-Ons</h2>
-            <p className="text-gray-600 text-lg">Take your events to the next level with our professional services</p>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-8">
-            {auxiliaryServices.map((service, index) => {
-              const Icon = service.icon
-              return (
-                <div
-                  key={index}
-                  className="bg-white rounded-2xl shadow-lg overflow-hidden hover:shadow-xl transition-all duration-300 border border-gray-100"
-                >
-                  <div className="p-8">
-                    <div className="flex items-start justify-between mb-6">
-                      <div className="inline-flex items-center justify-center w-12 h-12 bg-[#6b2fa5]/10 rounded-xl">
-                        <Icon size={24} className="text-[#6b2fa5]" />
-                      </div>
-                      <span className="text-sm font-semibold text-[#6b2fa5] bg-[#6b2fa5]/10 px-3 py-1 rounded-full">
-                        {service.pricing}
+            <div className="grid gap-6 lg:grid-cols-2 lg:gap-8">
+              {feeOptions.map((option, index) => (
+                <Reveal key={option.title} delay={index * 90}>
+                  <article className={`flex h-full flex-col p-6 sm:p-8 ${UI.card}`}>
+                    <div className="mb-6 flex items-start justify-between gap-4">
+                      <IconTile icon={option.icon} />
+                      <span className="rounded-full bg-[#f5f0fb] px-3 py-1 text-xs font-semibold text-[#6b2fa5]">
+                        {option.tag}
                       </span>
                     </div>
-                    
-                    <h3 className="text-2xl font-bold text-gray-900 mb-3">{service.title}</h3>
-                    <p className="text-gray-600 leading-relaxed mb-6">{service.description}</p>
-                    
-                    {service.example && (
-                      <div className="mb-6 p-3 bg-gray-50 rounded-lg border border-gray-200">
-                        <div className="text-xs text-gray-500 mb-1">Example:</div>
-                        <code className="text-sm text-[#6b2fa5] font-mono">{service.example}</code>
-                      </div>
-                    )}
 
-                    {/* Features */}
-                    <div className="space-y-2">
-                      {service.features.map((feature, fIndex) => (
-                        <div key={fIndex} className="flex items-start gap-2">
-                          <Check size={16} className="text-green-500 flex-shrink-0 mt-1" />
-                          <span className="text-sm text-gray-700">{feature}</span>
+                    <h3 className="mb-2 text-xl font-bold tracking-tight text-[#171123] sm:text-2xl">{option.title}</h3>
+                    <p className="mb-6 leading-relaxed text-[#6b6478]">{option.description}</p>
+
+                    {/* Receipt-style breakdown */}
+                    <div className="mt-auto">
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[#7c7389]">
+                        Example · {EXAMPLE.price} ticket
+                      </p>
+                      <dl className="space-y-2.5 rounded-xl bg-[#f7f6f9] p-4 text-sm sm:text-base">
+                        {option.rows.map((row) => (
+                          <div key={row.label} className="flex items-center justify-between gap-4 text-[#4b4257]">
+                            <dt>{row.label}</dt>
+                            <dd className="flex-shrink-0 font-semibold text-[#171123]">{row.value}</dd>
+                          </div>
+                        ))}
+                      </dl>
+
+                      <div className="mt-4 grid grid-cols-2 gap-3">
+                        <div className="rounded-xl border border-[#ece7f1] p-4">
+                          <p className="text-xs font-medium text-[#7c7389]">Buyer pays</p>
+                          <p className="mt-1 text-xl font-bold text-[#171123] sm:text-2xl">{option.buyerPays}</p>
                         </div>
-                      ))}
+                        <div className="rounded-xl bg-[#171123] p-4">
+                          <p className="text-xs font-medium text-white/60">You receive</p>
+                          <p className="mt-1 text-xl font-bold text-white sm:text-2xl">{option.youReceive}</p>
+                        </div>
+                      </div>
+
+                      <p className="mt-5 flex items-start gap-2 text-sm text-[#4b4257]">
+                        <Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-[#6b2fa5]" />
+                        {option.bestFor}
+                      </p>
                     </div>
-                  </div>
-                </div>
-              )
-            })}
+                  </article>
+                </Reveal>
+              ))}
+            </div>
+
+            <Reveal delay={120}>
+              <p className="mx-auto mt-8 flex max-w-3xl items-start gap-2.5 text-sm leading-relaxed text-[#6b6478]">
+                <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-[#6b2fa5]" />
+                <span>
+                  You set this per event, so you can pick a different option for each one. Examples show Spotix&apos;s
+                  service fee. Payment processing fees from our payment partner are handled the same way, either paid
+                  by buyers or covered by you, and are always itemised at checkout.
+                </span>
+              </p>
+            </Reveal>
           </div>
         </div>
+      </section>
 
-        {/* CTA Section */}
-        <div className="mt-20">
-          <div className="bg-gradient-to-br from-[#6b2fa5] to-purple-700 rounded-3xl shadow-2xl overflow-hidden">
-            <div className="px-8 py-12 md:p-16 text-center">
-              <div className="inline-flex items-center justify-center w-16 h-16 bg-white/20 rounded-full mb-6">
-                <MessageCircle size={32} className="text-white" />
+      {/* ── Voting & merchandise (secondary) ── */}
+      <section className={`py-20 sm:py-24 ${UI.bandWhite}`}>
+        <div className={UI.container}>
+          <SectionHeading
+            eyebrow="More ways to earn"
+            title="Voting and merchandise"
+            lead="Maximize your event monetization with paid voting and event merchandise."
+          />
+
+          <div className="grid gap-6 md:grid-cols-2 lg:gap-8">
+            {secondaryPricing.map((service, index) => (
+              <Reveal key={service.title} delay={index * 90}>
+                <article className={`h-full p-6 transition-colors duration-300 hover:border-[#171123]/25 sm:p-8 ${UI.card}`}>
+                  <IconTile icon={service.icon} />
+                  <h3 className="mb-3 mt-6 text-xl font-bold tracking-tight text-[#171123] sm:text-2xl">{service.title}</h3>
+                  <div className="mb-4 flex items-baseline gap-2">
+                    <span className="text-5xl font-bold tracking-tight text-[#171123]">{service.rate}</span>
+                    <span className="text-lg text-[#7c7389]">{service.subtitle}</span>
+                  </div>
+                  <p className="leading-relaxed text-[#6b6478]">{service.description}</p>
+                </article>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Premium add-ons (auxiliary) ── */}
+      <section className={`py-20 sm:py-24 ${UI.bandGrey}`}>
+        <div className={UI.container}>
+          <SectionHeading
+            eyebrow="Premium add-ons"
+            title="Take your events to the next level"
+            lead="Professional services built around your event, priced to fit it."
+          />
+
+          <div className="grid gap-6 md:grid-cols-2 lg:gap-8">
+            {auxiliaryServices.map((service, index) => (
+              <Reveal key={service.title} delay={(index % 2) * 90}>
+                <article className={`h-full bg-white p-6 transition-colors duration-300 hover:border-[#171123]/25 sm:p-8 ${UI.card}`}>
+                  <div className="mb-6 flex items-start justify-between gap-4">
+                    <IconTile icon={service.icon} />
+                    <span className="rounded-full bg-[#f5f0fb] px-3 py-1 text-sm font-semibold text-[#6b2fa5]">
+                      {service.pricing}
+                    </span>
+                  </div>
+
+                  <h3 className="mb-3 text-xl font-bold tracking-tight text-[#171123] sm:text-2xl">{service.title}</h3>
+                  <p className="mb-6 leading-relaxed text-[#6b6478]">{service.description}</p>
+
+                  {service.example && (
+                    <div className="mb-6 rounded-xl border border-[#ece7f1] bg-[#f7f6f9] p-3">
+                      <div className="mb-1 text-xs text-[#7c7389]">Example:</div>
+                      <code className="break-all font-mono text-sm text-[#6b2fa5]">{service.example}</code>
+                    </div>
+                  )}
+
+                  <ul className="space-y-2">
+                    {service.features.map((feature) => (
+                      <li key={feature} className="flex items-start gap-2.5">
+                        <Check className="mt-1 h-4 w-4 flex-shrink-0 text-[#6b2fa5]" />
+                        <span className="text-sm text-[#4b4257]">{feature}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </article>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── CTA ── */}
+      <section className={`px-4 py-24 sm:px-6 sm:py-28 lg:px-8 ${UI.bandWhite}`}>
+        <Reveal>
+          <div
+            className="relative mx-auto max-w-5xl overflow-hidden rounded-[2rem] px-6 py-16 text-center sm:px-12 sm:py-20"
+            style={{ background: GRADIENTS.brand }}
+          >
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0"
+              style={{ backgroundImage: "radial-gradient(ellipse 70% 80% at 50% 0%, rgba(255,255,255,0.16) 0%, transparent 70%)" }}
+            />
+            <div className="relative">
+              <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-full bg-white/10">
+                <MessageCircle className="h-7 w-7 text-white" />
               </div>
-              <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
-                Have Questions About Pricing?
+              <h2 className="mx-auto mb-5 max-w-2xl text-balance text-3xl font-bold leading-[1.1] tracking-tight text-white sm:text-4xl lg:text-5xl">
+                Have questions about pricing?
               </h2>
-              <p className="text-purple-100 text-lg mb-8 max-w-2xl mx-auto">
-                Our team is ready to help you understand our pricing and find the best solution for your events. Chat with us now!
+              <p className="mx-auto mb-10 max-w-xl text-lg text-white/85">
+                Our team is ready to help you understand our pricing and find the best solution for your events. Chat
+                with us now!
               </p>
               <a
                 href="https://tawk.to/spotix"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 bg-white text-[#6b2fa5] font-bold py-4 px-8 rounded-xl shadow-xl hover:shadow-2xl hover:scale-105 transition-all duration-200"
+                className="group inline-flex items-center gap-2 rounded-full bg-white px-9 py-4 text-base font-semibold text-[#171123] transition-colors duration-200 hover:bg-[#f0eaf8]"
               >
-                <MessageCircle size={20} />
-                Chat With Our Team
-                <ChevronRight size={20} />
+                Chat with our team
+                <ArrowRight className="h-5 w-5 transition-transform duration-300 group-hover:translate-x-1" />
               </a>
-              <div className="mt-6 text-purple-100 text-sm">
-                Average response time: Less than 2 minutes
-              </div>
+              <p className="mt-6 text-sm text-white/80">Average response time: Less than 2 minutes</p>
             </div>
           </div>
-        </div>
-      </div>
+        </Reveal>
+      </section>
 
       <Footer />
 
-      <style jsx>{`
-        @keyframes blob {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          25% { transform: translate(20px, -50px) scale(1.1); }
-          50% { transform: translate(-20px, 20px) scale(0.9); }
-          75% { transform: translate(50px, 50px) scale(1.05); }
+      <style jsx global>{`
+        .pr-reveal {
+          opacity: 0;
+          transform: translateY(24px);
+          transition: opacity 0.6s ease, transform 0.6s ease;
         }
-        .animate-blob {
-          animation: blob 7s infinite;
+        .pr-reveal.pr-visible {
+          opacity: 1;
+          transform: translateY(0);
         }
-        .animation-delay-2000 {
-          animation-delay: 2s;
-        }
-        .animation-delay-4000 {
-          animation-delay: 4s;
-        }
-        @keyframes spin-slow {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        .animate-spin-slow {
-          animation: spin-slow 8s linear infinite;
+        @media (prefers-reduced-motion: reduce) {
+          .pr-reveal {
+            opacity: 1;
+            transform: none;
+            transition: none;
+          }
         }
       `}</style>
     </div>

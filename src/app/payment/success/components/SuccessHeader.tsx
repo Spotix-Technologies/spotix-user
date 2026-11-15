@@ -13,16 +13,16 @@ interface SuccessHeaderProps {
  */
 export default function SuccessHeader({ isFreeTicket, isMultiTicket, totalTickets }: SuccessHeaderProps) {
   return (
-    <div className="bg-white rounded-2xl shadow-2xl p-8 mb-6 text-center">
+    <div className="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 mb-6 text-center">
       <div className="flex justify-center mb-4">
-        <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center animate-bounce">
+        <div className="w-16 h-16 sm:w-20 sm:h-20 bg-green-100 rounded-full flex items-center justify-center animate-bounce">
           <CheckCircle className="w-12 h-12 text-green-600" />
         </div>
       </div>
-      <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">
+      <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900 mb-2">
         {isFreeTicket ? "Registration Successful!" : "Payment Successful!"}
       </h1>
-      <p className="text-lg text-gray-600">
+      <p className="text-base sm:text-lg text-gray-600">
         {isMultiTicket ? `${totalTickets} tickets have been generated` : "Your ticket has been generated"}
       </p>
     </div>

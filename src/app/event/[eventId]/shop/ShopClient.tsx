@@ -35,7 +35,12 @@ export default function ShopClient({ eventId, initialEvent }: ShopClientProps) {
     const fetchMerch = async () => {
       try {
         setLoading(true)
-        const res = await fetch(`/api/v1/event/merch?eventId=${eventId}`)
+        // eventId (the URL segment) can be a booker-chosen shareable slug —
+        // /api/v1/event/merch does a direct events/{id}/listings lookup
+        // with no slug fallback, so this has to use initialEvent.eventId,
+        // the already-resolved real doc id (see page.tsx's
+        // fetchShopEvent), not the raw eventId prop.
+        const res = await fetch(`/api/v1/event/merch?eventId=${initialEvent?.eventId}`)
         const result = await res.json()
         if (cancelled) return
         if (res.ok && result.success) {
@@ -53,11 +58,11 @@ export default function ShopClient({ eventId, initialEvent }: ShopClientProps) {
         if (!cancelled) setLoading(false)
       }
     }
-    if (eventId) fetchMerch()
+    if (initialEvent?.eventId) fetchMerch()
     return () => {
       cancelled = true
     }
-  }, [eventId])
+  }, [initialEvent?.eventId])
 
   if (!initialEvent) {
     return (

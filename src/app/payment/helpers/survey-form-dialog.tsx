@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { Loader2 } from "lucide-react"
 import EventSurveyForm from "./event-survey-form"
+import { ResponsiveSheet } from "@/components/ui/responsive-sheet"
 
 interface SurveyFormDialogProps {
   eventId: string
@@ -17,7 +18,7 @@ interface SurveyFormDialogProps {
 }
 
 /**
- * Centered modal that hosts the event registration form.
+ * Bottom sheet (mobile) / right drawer (desktop) that hosts the event registration form.
  *
  * Opened from PaymentClient when the buyer clicks "Proceed" and the
  * selected ticket type requires a form. EventSurveyForm fires
@@ -71,14 +72,20 @@ export default function SurveyFormDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[60] px-4 py-8"
-      onClick={(e) => {
-        // Click-outside-to-close, but only while still filling the form —
-        // once we've moved into the "opening payment window" transition,
-        // the dialog is about to hand off and shouldn't be dismissible.
-        if (e.target === e.currentTarget && phase === "form") onCancel()
-      }}
+    <ResponsiveSheet
+      open
+      onClose={onCancel}
+      size="md"
+      // Dismissible (backdrop / Escape / swipe-down) only while still
+      // filling the form. Once we've moved to the "opening payment window"
+      // transition the dialog is about to hand off and must not be
+      // dismissed. EventSurveyForm renders its own header + X (wired to
+      // onCancel), so the sheet's built-in header is skipped.
+      dismissible={phase === "form"}
+      showClose={false}
+      hideHeader
+      bodyClassName="p-0 spotix-scroll"
+      ariaLabel="Event registration form"
     >
       <style>{`
         .spotix-scroll::-webkit-scrollbar { width: 6px; }
@@ -87,26 +94,24 @@ export default function SurveyFormDialog({
         .spotix-scroll::-webkit-scrollbar-thumb:hover { background: #5a2590; }
       `}</style>
 
-      <div className="spotix-scroll bg-white rounded-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto shadow-2xl relative">
-        {phase === "form" ? (
-          <EventSurveyForm
-            eventId={eventId}
-            ticketType={ticketType}
-            userEmail={userEmail}
-            userFullName={userFullName}
-            isGuest={isGuest}
-            onFormComplete={handleFormComplete}
-            onFormIncomplete={handleFormIncomplete}
-            onClose={onCancel}
-          />
-        ) : (
-          <div className="flex flex-col items-center justify-center py-20 px-8 text-center">
-            <Loader2 className="w-10 h-10 text-[#6b2fa5] animate-spin mb-5" />
-            <p className="text-lg font-bold text-gray-900">Opening payment window</p>
-            <p className="text-sm text-gray-500 mt-1.5">Just a moment while we get things ready…</p>
-          </div>
-        )}
-      </div>
-    </div>
+      {phase === "form" ? (
+        <EventSurveyForm
+          eventId={eventId}
+          ticketType={ticketType}
+          userEmail={userEmail}
+          userFullName={userFullName}
+          isGuest={isGuest}
+          onFormComplete={handleFormComplete}
+          onFormIncomplete={handleFormIncomplete}
+          onClose={onCancel}
+        />
+      ) : (
+        <div className="flex flex-col items-center justify-center py-20 px-8 text-center">
+          <Loader2 className="w-10 h-10 text-[#6b2fa5] animate-spin mb-5" />
+          <p className="text-lg font-bold text-gray-900">Opening payment window</p>
+          <p className="text-sm text-gray-500 mt-1.5">Just a moment while we get things ready…</p>
+        </div>
+      )}
+    </ResponsiveSheet>
   )
 }

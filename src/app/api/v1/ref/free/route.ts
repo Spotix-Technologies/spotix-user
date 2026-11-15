@@ -173,6 +173,10 @@ export async function POST(request: NextRequest) {
       eventId,
       eventCreatorId,
       eventName: eventName || "",
+      // Never trusted from the client — read straight off the event doc
+      // fetched above. Frozen here so the ticket confirmation email can
+      // show the event's cover image. See create-pay-ref/route.ts.
+      eventImage: eventDoc.eventImage || "",
       eventVenue: eventVenue || "",
       eventType: eventType || "",
       eventDate: eventDate || "",

@@ -57,6 +57,7 @@ import {
 } from "./lib/checkout-storage"
 import { PENDING_REFERENCE_POLL_MS } from "./constants"
 import type { PaymentData, ReferralData, ReferralCodeOption } from "./types"
+import { useNumeroxTrack } from "@/app/lib/numerox-track-client"
 
 export default function EventPaymentClient() {
   const router = useRouter()
@@ -81,6 +82,15 @@ export default function EventPaymentClient() {
   const [paymentData, setPaymentData] = useState<PaymentData | null>(null)
   const [selectedMethod, setSelectedMethod] = useState<SelectedMethod>(null)
   const [dataLoading, setDataLoading] = useState(true)
+
+  // ── Numerox funnel tracking ─────────────────────────────────────────────
+  // "Someone opened the checkout flow for this event." `routeEventId` is
+  // whatever the URL segment was — the real Firestore doc id OR a
+  // booker-chosen shareable slug — so we track against `paymentData.eventId`
+  // instead, which is the resolved real id used everywhere else in this
+  // file (queue tracking, referral codes, create-pay-ref). Fires once
+  // `paymentData` finishes loading; see app/lib/numerox-track-client.ts.
+  useNumeroxTrack(paymentData?.eventId, "CHECKOUT_STARTED")
 
   const [discountCode, setDiscountCode] = useState("")
   const [discountLoading, setDiscountLoading] = useState(false)
@@ -513,10 +523,10 @@ export default function EventPaymentClient() {
   const needsGuestIdentity = !user && !userData && !resumedReference
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-purple-50 flex flex-col">
+    <div className="min-h-dvh bg-gradient-to-br from-purple-50 via-white to-purple-50 flex flex-col">
       <UserHeader />
 
-      <main className="flex-1 w-full">
+      <main className="flex-1 w-full pb-36 lg:pb-0">
         <div className="w-full max-w-3xl xl:max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-12">
           {queueDeadline !== null && queueSecondsLeft !== null && (
             <QueueCountdownBanner queueSecondsLeft={queueSecondsLeft} />

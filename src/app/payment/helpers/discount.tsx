@@ -1,7 +1,7 @@
 "use client"
 
-import React from "react"
-import { Tag, X, Calendar, Ticket as TicketIcon } from "lucide-react"
+import React, { useState } from "react"
+import { Tag, X, Calendar, Ticket as TicketIcon, ChevronDown } from "lucide-react"
 import { formatNumber } from "@/utils/formatter"
 import type { DiscountData } from "./discount-utils"
 
@@ -26,6 +26,26 @@ export default function Discount({
   discountLoading,
   onValidateDiscount,
 }: DiscountProps) {
+  // Collapsed to a single row until the buyer asks for it (or a code is
+  // already typed / failed to validate) — keeps the checkout short.
+  const [open, setOpen] = useState(false)
+
+  if (!discountData && !open && !discountCode && !discountError) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="w-full flex items-center gap-3 bg-white rounded-2xl border-2 border-dashed border-gray-300 hover:border-purple-400 hover:bg-purple-50/40 px-4 py-3.5 text-left transition-colors"
+      >
+        <span className="w-8 h-8 rounded-lg flex items-center justify-center bg-purple-100 flex-shrink-0">
+          <Tag size={16} style={{ color: "#6b2fa5" }} />
+        </span>
+        <span className="flex-1 text-sm sm:text-base font-semibold text-gray-800">Have a discount code?</span>
+        <ChevronDown size={18} className="text-gray-400" />
+      </button>
+    )
+  }
+
   return (
     <div className="bg-white rounded-2xl border-2 border-gray-200 shadow-lg p-4 sm:p-6 w-full">
       <div className="flex items-center gap-2 mb-4">

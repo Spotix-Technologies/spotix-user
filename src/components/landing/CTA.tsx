@@ -2,7 +2,8 @@
 
 import { useEffect, useRef } from "react"
 import Link from "next/link"
-import { ArrowRight, Sparkles } from "lucide-react"
+import { ArrowRight } from "lucide-react"
+import { UI } from "./theme"
 
 function useReveal<T extends HTMLElement>() {
   const ref = useRef<T | null>(null)
@@ -28,28 +29,32 @@ export default function CTA() {
   const ref = useReveal<HTMLDivElement>()
 
   return (
-    <section className="relative py-24 sm:py-28 px-4 sm:px-6 lg:px-8 overflow-hidden bg-white">
-      <div ref={ref} className="cta-reveal relative max-w-3xl mx-auto text-center">
-        <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#f5f0fb] border border-[#e4d6f5] rounded-full mb-8">
-          <Sparkles className="w-4 h-4 text-[#6b2fa5]" />
-          <span className="text-sm font-semibold text-[#4b4257]">As it should be</span>
+    <section className={`relative overflow-hidden px-4 py-24 sm:px-6 sm:py-28 lg:px-8 ${UI.bandWhite}`}>
+      <div
+        ref={ref}
+        className="cta-reveal relative mx-auto max-w-5xl overflow-hidden rounded-[2rem] bg-[#171123] px-6 py-16 text-center sm:px-12 sm:py-20"
+      >
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{ backgroundImage: "radial-gradient(ellipse 70% 80% at 50% 0%, rgba(107,47,165,0.55) 0%, transparent 70%)" }}
+        />
+        <div className="relative">
+          <h2 className="mx-auto mb-5 max-w-2xl text-4xl font-bold leading-[1.08] tracking-tight text-white text-balance sm:text-5xl lg:text-6xl">
+            Your events deserve the spotlight
+          </h2>
+
+          <p className="mx-auto mb-10 max-w-xl text-lg text-white/70">
+            Join organizers and attendees already using Spotix to make events unforgettable.
+          </p>
+
+          <Link
+            href="/home"
+            className="group inline-flex items-center gap-2 rounded-full bg-white px-9 py-4 text-base font-semibold text-[#171123] transition-colors duration-200 hover:bg-[#f0eaf8]"
+          >
+            Explore Events
+            <ArrowRight className="w-5 h-5 transition-transform duration-300 group-hover:translate-x-1" />
+          </Link>
         </div>
-
-        <h2 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-[#171123] mb-6 leading-[1.1]">
-          Your events deserve <span className="text-[#6b2fa5]">the spotlight</span>
-        </h2>
-
-        <p className="text-lg text-[#7c7389] mb-10 max-w-xl mx-auto">
-          Join organizers and attendees already using Spotix to make events unforgettable.
-        </p>
-
-        <Link
-          href="/home"
-          className="group inline-flex items-center gap-2 px-9 py-4 bg-[#6b2fa5] text-white rounded-full font-bold text-base transition-all duration-300 hover:bg-[#4c2178]"
-        >
-          Explore Events
-          <ArrowRight className="w-5 h-5 transition-transform duration-300 group-hover:translate-x-1" />
-        </Link>
 
         {/* <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[#7c7389] text-sm">
           <span>Free to join</span>

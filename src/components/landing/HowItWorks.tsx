@@ -1,8 +1,9 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { CheckCircle, PlusCircle, Share2, BarChart2, Ticket, Search, CreditCard,/* Sparkles */ ArrowRight } from "lucide-react"
+import { CheckCircle, PlusCircle, Share2, BarChart2, Ticket, Search, CreditCard, ArrowRight } from "lucide-react"
 import Link from "next/link"
+import { UI } from "./theme"
 
 const organizerSteps = [
   { icon: CheckCircle, number: "01", title: "Sign up as a Booker", description: "Create your organizer account and verify your identity to unlock the full event management dashboard." },
@@ -43,18 +44,16 @@ function StepCard({ step, index }: { step: (typeof organizerSteps)[number]; inde
   return (
     <div
       ref={ref}
-      className="hiw-reveal flex items-start gap-4 p-5 rounded-2xl border bg-white border-[#ece7f1] hover:border-[#6b2fa5]/30 hover:shadow-md transition-colors duration-300"
+      className={`hiw-reveal flex items-start gap-4 p-5 transition-colors duration-300 hover:border-[#171123]/25 ${UI.card}`}
       style={{ transitionDelay: `${index * 60}ms` }}
     >
       <div className="flex-shrink-0 w-12 h-12 rounded-xl flex items-center justify-center bg-[#f5f0fb] text-[#6b2fa5]">
         <Icon className="w-6 h-6" />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-xs font-bold text-[#c9aee5]">{step.number}</span>
-          <h4 className="font-bold text-[#171123]">{step.title}</h4>
-        </div>
-        <p className="text-sm leading-relaxed text-[#7c7389]">{step.description}</p>
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-[#6b2fa5]">Step {step.number}</p>
+        <h4 className="mb-1 text-lg font-bold text-[#171123]">{step.title}</h4>
+        <p className="text-sm leading-relaxed text-[#6b6478]">{step.description}</p>
       </div>
     </div>
   )
@@ -74,10 +73,8 @@ function StepColumn({
   return (
     <div>
       <div ref={headerRef} className="hiw-reveal mb-8">
-        <span className="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest mb-4 bg-[#f5f0fb] text-[#6b2fa5]">
-          {badge}
-        </span>
-        <h3 className="text-2xl sm:text-3xl font-bold text-[#171123]">{title}</h3>
+        <p className={`${UI.eyebrow} mb-3`}>{badge}</p>
+        <h3 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#171123]">{title}</h3>
       </div>
 
       <div className="space-y-4">
@@ -93,17 +90,12 @@ export default function HowItWorks() {
   const headerRef = useReveal<HTMLDivElement>()
 
   return (
-    <section id="how-it-works" className="relative py-20 sm:py-24 px-4 sm:px-6 lg:px-8 bg-white overflow-hidden">
-      <div className="relative max-w-6xl mx-auto">
-        <div ref={headerRef} className="hiw-reveal text-center mb-16">
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#f5f0fb] border border-[#e4d6f5] rounded-full mb-6">
-            {/* <Sparkles className="w-4 h-4 text-[#6b2fa5]" />
-            <span className="text-sm font-semibold text-[#4b4257]">Step by step</span> */}
-          </div>
-          <h2 className="text-4xl sm:text-5xl font-bold text-[#171123] mb-4">How It Works</h2>
-          <p className="text-lg text-[#7c7389] max-w-xl mx-auto">
-            A simple path for organizers and ticket buyers alike.
-          </p>
+    <section id="how-it-works" className={`relative scroll-mt-20 overflow-hidden py-20 sm:py-24 ${UI.bandGrey}`}>
+      <div className={`${UI.container} relative`}>
+        <div ref={headerRef} className="hiw-reveal mb-14 max-w-2xl">
+          <p className={`${UI.eyebrow} mb-3`}>How it works</p>
+          <h2 className={`${UI.h2} mb-4`}>A simple path for organizers and ticket buyers</h2>
+          <p className={UI.lead}>Four steps to launch an event. Three to get your ticket.</p>
         </div>
 
         <div className="grid lg:grid-cols-2 gap-10 lg:gap-14">
@@ -111,17 +103,14 @@ export default function HowItWorks() {
           <StepColumn title="For Ticket Buyers" badge="Buyers" steps={buyerSteps} />
         </div>
 
-        <div className="mt-16 flex flex-col items-center text-center bg-[#f5f0fb] border border-[#e4d6f5] rounded-3xl p-10">
-          <div className="w-14 h-14 rounded-full bg-[#6b2fa5] flex items-center justify-center mb-5">
-            {/* <Sparkles className="w-7 h-7 text-white" /> */}
-          </div>
-          <h3 className="text-xl sm:text-2xl font-bold text-[#171123] mb-2">Ready to start?</h3>
-          <p className="text-[#7c7389] text-sm sm:text-base mb-6 max-w-md">
+        <div className="mt-16 flex flex-col items-center rounded-3xl bg-[#171123] p-10 text-center sm:p-14">
+          <h3 className="mb-3 text-2xl font-bold tracking-tight text-white sm:text-3xl">Ready to start?</h3>
+          <p className="mb-7 max-w-md text-sm text-white/70 sm:text-base">
             Join thousands using Spotix to create and attend amazing events.
           </p>
           <Link
             href="/home"
-            className="inline-flex items-center gap-2 px-7 py-3.5 bg-[#6b2fa5] text-white rounded-full font-semibold text-sm transition-all duration-300 hover:bg-[#4c2178]"
+            className="inline-flex items-center gap-2 rounded-full bg-white px-7 py-3.5 text-sm font-semibold text-[#171123] transition-colors duration-200 hover:bg-[#f0eaf8]"
           >
             Get Started
             <ArrowRight className="w-4 h-4" />

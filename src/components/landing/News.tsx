@@ -6,6 +6,7 @@ import { collection, addDoc, serverTimestamp } from "firebase/firestore"
 import { db } from "@/app/lib/firebase"
 import { gsap } from "gsap"
 import { ScrollTrigger } from "gsap/ScrollTrigger"
+import { UI } from "./theme"
 
 if (typeof window !== "undefined") {
   gsap.registerPlugin(ScrollTrigger)
@@ -69,19 +70,19 @@ const Newsletter = () => {
   return (
     <section
       ref={sectionRef}
-      className="relative py-20 px-4 sm:px-6 lg:px-8 overflow-hidden bg-white"
+      className={`relative overflow-hidden px-4 py-20 sm:px-6 lg:px-8 ${UI.bandGrey}`}
     >
       <div className="max-w-3xl mx-auto relative z-10 text-center">
-        <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#f5f0fb] border border-[#e4d6f5] rounded-full mb-6">
+        {/* <div className={`${UI.pill} mb-6`}>
           <Sparkles className="w-4 h-4 text-[#6b2fa5]" />
-          <span className="text-sm font-semibold text-[#4b4257]">Stay in the loop</span>
-        </div>
+          Stay in the loop
+        </div> */}
 
-        <h2 ref={headingRef} className="text-3xl sm:text-4xl md:text-5xl font-bold text-[#171123] mb-5 leading-tight">
+        <h2 ref={headingRef} className={`${UI.h2} mb-5`}>
           We are always cooking
         </h2>
 
-        <p ref={subTextRef} className="text-lg text-[#7c7389] mb-10 max-w-xl mx-auto leading-relaxed">
+        <p ref={subTextRef} className={`${UI.lead} mb-10 max-w-xl mx-auto`}>
           Subscribe to the Spotix newsletter for the best events happening and our latest updates.{" "}
           <span className="font-semibold text-[#171123]">No spam, ever.</span>
         </p>
@@ -96,7 +97,7 @@ const Newsletter = () => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="Enter your email"
-                  className="w-full pl-12 pr-4 py-4 bg-[#f5f0fb] border border-[#e4d6f5] rounded-full text-[#171123] placeholder-[#7c7389] focus:outline-none focus:border-[#6b2fa5] focus:bg-white transition-all duration-300"
+                  className="w-full pl-12 pr-4 py-4 bg-white border border-[#d9d4e0] rounded-full text-[#171123] placeholder-[#7c7389] focus:outline-none focus:border-[#171123] transition-colors duration-200"
                   disabled={isSubmitting}
                 />
               </div>
@@ -104,7 +105,7 @@ const Newsletter = () => {
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="px-8 py-4 bg-[#6b2fa5] text-white rounded-full font-bold text-base transition-all duration-300 hover:bg-[#4c2178] disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
+                className="px-8 py-4 bg-[#171123] text-white rounded-full font-semibold text-base transition-colors duration-200 hover:bg-[#6b2fa5] disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
               >
                 <span className="flex items-center justify-center gap-2">
                   {isSubmitting ? (
@@ -114,7 +115,7 @@ const Newsletter = () => {
                     </>
                   ) : (
                     <>
-                      <Sparkles className="w-4 h-4" />
+                      {/* <Sparkles className="w-4 h-4" /> */}
                       Subscribe
                     </>
                   )}
@@ -126,7 +127,7 @@ const Newsletter = () => {
           </form>
         ) : (
           <div className="max-w-md mx-auto">
-            <div className="bg-[#f5f0fb] border border-[#e4d6f5] rounded-2xl p-8">
+            <div className="bg-white border border-[#ece7f1] rounded-2xl p-8">
               <div className="w-14 h-14 bg-[#16a34a] rounded-full flex items-center justify-center mx-auto mb-4">
                 <Check className="w-7 h-7 text-white" />
               </div>
@@ -145,14 +146,14 @@ const Newsletter = () => {
           </div>
         )}
 
-        <div ref={trustRef} className="mt-8 flex flex-wrap items-center justify-center gap-6 text-sm text-[#7c7389]">
+        {/* <div ref={trustRef} className="mt-8 flex flex-wrap items-center justify-center gap-6 text-sm text-[#7c7389]">
           {["Secure & Private", "Unsubscribe Anytime", "No Spam, Ever"].map((label) => (
             <div key={label} className="flex items-center gap-2">
               <span className="w-1.5 h-1.5 bg-[#6b2fa5] rounded-full" />
               <span>{label}</span>
             </div>
           ))}
-        </div>
+        </div> */}
       </div>
     </section>
   )

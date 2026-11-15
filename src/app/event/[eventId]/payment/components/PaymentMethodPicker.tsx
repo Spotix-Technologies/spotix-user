@@ -51,7 +51,7 @@ export default function PaymentMethodPicker({ selectedMethod, onSelect, disabled
   const methods = PAYMENT_METHOD_OPTIONS.filter((m) => m.id !== "apple_pay" || showApplePay)
 
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" role="radiogroup" aria-label="Payment method">
       {methods.map((m) => {
         const isDisabled = disabled || !m.available
         return (
@@ -61,7 +61,8 @@ export default function PaymentMethodPicker({ selectedMethod, onSelect, disabled
             disabled={isDisabled}
             title={!m.available ? `${m.label} — coming soon` : m.description}
             onClick={() => m.available && onSelect(m.id)}
-            aria-pressed={selectedMethod === m.id}
+            role="radio"
+            aria-checked={selectedMethod === m.id}
             className={`flex items-center gap-3 p-3 sm:p-4 rounded-xl border-2 text-left transition-all duration-200 ${
               !m.available
                 ? "border-gray-100 bg-gray-50 cursor-not-allowed opacity-60"
@@ -83,6 +84,7 @@ export default function PaymentMethodPicker({ selectedMethod, onSelect, disabled
               <h4 className={`font-bold text-sm sm:text-base ${m.available ? "text-gray-900" : "text-gray-400"}`}>
                 {m.label}
               </h4>
+              <p className="text-xs text-gray-500 leading-snug mt-0.5 line-clamp-2">{m.description}</p>
             </div>
             {selectedMethod === m.id && m.available && (
               <CheckCircle className="w-5 h-5 flex-shrink-0" style={{ color: ICON_COLOR }} />

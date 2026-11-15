@@ -35,7 +35,15 @@ const eventCacheKey = (eventId: string) => `event:doc:${eventId}`
 
 export type RawEventDoc = Record<string, any> & { id: string }
 
-async function fetchEventDocFromFirestore(eventId: string): Promise<RawEventDoc | null> {
+/**
+ * Exported (not just used internally) so /api/v1/event/availability can
+ * read the live doc straight from Firestore, bypassing the cache above
+ * entirely — see that route for why ticket availability is deliberately
+ * never cached. Keeping the slug-fallback lookup here means both entry
+ * points resolve `/event/{eventId-or-slug}` identically instead of
+ * duplicating that logic.
+ */
+export async function fetchEventDocFromFirestore(eventId: string): Promise<RawEventDoc | null> {
   const snap = await adminDb.collection("events").doc(eventId).get()
   if (snap.exists) return { id: snap.id, ...snap.data() }
 

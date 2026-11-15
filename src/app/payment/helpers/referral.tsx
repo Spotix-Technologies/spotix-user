@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { Users, X, ChevronDown } from "lucide-react"
 
 interface ReferralData {
@@ -31,6 +32,31 @@ export default function Referral({
   onSelectReferral,
   onRemoveReferral,
 }: ReferralProps) {
+  const [open, setOpen] = useState(false)
+
+  // Nothing to pick, nothing picked, nothing loading, nothing wrong: don't
+  // show an empty card at all.
+  if (!referralData && !referralFetching && !referralError && referralCodes.length === 0) return null
+
+  // Optional, so collapsed to one row until the buyer opens it.
+  if (!referralData && !open && !referralError) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="w-full flex items-center gap-3 bg-white rounded-2xl border-2 border-dashed border-gray-300 hover:border-purple-400 hover:bg-purple-50/40 px-4 py-3.5 text-left transition-colors"
+      >
+        <span className="w-8 h-8 rounded-lg flex items-center justify-center bg-purple-100 flex-shrink-0">
+          <Users size={16} style={{ color: "#6b2fa5" }} />
+        </span>
+        <span className="flex-1 text-sm sm:text-base font-semibold text-gray-800">
+          Referred by someone? <span className="font-normal text-gray-500">(optional)</span>
+        </span>
+        <ChevronDown size={18} className="text-gray-400" />
+      </button>
+    )
+  }
+
   return (
     <div className="bg-white rounded-2xl border-2 border-gray-200 shadow-lg p-4 sm:p-6 w-full">
       <div className="flex items-center gap-2 mb-4">

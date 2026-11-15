@@ -1,5 +1,11 @@
-export const formatNumber = (num: number): string => {
-  return num.toLocaleString()
+/**
+ * Formats a number with thousands separators.
+ * Accepts numeric strings too — ticket prices are sometimes stored as strings
+ * in Firestore, and `"300000".toLocaleString()` returns "300000" unformatted.
+ */
+export const formatNumber = (num: number | string): string => {
+  const n = Number(num)
+  return Number.isFinite(n) ? n.toLocaleString() : "0"
 }
 
 export const formatCurrency = (amount: number): string => {

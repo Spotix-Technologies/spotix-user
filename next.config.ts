@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Dev only: lets the preview domain reach Next's dev resources (HMR websocket etc.)
+  allowedDevOrigins: ['spotix.drexxtech-preview.name.ng'],
   images: {
     remotePatterns: [
       {

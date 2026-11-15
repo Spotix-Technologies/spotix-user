@@ -1,6 +1,11 @@
-import React from "react"
-import { Heart, Share2, AlertCircle } from "lucide-react"
+"use client"
+
+import React, { useState } from "react"
+import { AlertCircle, Calendar, Clock, Heart, MapPin, Share2, Tag } from "lucide-react"
 import type { EventType } from "./page"
+import { Reveal } from "./components/reveal"
+import { SectionHeading } from "./components/section-heading"
+import { formatLongDate, formatTime12, getEventStart } from "./lib/event-datetime"
 
 interface EventDetailsSectionProps {
   eventData: EventType
@@ -12,6 +17,9 @@ interface EventDetailsSectionProps {
   onToggleLike: () => void
 }
 
+const CLAMP_AT = 420 // characters — longer descriptions get a "Read more" toggle
+
+/** "About this event": description, at-a-glance detail tiles, like + share. */
 const EventDetailsSection: React.FC<EventDetailsSectionProps> = ({
   eventData,
   eventUrl,
@@ -21,6 +29,8 @@ const EventDetailsSection: React.FC<EventDetailsSectionProps> = ({
   isSoldOut,
   onToggleLike,
 }) => {
+  const [expanded, setExpanded] = useState(false)
+
   const handleShare = async () => {
     if (typeof window !== "undefined" && navigator.share) {
       try {
@@ -39,81 +49,102 @@ const EventDetailsSection: React.FC<EventDetailsSectionProps> = ({
     }
   }
 
+  const start = getEventStart(eventData)
+  const description = eventData.eventDescription?.trim() ?? ""
+  const isLong = description.length > CLAMP_AT
+
+  const facts = [
+    { icon: Calendar, label: "Date", value: start ? formatLongDate(start) : eventData.eventDate },
+    eventData.eventStart
+      ? {
+          icon: Clock,
+          label: "Time",
+          value: `${formatTime12(eventData.eventStart)}${eventData.eventEnd ? ` – ${formatTime12(eventData.eventEnd)}` : ""}`,
+        }
+      : null,
+    eventData.eventVenue ? { icon: MapPin, label: "Venue", value: eventData.eventVenue } : null,
+    eventData.eventType ? { icon: Tag, label: "Category", value: eventData.eventType } : null,
+  ].filter((f): f is { icon: typeof Calendar; label: string; value: string } => f !== null)
+
+  const action =
+    "inline-flex items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-semibold transition-colors"
+
   return (
-    <div className="bg-white rounded-2xl shadow-lg p-6 lg:p-8 border-2 border-purple-100">
-      {/* Title and Status */}
-      <div className="mb-6">
-        <h1 className="text-3xl lg:text-4xl font-bold text-gray-900 mb-4 text-balance">
-          {eventData.eventName}
-        </h1>
+    <section id="about" className="scroll-mt-32">
+      <Reveal>
+        <SectionHeading kicker="The event" title="About this" accent="event." />
+      </Reveal>
 
-        {isSoldOut && (
-          <div className="flex items-center gap-3 p-4 bg-red-50 border border-red-200 rounded-lg mb-4">
-            <AlertCircle size={20} className="text-red-600 flex-shrink-0" />
-            <p className="text-red-700 font-medium">This event is sold out</p>
-          </div>
-        )}
-
-        <div className="flex flex-wrap items-center gap-4 text-gray-600">
-          <span className="inline-flex items-center gap-2 px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-medium">
-            {eventData.eventType}
-          </span>
-          <span className="text-sm">
-            {new Date(eventData.eventDate).toLocaleDateString("en-US", {
-              weekday: "short",
-              month: "short",
-              day: "numeric",
-              year: "numeric",
-            })}
-          </span>
-          {eventData.eventStart && (
-            <span className="text-sm">
-              {eventData.eventStart} - {eventData.eventEnd || "TBD"}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Description */}
-      {eventData.eventDescription && (
-        <div className="mb-6 pb-6 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900 mb-3">About this event</h3>
-          <p className="text-gray-700 leading-relaxed text-pretty">
-            {eventData.eventDescription}
-          </p>
+      {isSoldOut && (
+        <div className="mt-8 flex items-center gap-3 rounded-2xl border border-red-200 bg-red-50 p-4">
+          <AlertCircle size={20} className="shrink-0 text-red-600" />
+          <p className="text-sm font-medium text-red-700">This event is sold out</p>
         </div>
       )}
 
-      {/* Actions */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={onToggleLike}
-          disabled={isLiking}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all duration-200 ${
-            isLiked
-              ? "bg-red-50 text-red-600 hover:bg-red-100"
-              : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-          } disabled:opacity-50 disabled:cursor-not-allowed`}
-        >
-          <Heart
-            size={20}
-            fill={isLiked ? "currentColor" : "none"}
-            className={isLiked ? "text-red-600" : ""}
-          />
-          <span>
-            {likeCount} {likeCount === 1 ? "Like" : "Likes"}
-          </span>
-        </button>
+      <div className="mt-10 grid gap-10 lg:grid-cols-[1.2fr_0.8fr]">
+        <Reveal>
+          {description ? (
+            <div>
+              <p
+                className={`whitespace-pre-line text-pretty text-lg leading-relaxed text-gray-600 ${
+                  isLong && !expanded ? "line-clamp-6" : ""
+                }`}
+              >
+                {description}
+              </p>
+              {isLong && (
+                <button
+                  type="button"
+                  onClick={() => setExpanded((v) => !v)}
+                  className="mt-3 text-sm font-semibold text-[#6b2fa5] underline underline-offset-4 hover:text-[#58248a]"
+                >
+                  {expanded ? "Show less" : "Read more"}
+                </button>
+              )}
+            </div>
+          ) : (
+            <p className="text-lg text-gray-500">The organizer hasn&apos;t added a description yet.</p>
+          )}
 
-        <button
-          onClick={handleShare}
-          className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
-        >
-          <Share2 size={20} />
-          <span className="hidden sm:inline">Share</span>
-        </button>
+          <div className="mt-8 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={onToggleLike}
+              disabled={isLiking}
+              className={`${action} disabled:cursor-not-allowed disabled:opacity-50 ${
+                isLiked
+                  ? "border-red-200 bg-red-50 text-red-600 hover:bg-red-100"
+                  : "border-gray-300 text-[#171123] hover:border-[#171123]"
+              }`}
+            >
+              <Heart size={16} fill={isLiked ? "currentColor" : "none"} />
+              {likeCount} {likeCount === 1 ? "Like" : "Likes"}
+            </button>
+            <button type="button" onClick={handleShare} className={`${action} border-gray-300 text-[#171123] hover:border-[#171123]`}>
+              <Share2 size={16} />
+              Share
+            </button>
+          </div>
+        </Reveal>
+
+        <Reveal delay={100}>
+          <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+            {facts.map(({ icon: Icon, label, value }) => (
+              <div key={label} className="flex items-start gap-4 rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white text-[#6b2fa5] shadow-sm ring-1 ring-gray-200">
+                  <Icon size={18} aria-hidden="true" />
+                </span>
+                <div className="min-w-0">
+                  <dt className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">{label}</dt>
+                  <dd className="mt-0.5 break-words font-semibold text-[#171123]">{value}</dd>
+                </div>
+              </div>
+            ))}
+          </dl>
+        </Reveal>
       </div>
-    </div>
+    </section>
   )
 }
 

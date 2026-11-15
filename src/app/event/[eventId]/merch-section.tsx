@@ -16,6 +16,15 @@ interface MerchItem {
 
 interface MerchSectionProps {
   eventId: string
+  /** The resolved real Firestore doc id — eventId above is whatever the URL
+   *  segment was (could be a booker-chosen shareable slug, see page.tsx's
+   *  fetchEventData comment), and /api/v1/event/merch does a direct
+   *  events/{eventId}/listings lookup with no slug fallback. Using the raw
+   *  slug there silently returns an empty listings snapshot (200, no
+   *  error) instead of the real merch, so the API call has to use this
+   *  instead. `eventId` itself is still what's used to build the /shop
+   *  links below, so navigation keeps the shareable slug URL. */
+  apiEventId: string
   createdBy: string
   eventName: string
 }
@@ -38,7 +47,7 @@ const MERCH_TEASER_LIMIT = 3
  * On mobile the (at most 3) cards page one at a time with arrow
  * navigation; from sm: up they're just laid out in a row.
  */
-const MerchSection: React.FC<MerchSectionProps> = ({ eventId }) => {
+const MerchSection: React.FC<MerchSectionProps> = ({ eventId, apiEventId }) => {
   const [merch, setMerch] = useState<MerchItem[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [paystackHint, setPaystackHint] = useState(false)
@@ -53,7 +62,7 @@ const MerchSection: React.FC<MerchSectionProps> = ({ eventId }) => {
       try {
         setLoading(true)
         const response = await fetch(
-          `/api/v1/event/merch?eventId=${eventId}&limit=${MERCH_TEASER_LIMIT}`
+          `/api/v1/event/merch?eventId=${apiEventId}&limit=${MERCH_TEASER_LIMIT}`
         )
         const result = await response.json()
         if (cancelled) return
@@ -76,11 +85,11 @@ const MerchSection: React.FC<MerchSectionProps> = ({ eventId }) => {
       }
     }
 
-    if (eventId) fetchMerch()
+    if (apiEventId) fetchMerch()
     return () => {
       cancelled = true
     }
-  }, [eventId])
+  }, [apiEventId])
 
   // Don't render section if no merch available
   if (!loading && merch.length === 0) {
@@ -125,7 +134,7 @@ const MerchSection: React.FC<MerchSectionProps> = ({ eventId }) => {
   )
 
   return (
-    <div className="bg-white rounded-2xl shadow-lg p-6 lg:p-8 border-2 border-purple-100">
+    <div className="bg-white rounded-3xl shadow-sm p-6 lg:p-8 border border-gray-200">
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <h3 className="text-2xl font-bold text-gray-900">Event Merchandise</h3>

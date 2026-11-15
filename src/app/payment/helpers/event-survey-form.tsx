@@ -205,7 +205,7 @@ export default function EventSurveyForm({
 
   if (loading) {
     return (
-      <div className="bg-white rounded-2xl p-8 relative">
+      <div className="bg-white p-8 relative">
         {onClose && (
           <button
             onClick={onClose}
@@ -232,7 +232,7 @@ export default function EventSurveyForm({
   const isFormValid = validateAll(false)
 
   return (
-    <div className="bg-white rounded-2xl overflow-hidden">
+    <div className="bg-white">
       {/* Header */}
       <div className="bg-gradient-to-r from-[#6b2fa5] to-purple-600 px-6 py-4 sticky top-0 z-[1]">
         <div className="flex items-center justify-between gap-3">
@@ -289,7 +289,7 @@ export default function EventSurveyForm({
                     setGuestName(e.target.value)
                     if (guestErrors.name) setGuestErrors((p) => { const n = { ...p }; delete n.name; return n })
                   }}
-                  className={`w-full pl-9 pr-3 py-2.5 rounded-lg border-2 text-sm text-gray-900 outline-none transition-all ${
+                  className={`w-full pl-9 pr-3 py-2.5 rounded-lg border-2 text-base sm:text-sm text-gray-900 outline-none transition-all ${
                     guestErrors.name
                       ? "border-red-400 bg-red-50 focus:ring-2 focus:ring-red-100"
                       : "border-gray-200 bg-white focus:border-[#6b2fa5] focus:ring-2 focus:ring-purple-100"
@@ -313,7 +313,7 @@ export default function EventSurveyForm({
                     setGuestEmail(e.target.value)
                     if (guestErrors.email) setGuestErrors((p) => { const n = { ...p }; delete n.email; return n })
                   }}
-                  className={`w-full pl-9 pr-3 py-2.5 rounded-lg border-2 text-sm text-gray-900 outline-none transition-all ${
+                  className={`w-full pl-9 pr-3 py-2.5 rounded-lg border-2 text-base sm:text-sm text-gray-900 outline-none transition-all ${
                     guestErrors.email
                       ? "border-red-400 bg-red-50 focus:ring-2 focus:ring-red-100"
                       : "border-gray-200 bg-white focus:border-[#6b2fa5] focus:ring-2 focus:ring-purple-100"
@@ -356,25 +356,31 @@ export default function EventSurveyForm({
             so browsers silently blocked PaystackPop.openIframe(). Routing
             everything through this button's onClick keeps the whole chain
             inside the click's activation window. */}
-        <button
-          type="button"
-          onClick={handlePayNowClick}
-          disabled={!isFormValid || submitting}
-          className={`w-full py-3.5 rounded-xl font-bold text-white text-sm transition-all flex items-center justify-center gap-2 ${
-            isFormValid && !submitting
-              ? "bg-gradient-to-r from-[#6b2fa5] to-purple-600 hover:from-[#5a2590] hover:to-purple-700 shadow-lg shadow-purple-200 cursor-pointer"
-              : "bg-gray-300 cursor-not-allowed"
-          }`}
+        {/* Pinned to the bottom of the sheet while scrolling a long form */}
+        <div
+          className="sticky bottom-0 -mx-6 -mb-6 px-6 pt-3 bg-white/95 backdrop-blur border-t border-slate-100"
+          style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
         >
-          {submitting ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Processing...
-            </>
-          ) : (
-            "Pay Now"
-          )}
-        </button>
+          <button
+            type="button"
+            onClick={handlePayNowClick}
+            disabled={!isFormValid || submitting}
+            className={`w-full py-3.5 rounded-xl font-bold text-white text-sm transition-all flex items-center justify-center gap-2 ${
+              isFormValid && !submitting
+                ? "bg-gradient-to-r from-[#6b2fa5] to-purple-600 hover:from-[#5a2590] hover:to-purple-700 shadow-lg shadow-purple-200 cursor-pointer"
+                : "bg-gray-300 cursor-not-allowed"
+            }`}
+          >
+            {submitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Processing...
+              </>
+            ) : (
+              "Pay Now"
+            )}
+          </button>
+        </div>
       </div>
     </div>
   )

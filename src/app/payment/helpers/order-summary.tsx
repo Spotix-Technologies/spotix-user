@@ -2,7 +2,8 @@
 
 "use client"
 
-import { CheckCircle, Ticket } from "lucide-react"
+import { useState } from "react"
+import { CheckCircle, ChevronDown, Ticket } from "lucide-react"
 import { resolvePlatformFeeRates, calculateVATFee, type OrderPricingBreakdown } from "@/utils/priceUtility"
 import { formatNumber } from "@/utils/formatter"
 
@@ -46,6 +47,7 @@ export default function OrderSummary({
   // trust that instead of recomputing from a formula this component has no
   // way to know the right rates for. The recompute is only a fallback for
   // the rare item that somehow reached here without one already set.
+  const [expanded, setExpanded] = useState(false)
   const fallbackRates = resolvePlatformFeeRates(null)
   const pricedCart = cart.map((item) => {
     const vatFee = typeof item.vat === "number" ? item.vat : calculateVATFee(item.price, fallbackRates)
@@ -55,6 +57,7 @@ export default function OrderSummary({
   const subtotal = pricedCart.reduce((sum, item) => sum + item.originalPrice * item.quantity, 0)
   const totalVat = pricedCart.reduce((sum, item) => sum + item.vatFee * item.quantity, 0)
   const isTrulyFree = isFreeEvent || subtotal === 0
+  const totalTickets = cart.reduce((sum, i) => sum + i.quantity, 0)
 
   // Whenever a full breakdown is available, it's the source of truth for
   // the total (Spotix fee + Paystack fee + addons, all burden-aware).
@@ -76,17 +79,36 @@ export default function OrderSummary({
 
   return (
     <div className="bg-white rounded-2xl border-2 border-gray-200 shadow-lg p-4 sm:p-6 w-full">
-      <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-        <div
-          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-          style={{ background: "#f3e8ff" }}
+      {/* On phones the summary is collapsed to one line (ticket count + total)
+          so the payment methods are reachable without a long scroll; tap to
+          expand the full breakdown. From lg up it is always open. */}
+      <h3 className="text-lg sm:text-xl font-bold text-gray-900">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="w-full flex items-center gap-2 text-left lg:pointer-events-none lg:cursor-default"
         >
-          <CheckCircle size={16} style={{ color: "#6b2fa5" }} />
-        </div>
-        <span className="break-words">Order Summary</span>
+          <span
+            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+            style={{ background: "#f3e8ff" }}
+          >
+            <CheckCircle size={16} style={{ color: "#6b2fa5" }} />
+          </span>
+          <span className="flex-1 min-w-0">
+            <span className="block break-words">Order Summary</span>
+            <span className="block lg:hidden text-xs font-medium text-gray-500">
+              {totalTickets} ticket{totalTickets === 1 ? "" : "s"} · {isTrulyFree ? "Free" : `₦${formatNumber(computedTotal)}`}
+            </span>
+          </span>
+          <ChevronDown
+            size={18}
+            className={`lg:hidden flex-shrink-0 text-gray-400 transition-transform ${expanded ? "rotate-180" : ""}`}
+          />
+        </button>
       </h3>
 
-      <div className="space-y-3">
+      <div className={`${expanded ? "block" : "hidden"} lg:block mt-4 space-y-3`}>
         {/* Event Name */}
         <div className="p-3 sm:p-4 bg-purple-50 rounded-xl border border-purple-100">
           <p className="text-xs sm:text-sm text-gray-600 mb-1">Event</p>
@@ -169,9 +191,16 @@ export default function OrderSummary({
                     </div>
                   )}
 
-                  <a href="#" className="inline-block text-xs text-purple-600 hover:underline mt-1">
-                    What are these fees?
-                  </a>
+                  <details className="group mt-1">
+                    <summary className="inline-block cursor-pointer text-xs text-purple-600 hover:underline list-none">
+                      What are these fees?
+                    </summary>
+                    <p className="mt-1.5 text-xs text-gray-500 leading-relaxed">
+                      The Spotix platform fee keeps ticketing, support and organizer payouts running, and the Paystack fee is
+                      charged by the payment processor. Where a line says &ldquo;Covered by organizer&rdquo;, you pay nothing
+                      extra for it.
+                    </p>
+                  </details>
                 </div>
               ) : (
                 <div className="flex justify-between text-sm sm:text-base text-gray-700">

@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react"
 import Link from "next/link"
 import Image from "next/image"
 import { Calendar, DollarSign, BarChart, ArrowRight, Zap } from "lucide-react"
+import { UI } from "./theme"
 import { gsap } from "gsap"
 import { ScrollTrigger } from "gsap/ScrollTrigger"
 
@@ -68,22 +69,22 @@ const BookerCTA = () => {
   return (
     <section
       ref={sectionRef}
-      className="relative py-20 sm:py-24 px-4 sm:px-6 lg:px-8 overflow-hidden bg-white"
+      className={`relative overflow-hidden py-20 sm:py-24 ${UI.bandWhite}`}
     >
-      <div className="max-w-7xl mx-auto relative z-10">
+      <div className={`${UI.container} relative z-10`}>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-center">
           {/* Content Side */}
           <div ref={contentRef} className="space-y-8">
-            <div ref={badgeRef} className="inline-flex items-center gap-2 px-4 py-2 bg-[#f5f0fb] border border-[#e4d6f5] rounded-full">
+            <div ref={badgeRef} className={UI.pill}>
               <span className="w-2 h-2 bg-[#6b2fa5] rounded-full" />
-              <span className="text-sm font-semibold text-[#4b4257]">For Event Organizers</span>
+              For Event Organizers
             </div>
 
             <div ref={headingRef} className="space-y-4">
-              <h2 className="text-4xl md:text-5xl font-bold text-[#171123] leading-tight">
+              <h2 className={UI.h2}>
                 Become a <span className="text-[#6b2fa5]">Booker</span>
               </h2>
-              <p className="text-lg sm:text-xl text-[#7c7389]">
+              <p className={UI.lead}>
                 Are you an event organizer? Join Spotix as a booker and start creating and managing your own events.
               </p>
             </div>
@@ -97,16 +98,16 @@ const BookerCTA = () => {
                     ref={(el) => {
                       featuresRef.current[index] = el
                     }}
-                    className="group flex items-start gap-4 p-5 rounded-2xl bg-white border border-[#ece7f1] hover:border-[#6b2fa5]/30 hover:shadow-md transition-all duration-300"
+                    className={`group flex items-start gap-4 p-5 transition-colors duration-300 hover:border-[#171123]/25 ${UI.card}`}
                   >
-                    <div className="flex-shrink-0 w-11 h-11 rounded-xl bg-[#f5f0fb] flex items-center justify-center">
+                    <div className="flex-shrink-0 w-11 h-11 rounded-xl bg-[#f7f6f9] flex items-center justify-center">
                       <IconComponent className="w-5 h-5 text-[#6b2fa5]" />
                     </div>
                     <div className="flex-1 space-y-1">
                       <h3 className="text-base font-bold text-[#171123]">{feature.title}</h3>
                       <p className="text-[#7c7389] text-sm leading-relaxed">{feature.description}</p>
                     </div>
-                    <ArrowRight className="w-5 h-5 text-[#6b2fa5] opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex-shrink-0" />
+                    <ArrowRight className="w-5 h-5 text-[#171123] opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex-shrink-0" />
                   </div>
                 )
               })}
@@ -115,14 +116,14 @@ const BookerCTA = () => {
             <div ref={ctaBtnsRef} className="flex flex-col sm:flex-row gap-4 pt-2">
               <Link
                 href="https://booker.spotix.com.ng/create-event"
-                className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-[#6b2fa5] text-white rounded-full font-bold text-base transition-all duration-300 hover:bg-[#4c2178]"
+                className={UI.btnPrimary}
               >
                 Create Event
                 <Calendar className="w-4 h-4" />
               </Link>
               <Link
                 href="/booker-confirm"
-                className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-white border-2 border-[#6b2fa5] text-[#6b2fa5] rounded-full font-bold text-base transition-all duration-300 hover:bg-[#f5f0fb]"
+                className={UI.btnOutline}
               >
                 Become a Booker
                 <ArrowRight className="w-4 h-4" />
@@ -132,14 +133,14 @@ const BookerCTA = () => {
 
           {/* Image Side */}
           <div ref={imageRef} className="relative">
-            <div className="relative rounded-3xl overflow-hidden shadow-2xl border border-[#ece7f1]">
+            <div className="relative overflow-hidden rounded-3xl bg-[#f7f6f9] p-6 sm:p-10">
               <div className="relative w-full" style={{ aspectRatio: "1/1" }}>
                 <Image src="/BK.png" alt="Spotix Booker Dashboard" fill className="object-contain" sizes="(max-width: 640px) 100vw, 50vw" priority />
               </div>
             </div>
 
-            <div className="absolute -bottom-6 left-1/2 -translate-x-1/2">
-              <div className="px-5 py-2.5 bg-white rounded-full shadow-xl flex items-center gap-2 border border-[#ece7f1]">
+            <div className="absolute -bottom-5 left-1/2 -translate-x-1/2">
+              <div className="px-5 py-2.5 bg-white rounded-full shadow-[0_8px_24px_-8px_rgba(23,17,35,0.25)] flex items-center gap-2 border border-[#ece7f1]">
                 <Zap className="w-4 h-4 text-[#6b2fa5]" />
                 <span className="font-bold text-[#171123] text-sm">All Devices</span>
               </div>
