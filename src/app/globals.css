@@ -69,3 +69,31 @@ body {
 .no-scrollbar::-webkit-scrollbar {
   display: none !important;
 }
+
+
+/* ── App-like mobile behaviour ─────────────────────────────────────────────
+   - touch-action: pan-x pan-y blocks pinch zoom and double-tap zoom while
+     still allowing normal scrolling.
+   - Inputs at 16px+ stop iOS Safari auto-zooming when a field is focused
+     (it zooms whenever the focused control's font-size is below 16px).
+   - Text-size-adjust stops browsers inflating text in landscape.        */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  touch-action: pan-x pan-y;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  input,
+  select,
+  textarea,
+  [contenteditable="true"] {
+    font-size: 16px !important;
+    touch-action: manipulation;
+  }
+}

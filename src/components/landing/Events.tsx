@@ -2,12 +2,12 @@
 
 import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
-import Image from "next/image"
 import { Calendar, MapPin, Tag, ChevronLeft, ChevronRight, ArrowRight } from "lucide-react"
 import { collection, getDocs, query, orderBy, limit } from "firebase/firestore"
 import { db } from "@/app/lib/firebase"
 import useSWR from "swr"
 import { UI } from "./theme"
+import { optimizeImage } from "@/app/home/lib/format"
 
 interface FeaturedEvent {
   id: string
@@ -209,13 +209,20 @@ const Events = () => {
                       }`}
                     >
                       <div className="absolute inset-0">
-                        <Image
-                          src={event.imageURL || "/placeholder.svg"}
+                        {/* Plain <img> (same as the /home page): event images come from
+                            arbitrary hosts, which next/image rejects unless each is
+                            whitelisted in next.config. */}
+                        <img
+                          src={optimizeImage(event.imageURL, 1600)}
                           alt={event.eventName}
-                          fill
-                          className="object-cover"
-                          priority={index === 0}
-                          sizes="(max-width: 768px) 100vw, 90vw"
+                          className="absolute inset-0 h-full w-full object-cover"
+                          loading={index === 0 ? "eager" : "lazy"}
+                          fetchPriority={index === 0 ? "high" : "auto"}
+                          decoding="async"
+                          onError={(e) => {
+                            const img = e.currentTarget
+                            if (!img.src.endsWith("/placeholder.svg")) img.src = "/placeholder.svg"
+                          }}
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-[#171123] via-[#171123]/50 to-transparent" />
                       </div>
@@ -322,12 +329,16 @@ const Events = () => {
                     className="group rounded-2xl overflow-hidden bg-white border border-[#ece7f1] hover:border-[#171123]/25 hover:shadow-[0_12px_32px_-16px_rgba(23,17,35,0.25)] transition-all duration-300"
                   >
                     <div className="relative h-36 sm:h-40 overflow-hidden">
-                      <Image
-                        src={event.imageURL || "/placeholder.svg"}
+                      <img
+                        src={optimizeImage(event.imageURL, 600, 320)}
                         alt={event.eventName}
-                        fill
-                        className="object-cover transition-transform duration-500 group-hover:scale-105"
-                        sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+                        className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        loading="lazy"
+                        decoding="async"
+                        onError={(e) => {
+                          const img = e.currentTarget
+                          if (!img.src.endsWith("/placeholder.svg")) img.src = "/placeholder.svg"
+                        }}
                       />
                       <div className="absolute top-3 right-3">
                         <span className="px-2.5 py-1 rounded-full bg-[#171123]/70 backdrop-blur-sm text-white text-xs font-semibold">

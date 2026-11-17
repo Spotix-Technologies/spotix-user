@@ -1,9 +1,10 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/app/hooks/useAuth";
 import TawkToChat from "./Tawktochat";
 import { AppStatusShell } from "@/components/status/AppStatusShell";
+import { ViewportLock } from "@/components/ViewportLock";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -127,6 +128,16 @@ export const metadata: Metadata = {
     "apple-mobile-web-app-title": "Spotix",
   },
 };
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  minimumScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
+  themeColor: "#6b2fa5",
+}
 
 export default function RootLayout({
   children,
@@ -275,6 +286,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <ViewportLock />
         <AppStatusShell variant="user">
           <AuthProvider>
             {children}
